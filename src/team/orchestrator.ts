@@ -378,11 +378,18 @@ export class TeamOrchestrator {
     if (task.claim?.token !== input.claimToken || task.claim.generation !== input.generation) {
       return err(runtimeError('E_REVISION_CONFLICT', 'Task claim token or generation is stale'));
     }
-    // 交付前移除 orchestrator 執行期檔，確保 porcelain clean（delivery 契約要求）
-    for (const relative of ['.oma-worker-ready', '.oma-worker-descriptor.json']) {
-      try { fs.rmSync(path.join(input.worktreePath, relative), { force: true }); } catch (_) { /* best-effort */ }
+    // 交付前先停 worker：hold/bootstrap 可能在 clean 之後又寫回 .oma-worker-ready（race）
+    const heartbeat = aggregate.heartbeats[input.taskId];
+    if (heartbeat !== undefined) {
+      const sessionName = inferSessionName(this.sessionNamePrefix, input.teamId, input.taskId, heartbeat);
+      if (this.tmux.hasSession(sessionName)) {
+        const killed = this.tmux.killOwnedSession(sessionName, aggregate.ownerNonce);
+        if (!killed.ok) return killed;
+      }
     }
-    try { fs.rmSync(path.join(input.worktreePath, '.oma'), { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+    // 交付前移除 orchestrator 執行期檔，確保 porcelain clean（delivery 契約要求）
+    const cleaned = ensureWorkerWorktreeCleanForDelivery(input.worktreePath);
+    if (!cleaned.ok) return cleaned;
 
     const markerPath = `${input.worktreePath}.owner.json`;
     let deliveryBase = '';
@@ -677,9 +684,49 @@ export function listReadyTaskSpecs(
   });
 }
 
+/**
+ * 清除 worker 執行期檔並確認 porcelain 為空。
+ * 設計概念映射：delivery clean proof 契約；先停 worker 仍可能殘留檔，故重試 clean。
+ */
+function ensureWorkerWorktreeCleanForDelivery(worktreePath: string): Result<void, RuntimeError> {
+  const runtimeRelatives = ['.oma-worker-ready', '.oma-worker-descriptor.json'];
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (const relative of runtimeRelatives) {
+      try { fs.rmSync(path.join(worktreePath, relative), { force: true }); } catch (_) { /* best-effort */ }
+    }
+    try { fs.rmSync(path.join(worktreePath, '.oma'), { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+    const status = spawnSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+      cwd: worktreePath,
+      encoding: 'utf8',
+    });
+    if (status.status === 0 && (status.stdout ?? '') === '') {
+      return ok(undefined);
+    }
+    // 極短等待：防止殘留 writer 在 kill 後仍 flush 一次
+    sleepMs(50);
+  }
+  const finalStatus = spawnSync('git', ['status', '--porcelain=v1', '--untracked-files=all'], {
+    cwd: worktreePath,
+    encoding: 'utf8',
+  });
+  return err(runtimeError('E_DELIVERY_UNINTEGRATED', 'Worker worktree could not be made clean for delivery', {
+    porcelain: finalStatus.stdout ?? '',
+  }));
+}
+
+function sleepMs(ms: number): void {
+  try {
+    const ia = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(ia, 0, 0, ms);
+  } catch (_) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* spin fallback */ }
+  }
+}
+
 /** tmux validSessionName: /^[A-Za-z0-9_.-]+$/ */
 function sanitizeSession(value: string): string {
-  return value.replace(/[^A-Za-z0-9_.-]/g, '-').slice(0, 80);
+  return value.replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 80);
 }
 
 function inferSessionName(
