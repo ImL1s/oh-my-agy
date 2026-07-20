@@ -45,34 +45,57 @@ OMA does **not** replace Antigravity.
 
 **Requirements:** Node.js **20+** · Antigravity CLI (`agy` on `PATH`, authenticated)
 
+You need **all three**: `agy` (auth) + **plugin hooks** + **`oma` on PATH**.
+
+### One-shot (recommended from a clone)
+
 ```bash
-# 1) Build from this repo
-npm install
-npm run build
+git clone https://github.com/ImL1s/oh-my-agy.git
+cd oh-my-agy
+./scripts/install.sh
+# builds, symlinks oma/omy → ~/.local/bin, runs: oma setup
+oma doctor
+```
 
-# 2) Put oma on PATH (example)
+### Manual (same steps)
+
+```bash
+npm ci && npm run build
 ln -sf "$(pwd)/dist/bin/oma.js" ~/.local/bin/oma
-ln -sf "$(pwd)/dist/bin/oma.js" ~/.local/bin/omy
-# or: node dist/bin/oma.js --help
+ln -sf "$(pwd)/dist/bin/oma.js" ~/.local/bin/omy   # ensure ~/.local/bin is on PATH
 
-# 3) Install plugin + hooks for agy
-agy plugins install . --trust   # if your agy supports trust flag; else: agy plugins install .
-agy plugins enable oh-my-agy
-# project-local surface (recommended on current hosts):
-# .agents/hooks.json → node "../dist/src/hooks/{pre-invocation,stop}.js"
-
-# 4) Wire state + preflight
+# Authority is "agy plugin" (singular), not "plugins"
+agy plugin validate .
+agy plugin install .
+agy plugin enable oh-my-agy
+# or one transaction:
 oma setup
+
+oma doctor
+```
+
+Optional project-local hooks (some hosts load `.agents/hooks.json` more reliably):
+
+```text
+.agents/hooks.json → node "../dist/src/hooks/{pre-invocation,stop}.js"
 ```
 
 Smoke:
 
 ```bash
 oma --help
-node dist/bin/oma.js ralph -- "Reply with exactly one word: pong"
+oma ralph -- "Reply with exactly one word: pong"
 ```
 
-That's enough to start. Everything below is the default spine and reference.
+### Future / npm (when published)
+
+```bash
+npm i -g oh-my-agy@latest
+oma setup
+oma doctor
+```
+
+`npm i -g` only puts **`oma` on PATH** — you still need `oma setup` (or `agy plugin install`) for hooks.
 
 ---
 
@@ -121,10 +144,13 @@ oma autopilot review|qa|reset-breaker …   # see oma --help
 oma team start --manifest <file>
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
 oma setup
+oma doctor [--json] [--no-strict-plugin]
 oma <agy args...>   # pass-through (strips managed binding env)
 ```
 
 Bins after build: `oma`, `omy` → `dist/bin/oma.js`.
+
+`oma doctor` checks Node ≥20, `dist` hooks, `package.json`/`plugin.json` version sync, `agy` on PATH, state root, and plugin installed+enabled (fail-closed by default).
 
 ### Dual entry paths (read this)
 
@@ -167,12 +193,27 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 
 ---
 
-## Tests
+## Tests / CI / release
 
 ```bash
 npm run build
 npm run test:unit
 npm run test:e2e
+./scripts/smoke.sh          # unit + package + npm pack hook surface
+```
+
+| Surface | What |
+|---------|------|
+| **CI** | `.github/workflows/ci.yml` — Node 20/22 build + unit + pack smoke; e2e with mock `agy` |
+| **Release** | `.github/workflows/release.yml` — on tag `v*` (must match `package.json` / `plugin.json`): test, `npm pack`, GH Release asset; optional `npm publish` if `NPM_TOKEN` set |
+| **Install script** | `./scripts/install.sh` |
+
+Tag example:
+
+```bash
+# after main is green
+git tag -a v0.1.0 -m "v0.1.0"
+git push origin v0.1.0
 ```
 
 ---

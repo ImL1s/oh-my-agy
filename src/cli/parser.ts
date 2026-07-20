@@ -8,6 +8,7 @@ export type ParsedCliCommand =
   | { readonly kind: 'autopilot'; readonly args: readonly string[] }
   | { readonly kind: 'team'; readonly args: readonly string[] }
   | { readonly kind: 'setup'; readonly args: readonly string[] }
+  | { readonly kind: 'doctor'; readonly args: readonly string[] }
   | { readonly kind: 'passthrough'; readonly args: readonly string[] }
   | { readonly kind: 'invalid'; readonly code: RuntimeErrorCode; readonly message: string };
 
@@ -35,6 +36,7 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliCommand {
   if (first === 'autopilot') return { kind: 'autopilot', args: argv.slice(1) };
   if (first === 'team') return { kind: 'team', args: argv.slice(1) };
   if (first === 'setup') return { kind: 'setup', args: argv.slice(1) };
+  if (first === 'doctor') return { kind: 'doctor', args: argv.slice(1) };
   return { kind: 'passthrough', args: [...argv] };
 }
 

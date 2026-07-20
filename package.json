@@ -24,7 +24,9 @@
     "prepack": "npm run build",
     "test:unit": "jest --config jest.unit.config.js --runInBand",
     "test:e2e": "jest --config jest.config.js --runInBand",
-    "test:package": "jest --config jest.unit.config.js --runInBand tests/package"
+    "test:package": "jest --config jest.unit.config.js --runInBand tests/package",
+    "smoke": "bash scripts/smoke.sh",
+    "install:local": "bash scripts/install.sh"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",

@@ -1,0 +1,81 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      publish_npm:
+        description: Also npm publish (needs NPM_TOKEN secret)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+      - run: npm run build
+      - name: Assert tag matches package version (tag pushes)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          test "$TAG" = "$PKG"
+          PLUG="$(node -p "require('./plugin.json').version")"
+          test "$TAG" = "$PLUG"
+      - run: npm run test:unit
+      - run: npm run test:package
+      - run: npm run test:e2e
+
+      - name: Create npm pack artifact
+        run: |
+          set -euo pipefail
+          TARBALL="$(npm pack --silent)"
+          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          mkdir -p release-assets
+          cp "$TARBALL" release-assets/
+          tar -tzf "$TARBALL" | grep -E 'package/dist/src/hooks/(pre-invocation|stop)\.js'
+
+      - name: Smoke packed CLI
+        run: |
+          set -euo pipefail
+          PREFIX="$RUNNER_TEMP/oma-pack-smoke"
+          npm install --ignore-scripts --prefix "$PREFIX" "./$TARBALL"
+          "$PREFIX/node_modules/.bin/oma" --help
+          "$PREFIX/node_modules/.bin/oma" --version
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: npm publish (optional)
+        if: |
+          (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
+          && (github.event_name != 'workflow_dispatch' || inputs.publish_npm)
+          && secrets.NPM_TOKEN != ''
+        run: npm publish "./$TARBALL" --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

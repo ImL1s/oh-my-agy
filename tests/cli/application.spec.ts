@@ -37,6 +37,10 @@ describe('CLI application wiring', () => {
         ReturnType<CliServices['setupCommand']>,
         Parameters<CliServices['setupCommand']>
       >(async () => 0),
+      doctorCommand: jest.fn<
+        ReturnType<CliServices['doctorCommand']>,
+        Parameters<CliServices['doctorCommand']>
+      >(async () => 0),
     };
     const io = {
       stdout: (value: string) => { stdout += value; },
@@ -78,6 +82,7 @@ describe('CLI application wiring', () => {
     const { services, io, output } = fixture();
     expect(await runCli(['--help'], services, io)).toBe(0);
     expect(output().stdout).toContain('autopilot resume --session <id> --conversation <id> --expected-revision <n>');
+    expect(output().stdout).toContain('oma doctor');
     expect(output().stdout).toContain('team resolve-fork --team <id> --fork <id> --winner-generation <n>');
   });
 });

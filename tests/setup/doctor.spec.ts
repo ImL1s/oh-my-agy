@@ -1,0 +1,66 @@
+import * as path from 'path';
+import { runDoctor } from '../../src/setup/doctor';
+import { PluginCommandAdapter } from '../../src/setup/plugin';
+
+describe('oma doctor', () => {
+  const packageRoot = path.resolve(__dirname, '../..');
+
+  test('passes hooks/version when plugin registry is active', async () => {
+    const adapter: PluginCommandAdapter = {
+      async run(argv) {
+        if (argv[0] === 'plugin' && argv[1] === 'list') {
+          return {
+            argv,
+            code: 0,
+            stdout: JSON.stringify({
+              imports: [{ name: 'oh-my-agy', enabled: true, version: '0.1.0', source: 'test' }],
+            }),
+            stderr: '',
+          };
+        }
+        return { argv, code: 0, stdout: '', stderr: '' };
+      },
+    };
+    const report = await runDoctor({
+      packageRoot,
+      packageVersion: '0.1.0',
+      adapter,
+      strictPlugin: true,
+      // CI 可能沒有 agy；echo 可 spawn 即通過 path 檢查
+      agyCommand: 'echo',
+    });
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+    expect(report.value.checks.find((c) => c.id === 'hooks')?.status).toBe('pass');
+    expect(report.value.checks.find((c) => c.id === 'version_sync')?.status).toBe('pass');
+    expect(report.value.checks.find((c) => c.id === 'plugin_registry')?.status).toBe('pass');
+  });
+
+  test('fails closed on inactive plugin when strict', async () => {
+    const adapter: PluginCommandAdapter = {
+      async run(argv) {
+        if (argv[0] === 'plugin' && argv[1] === 'list') {
+          return {
+            argv,
+            code: 0,
+            stdout: JSON.stringify({ imports: [] }),
+            stderr: '',
+          };
+        }
+        return { argv, code: 0, stdout: '', stderr: '' };
+      },
+    };
+    const report = await runDoctor({
+      packageRoot,
+      packageVersion: '0.1.0',
+      adapter,
+      strictPlugin: true,
+      agyCommand: 'echo',
+    });
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+    expect(report.value.ok).toBe(false);
+    expect(report.value.exitCode).toBe(1);
+    expect(report.value.checks.find((c) => c.id === 'plugin_registry')?.status).toBe('fail');
+  });
+});

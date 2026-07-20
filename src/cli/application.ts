@@ -11,6 +11,7 @@ export interface CliServices {
   autopilotCommand(argv: readonly string[]): Promise<number>;
   teamCommand(argv: readonly string[]): Promise<number>;
   setupCommand(argv: readonly string[]): Promise<number>;
+  doctorCommand(argv: readonly string[]): Promise<number>;
 }
 
 export interface CliIo {
@@ -36,7 +37,8 @@ Usage:
   oma autopilot doctor --session <id>
   oma team start --manifest <file> [--worker-mode interactive|headless]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
-  oma setup [--global|--workspace] [--upgrade]
+  oma setup [--global|--workspace]
+  oma doctor [--json] [--no-strict-plugin]
 `;
 
 export async function runCli(
@@ -68,6 +70,8 @@ export async function runCli(
       return services.teamCommand(command.args);
     case 'setup':
       return services.setupCommand(command.args);
+    case 'doctor':
+      return services.doctorCommand(command.args);
   }
 }
 

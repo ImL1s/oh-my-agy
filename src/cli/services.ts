@@ -8,6 +8,7 @@ import { Result, ok } from '../runtime/types';
 import { RuntimeError } from '../runtime/errors';
 import { verifyPluginActive, PluginCommandAdapter } from '../setup/plugin';
 import { PluginSetupTransaction } from '../setup/transaction';
+import { doctorReportToLines, runDoctor } from '../setup/doctor';
 import { teamCommand as runTeamCommand } from '../team/commands';
 import { RuntimeContext } from '../team/types';
 import { ManagedInvocationService, ordinaryEnvironment } from './managed-invocation';
@@ -114,6 +115,28 @@ export function createDefaultServices(
       }
       stdout(`${JSON.stringify({ ...result.value, mode: global ? 'global' : 'workspace' }, null, 2)}\n`);
       return 0;
+    },
+    async doctorCommand(argv) {
+      const asJson = argv.includes('--json');
+      const strictPlugin = !argv.includes('--no-strict-plugin');
+      const adapter = options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand);
+      const report = await runDoctor({
+        packageRoot,
+        packageVersion: version,
+        agyCommand,
+        adapter,
+        strictPlugin,
+      });
+      if (!report.ok) {
+        stderr(`${report.error.code}: ${report.error.message}\n`);
+        return 1;
+      }
+      if (asJson) {
+        stdout(`${JSON.stringify(report.value, null, 2)}\n`);
+      } else {
+        stdout(`${doctorReportToLines(report.value).join('\n')}\n`);
+      }
+      return report.value.exitCode;
     },
   };
 }
