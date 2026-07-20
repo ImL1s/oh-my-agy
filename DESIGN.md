@@ -20,7 +20,7 @@
 #### 當前已實作功能 (Currently Implemented Features)
 *   **CLI 進入點 (bin/oma.ts)**：作為 CLI 進入點接管並解析命令列引數，攔截魔術關鍵字（`ralph`, `ultrawork`, `search`），將其對應模式的提示詞（System Prompt）注入，並將其餘指令透傳給實體 `agy` 指令程序。
 *   **薛西弗斯任務延續執行器 (Sisyphus Continuation Enforcer)**：在 `bin/oma.ts` 執行結束時，透過 `src/enforcer.ts` 檢查 `.agy/todo.json` 中的工作項目。若有未完成的待辦任務，會先進行 2 秒黃色警告倒數，隨後注入 `[SYSTEM REMINDER - TODO CONTINUATION]` 提示詞強迫喚醒 Agent 繼續執行。
-*   **死鎖熔斷器 (Deadlock Circuit Breaker)**：當同一待辦任務連續遭遇 3 次執行失敗（重試次數遞減至 0），系統會自動觸發熔斷，並執行 Git 自動還原（`git reset --hard` 到上一次穩定 Commit），以保護儲存庫狀態並阻止無謂的 Token 燃燒。
+*   **死鎖熔斷器 (Deadlock Circuit Breaker)**：當同一待辦任務連續遭遇 3 次執行失敗（重試次數遞減至 0），系統會自動觸發熔斷，**只將帳本標為 `tripped` 並要求人類介入**；**禁止** `git reset --hard` / `git clean -fd`，以保護使用者工作區並阻止無謂的 Token 燃燒。
 
 #### 設計藍圖 (Design Blueprint / Future Plans)
 以下進階功能目前在 TypeScript 程式碼庫中尚未實作，但在 E2E 測試中透過模擬（mock-based）環境與輸出通過了驗證：
@@ -89,7 +89,7 @@
 
 *   **外層協調者 (`bin/oma.ts`)**：作為 CLI 進入點，負責接管實體程序。在啟動 `agy` 前分配好獨立的 Git Worktree 實體目錄，設定環境變數，並啟動程序樹監控器（處理超時、最大日誌溢出等安全防禦）。
 *   **內層監聽者 (`src/hooks/` / Native Plugins)**：註冊為 `agy` 內部的原生插件，在 `PreToolUse` 事件中實現規劃寫入鎖，並在 `工作階段閒置` 事件中檢查未完成任務。
-*   **非同步狀態總線**：內外層不進行強耦合的跨程序通訊（IPC），而是透過共享狀態帳本（實體儲存於工作區外的全域 App Data 目錄 `~/.agy/sessions/{sessionId}/todo.json`，或加入 `.gitignore` 並在清理時排除，以防 `git reset --hard` 還原）進行非同步、事件驅動的通訊，降低系統複雜度。
+*   **非同步狀態總線**：內外層不進行強耦合的跨程序通訊（IPC），而是透過共享狀態帳本（實體儲存於工作區外的全域 App Data 目錄 / 平台 state root，或加入 `.gitignore` 的工作區外路徑）進行非同步、事件驅動的通訊，降低系統複雜度。
 
 ---
 
@@ -150,7 +150,7 @@
 |                                                                                   |
 |  [死鎖與 Token 防禦]                                                              |
 |    - Circuit Breaker (熔斷器): 單一 Todo 失敗 3 次/狀態無進展 -> Trip 熔斷        |
-|    - Git Saga 還原: 熔斷時自動 git reset --hard 還原至動工前穩定 Commit           |
+|    - 熔斷策略: 僅標記 tripped + 診斷；禁止 git reset --hard / git clean（保使用者工作） |
 |                                                                                   |
 |  [實體與執行期防禦]                                                               |
 |    - 程序樹超時 (SIGKILL): 實體程序樹超時監控, 掃除孤兒孫程序                     |
@@ -176,7 +176,7 @@
     3.  **主動回收與程序清理（Active Reclamation & SIGKILL）**：若 Works 檢測到 Looks 處於 `busy` 狀態且 `currentTime - last_active > 30` 秒，判定 Looks 已失聯。外層 Wrapper CLI 將向 Looks 的程序組 ID（PGID）發送 `SIGKILL` 徹底清理 Looks 的殭屍程序，重置 `busy` 為 `false` 並回收租約，解除 Works 的等待狀態。**Looks 在長任務（如 UI 渲染、編譯或長測試）執行前，必須在 帳本 中設定預期耗時與租約承諾（Lease Expectation / Lease Promise）或宣告「長時間阻塞模式」；Works / Wrapper CLI 必須優先讀取此預期，動態延長心跳超時閾值，防止 GC 或 I/O 阻塞造成的誤殺。**
 *   **熔斷與 Saga 還原流程**：
     1.  **熔斷狀態變更**：Continuation Enforcer 停止注入喚醒 Prompt，將系統狀態設為 `tripped`（滿足 `ContinuationResult` 中 `status: 'tripped'` 的契約）。
-    2.  **實體程式碼還原與強一致性保證**：自動執行 `git reset --hard`，將當前工作區程式碼還原至該 Todo 動工前的上一個穩定 commit 狀態。在此期間，狀態帳本與重試計數器（儲存於工作區外或被 Git 排除之目錄）將不受還原影響，確保重試計數器的連續性，防止被污染的修改滯留在儲存庫中，並杜絕無限重試死迴圈。**帳本的所有讀寫操作必須採用檔案互斥鎖（File Lock）機制。在執行實體還原時，系統必須確認 `git reset --hard` 執行成功且回傳碼為 0 後，才允許將 帳本 狀態更新為 `'tripped'` 熔斷狀態；若還原失敗，拒絕寫入 `'tripped'` 狀態並報警，確保 帳本 與實體程式碼狀態強一致性。**
+    2.  **保留使用者工作（安全熔斷）**：熔斷時**不得**執行 `git reset --hard` / `git clean -fd` / 強制 checkout。只將帳本更新為 `'tripped'` 並輸出診斷，由人類決定如何處理工作區。**帳本的所有讀寫操作必須採用檔案互斥鎖（File Lock）機制。** 狀態帳本與重試計數器應存放在工作區外或已 gitignore 的路徑，避免與使用者內容混寫。
     3.  **終止執行並通知**：立即退出執行迴圈，並同時發送終端黃色高亮警告與桌面通知，強制要求人類介入（Human-in-the-loop），徹底阻斷 Token 的無效燃燒。
 
 ### 2. 規劃階段寫入鎖 (Planning Mode Write Block)

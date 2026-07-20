@@ -18,6 +18,8 @@ Sibling of [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (
 
 _Don't learn every `agy` flag. Use `oma` / `omy`: launch managed → bind exact_env → Stop continue until progress or trip._
 
+> **Unofficial.** Not affiliated with Google / Antigravity. Requires a working, authenticated `agy` on your `PATH`.
+
 ---
 
 ## Mental model
@@ -103,21 +105,36 @@ When the task is non-trivial:
 
 ```bash
 oma --help
+# Managed exact_env (recommended — note the -- delimiter)
 oma ralph -- <task>
 oma ultrawork -- <task>
 oma search -- <read-only query>
+
 oma autopilot start -- <goal>
 oma autopilot status --session <id>
 oma autopilot checkpoint --session <id> --expected-revision <n> --evidence <file>
 oma autopilot resume --session <id> --conversation <id> --expected-revision <n>
 oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot doctor --session <id>
+oma autopilot review|qa|reset-breaker …   # see oma --help
+
+oma team start --manifest <file>
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
 oma setup
-oma <agy args...>   # pass-through
+oma <agy args...>   # pass-through (strips managed binding env)
 ```
 
 Bins after build: `oma`, `omy` → `dist/bin/oma.js`.
+
+### Dual entry paths (read this)
+
+| Invocation | Path | Binding |
+|------------|------|---------|
+| `oma ralph -- "task"` | **Managed** (structured CLI) | Injects `OMA_*` exact_env |
+| `oma ralph task` (no `--`) | **Legacy magic** (e2e / keyword intercept) | No exact_env; strips ambient binding |
+| `oma models list` / other | **Pass-through** | Strips managed binding env |
+
+Prefer the **`--` managed form** for production continuation.
 
 ---
 
@@ -176,4 +193,4 @@ Same family idea: **better workflow around a host agent**, not a replacement age
 
 ## License
 
-MIT (if/when a LICENSE file is added to the repo root; until then treat as private/unpublished unless you add one).
+[MIT](./LICENSE) — see the `LICENSE` file in the repository root.

@@ -11,6 +11,14 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+**/secrets/**
+
 # workspace-local agent research dumps under .agents (keep hooks.json only)
 .agents/**
 !.agents/hooks.json

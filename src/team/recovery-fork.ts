@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { canonicalJson, sha256 } from '../runtime/atomic';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { StateStore } from '../runtime/state-store';
@@ -236,6 +237,7 @@ function replayValue(
 }
 
 function randomToken(): string {
-  return `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  // 設計概念映射：claim token 為 capability；必須用 CSPRNG，不可 Math.random
+  return crypto.randomBytes(32).toString('hex');
 }
 

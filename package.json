@@ -1,19 +1,22 @@
 {
   "name": "oh-my-agy",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Google Antigravity CLI (agy) Wrapper & Continuation Enforcer",
-  "main": "bin/oma.ts",
+  "main": "dist/bin/oma.js",
   "bin": {
     "oma": "dist/bin/oma.js",
     "omy": "dist/bin/oma.js"
   },
   "files": [
-    "dist",
+    "dist/bin",
+    "dist/src",
     "plugin.json",
     "hooks.json",
     "skills",
     "rules",
+    "assets",
     "README.md",
+    "LICENSE",
     "package.json"
   ],
   "scripts": {
@@ -30,5 +33,17 @@
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
-  }
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ImL1s/oh-my-agy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ImL1s/oh-my-agy/issues"
+  },
+  "homepage": "https://github.com/ImL1s/oh-my-agy#readme"
 }

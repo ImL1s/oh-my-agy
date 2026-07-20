@@ -11,6 +11,7 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkContinuation, acquireLock, releaseLock } from '../src/enforcer';
+import { ordinaryEnvironment } from '../src/cli/managed-invocation';
 
 // 常用諮詢詞之正規表示式，用以過濾諮詢意圖，避免誤觸攔截
 const INFORMATIONAL_INTENT_PATTERNS = [
@@ -52,7 +53,11 @@ function isInformationalIntent(keyword: string, text: string): boolean {
 
 /**
  * 判斷是否走結構化 CLI（Autopilot / Team / Setup / explicit managed modes）。
- * 自然語言內嵌關鍵字（無 `--` delimiter）仍走 legacy magic path。
+ *
+ * 設計概念映射：
+ * - `oma ralph -- <task>` → managed exact_env（結構化）
+ * - `oma ralph <args…>` 無 `--` → legacy magic（e2e / 自然語言關鍵字相容；不注入 binding）
+ * - 其餘透傳 → ordinaryEnvironment 剝除 managed binding env
  */
 function shouldUseStructuredCli(args: readonly string[]): boolean {
   if (args.length === 0) return false;
@@ -61,10 +66,21 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
   if (['--help', '-h', '--version', '-v', 'autopilot', 'team', 'setup'].includes(first)) {
     return true;
   }
+  // 明確 managed：mode 後必須有 `--` 分隔 task
   if (['ralph', 'ultrawork', 'search'].includes(first) && args.includes('--')) {
     return true;
   }
   return false;
+}
+
+/** 所有 legacy spawn 共用：剝除 managed binding，避免 capability 外洩到非 managed agy。 */
+function childEnvWithPath(): NodeJS.ProcessEnv {
+  const nodeBinDir = path.dirname(process.execPath);
+  const extendedPath = nodeBinDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH || '');
+  return {
+    ...ordinaryEnvironment(process.env),
+    PATH: extendedPath,
+  };
 }
 
 async function main() {
@@ -178,19 +194,15 @@ async function main() {
       process.stdout.write(`${modePrompt}\n`);
     }
 
-    // 執行實體 agy 子程序，將其 stdout/stderr 輸出重導向至 'ignore' 以進行靜音，並同步等待執行完畢
-    // 設計概念映射：為了解決競態條件與背景程序洩漏問題，本段實作同步等待 close 事件，而非採用分離式背景執行
-    const nodeBinDir = path.dirname(process.execPath);
-    const extendedPath = nodeBinDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH || '');
+    // 執行實體 agy 子程序並同步等待 close（legacy magic：不注入 exact_env binding）
+    // e2e 預設靜音；互動環境可用 OMA_LEGACY_STDIO=inherit 看到輸出
+    const legacyStdio = process.env.OMA_LEGACY_STDIO === 'inherit' ? 'inherit' : 'ignore';
 
     let exitCode = 0;
     try {
       const child = spawn('agy', remainingArgs, {
-        stdio: 'ignore',
-        env: {
-          ...process.env,
-          PATH: extendedPath
-        }
+        stdio: legacyStdio,
+        env: childEnvWithPath(),
       });
 
       // 註冊中斷信號 (SIGINT) 監聽器以轉發給子程序，避免背景程序洩漏
@@ -243,22 +255,13 @@ async function main() {
   }
 
   // 5. 若無命中模式，正常進行指令透傳 (Pass-through)
-  // 使用 spawn (而非 exec) 來防範 shell 命令注入漏洞
-  // 廢除臨時檔案中轉機制，改為直接將子程序的 stdout/stderr 流導向到 parent 的 stdout/stderr
-  // 設計概念映射：改用 Stream 直連傳送以獲取即時輸出與正確的生命週期管理
-  // 在 spawn 實體 agy 子程序時開啟 detached 模式以進行程序組隔離
-  const nodeBinDir = path.dirname(process.execPath);
-  const extendedPath = nodeBinDir + (process.platform === 'win32' ? ';' : ':') + (process.env.PATH || '');
-
+  // 使用 spawn (而非 exec) 來防範 shell 命令注入漏洞；env 必剝 managed binding
   const timeoutMsStr = process.env.OMA_TIMEOUT_MS;
   const hasTimeout = timeoutMsStr && !isNaN(parseInt(timeoutMsStr, 10)) && parseInt(timeoutMsStr, 10) > 0;
 
   const spawnOptions: any = {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      PATH: extendedPath
-    }
+    env: childEnvWithPath(),
   };
 
   if (hasTimeout) {
