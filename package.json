@@ -1,6 +1,6 @@
 {
   "name": "oh-my-agy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "OMA — multi-agent orchestration for Google Antigravity CLI (managed modes, exact_env hooks, Autopilot/Team)",
   "main": "dist/bin/oma.js",
   "bin": {
