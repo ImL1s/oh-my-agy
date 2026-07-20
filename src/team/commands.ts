@@ -8,9 +8,9 @@ import {
   RecoveryForkSelectionEvidenceV1,
   RecoveryTaskAggregateV1,
 } from './recovery-fork';
+import { TeamOrchestrator } from './orchestrator';
 import { RuntimeContext, TeamActorIdentityV1 } from './types';
 import { resolveGitWorktreeIdentity } from './worktree';
-import { validateTeamManifest } from './manifest';
 
 export type ParsedTeamCommand =
   | {
@@ -25,11 +25,19 @@ export type ParsedTeamCommand =
       kind: 'start';
       manifestPath: string;
       workerMode: 'interactive' | 'headless';
+    }
+  | {
+      kind: 'status';
+      teamId: string;
+    }
+  | {
+      kind: 'stop';
+      teamId: string;
     };
 
 /**
  * 設計概念映射：Lane B 只做 argv→typed API 轉接；
- * resolve-fork 語意與 CAS 判定完全交給 RecoveryForkResolver（Lane C）。
+ * start/status/stop 委派 TeamOrchestrator；resolve-fork 委派 RecoveryForkResolver。
  */
 export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
   const subcommand = argv[0];
@@ -78,6 +86,22 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
       workerMode,
     });
   }
+  if (subcommand === 'status') {
+    const flags = parseStrictFlags(argv.slice(1));
+    if (!flags.ok) return flags;
+    if (flags.value.size !== 1 || !flags.value.has('--team')) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'team status requires --team'));
+    }
+    return ok({ kind: 'status', teamId: flags.value.get('--team')! });
+  }
+  if (subcommand === 'stop') {
+    const flags = parseStrictFlags(argv.slice(1));
+    if (!flags.ok) return flags;
+    if (flags.value.size !== 1 || !flags.value.has('--team')) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'team stop requires --team'));
+    }
+    return ok({ kind: 'stop', teamId: flags.value.get('--team')! });
+  }
   return err(runtimeError('E_VALIDATOR_REJECTED', 'Unknown team command'));
 }
 
@@ -86,6 +110,25 @@ export interface TeamCommandOptions {
   storeRoot?: string;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
+  /**
+   * 測試注入點；production 使用 defaultOrchestrator。
+   * 設計概念映射：CLI 不內嵌編排細節，委派 TeamOrchestrator。
+   */
+  orchestratorFactory?: (context: RuntimeContext) => TeamOrchestrator;
+}
+
+function defaultOrchestrator(context: RuntimeContext): TeamOrchestrator {
+  const managedRoot = path.join(context.stateRoot, 'managed-worktrees');
+  const holdEntry = path.resolve(__dirname, 'worker-hold.js');
+  return new TeamOrchestrator({
+    stateRoot: context.stateRoot,
+    workspaceRoot: context.workspaceRoot,
+    repoKey: context.repoKey,
+    workspaceKey: context.workspaceKey,
+    managedWorktreesRoot: managedRoot,
+    tokenFactory: context.tokenFactory,
+    workerHoldEntryPath: holdEntry,
+  });
 }
 
 /**
@@ -103,34 +146,56 @@ export async function teamCommand(
     return 2;
   }
   if (parsed.value.kind === 'start') {
-    // CLI start 僅做 manifest 契約驗證；完整 tmux/worker 生命週期走 typed Team APIs + unit fixtures。
-    if (!fs.existsSync(parsed.value.manifestPath)) {
-      stderr(`E_MANIFEST_INVALID: manifest not found: ${parsed.value.manifestPath}\n`);
-      return 1;
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    const result = await factory(options.context).startFromManifest(
+      parsed.value.manifestPath,
+      parsed.value.workerMode,
+    );
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return result.error.code === 'E_VALIDATOR_REJECTED' || result.error.code === 'E_MANIFEST_INVALID'
+        ? 2
+        : 1;
     }
-    let raw: unknown;
-    try {
-      raw = JSON.parse(fs.readFileSync(parsed.value.manifestPath, 'utf8'));
-    } catch (error) {
-      stderr(`E_MANIFEST_INVALID: cannot parse manifest: ${
-        error instanceof Error ? error.message : String(error)
-      }\n`);
-      return 1;
-    }
-    const validated = validateTeamManifest(raw, options.context.workspaceRoot);
-    if (!validated.ok) {
-      stderr(`${validated.error.code}: ${validated.error.message}\n`);
-      return 1;
-    }
-    stdout(JSON.stringify({
+    // claimToken 僅單次回傳於 JSON；勿寫入 durable 日誌以外的儲存
+    stdout(`${JSON.stringify({
       ok: true,
-      kind: 'manifest-validated',
-      teamId: validated.value.teamId,
-      revision: validated.value.revision,
-      taskCount: validated.value.tasks.length,
-      workerMode: parsed.value.workerMode,
-      note: 'tmux worker lifecycle is started via typed Team APIs, not this CLI stub',
-    }) + '\n');
+      kind: 'team-started',
+      teamId: result.value.teamId,
+      aggregateRevision: result.value.aggregateRevision,
+      workers: result.value.workers.map((worker) => ({
+        taskId: worker.taskId,
+        generation: worker.generation,
+        sessionName: worker.sessionName,
+        paneId: worker.paneId,
+        worktreePath: worker.worktreePath,
+        branchName: worker.branchName,
+        claimToken: worker.claimToken,
+        markerPath: worker.markerPath,
+      })),
+    })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'status') {
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    const result = await factory(options.context).status(parsed.value.teamId);
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return 1;
+    }
+    stdout(`${JSON.stringify({ ok: true, kind: 'team-status', ...result.value })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'stop') {
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    const result = await factory(options.context).stop(parsed.value.teamId);
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return 1;
+    }
+    stdout(`${JSON.stringify({ ok: true, kind: 'team-stopped', ...result.value })}\n`);
     return 0;
   }
 

@@ -36,6 +36,8 @@ Usage:
   oma autopilot reset-breaker --session <id> --expected-revision <n>
   oma autopilot doctor --session <id>
   oma team start --manifest <file> [--worker-mode interactive|headless]
+  oma team status --team <id>
+  oma team stop --team <id>
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace]
   oma doctor [--json] [--no-strict-plugin]

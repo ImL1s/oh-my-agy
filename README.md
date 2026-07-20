@@ -117,6 +117,7 @@ When the task is non-trivial:
 | Parallel / high-throughput mode | `oma ultrawork -- "…"` |
 | Read-only plan-style launch | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
+| Multi-agent first worker (v1) | `oma team start --manifest …` then `status` / `stop` |
 | Team fork resolution | `oma team resolve-fork …` |
 | Ordinary `agy` | `oma <agy args…>` (pass-through; strips managed binding env) |
 
@@ -141,7 +142,12 @@ oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot doctor --session <id>
 oma autopilot review|qa|reset-breaker …   # see oma --help
 
-oma team start --manifest <file>
+oma team start --manifest <file> [--worker-mode interactive|headless]
+  # v1: validates manifest, creates Team aggregate, starts FIRST ready task
+  # (empty deps) in a managed git worktree + owned tmux pane (worker-hold).
+  # Does NOT yet run full DAG, delivery, or integration.
+oma team status --team <id>
+oma team stop --team <id>
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
 oma setup
 oma doctor [--json] [--no-strict-plugin]

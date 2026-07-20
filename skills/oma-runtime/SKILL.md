@@ -3,7 +3,7 @@
 Antigravity plugin skill surface for oh-my-agy.
 
 - Managed modes: `ralph`, `ultrawork`, `search`
-- Team runtime: `oma team start|status|resolve-fork`
+- Team runtime (v1): `oma team start|status|stop|resolve-fork` — start launches first ready task (worktree+tmux hold), not full DAG/delivery
 - Autopilot: `oma autopilot ...`
 - Setup: `oma setup` (transactional plugin install/enable/readback)
 
