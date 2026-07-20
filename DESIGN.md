@@ -102,11 +102,19 @@ User-facing workflow priority (does not change Hybrid process architecture above
 
 | Priority | Surface | Role |
 | :--- | :--- | :--- |
-| **Primary** | Session slash `/oh-my-agy:<skill>` | Happy path inside Claude Code / Grok / Antigravity host. Agent runs the skill protocol **in-session** (e.g. `/oh-my-agy:autopilot`). No terminal or SID required to start. Workspace artifacts under `.agy/`. |
+| **Primary** | Session slash skills | Happy path **in-session**. **Antigravity (`agy`)**: bare `/autopilot` from the installed `oh-my-agy` plugin. **Claude Code / Grok**: namespaced `/oh-my-agy:autopilot` so OMC can keep bare `/autopilot`. No terminal or SID required to start. Workspace artifacts under `.agy/`. |
 | **Secondary** | Optional `oma` CLI durable ledger | Cross-session resume, managed binding (`OMA_SESSION_ID` / launch nonce / generation), autopilot FSM drive/advance/handoff, team tmux lifecycle. Use when the user wants durability — never as a gate for in-session work. |
 | **Tertiary** | `agy` managed plugin hooks | PreInvocation / Stop and related hooks from the plugin surface; skill protocol injection on managed launch (`<<<OMA_SKILL_PROTOCOL>>>`). Complements slash + CLI; does not replace in-session skill docs under `skills/*/SKILL.md`. |
 
-Canonical slash form is namespaced: **`/oh-my-agy:<name>`** (bare `/autopilot` may belong to OMC/host if present). Skill bodies lead with in-session steps; `oma …` commands live in skill appendices only.
+Host-specific slash:
+
+| Host | Canonical form | Notes |
+| :--- | :--- | :--- |
+| Antigravity (`agy`) | `/autopilot` | Plugin skills under `~/.gemini/config/plugins/oh-my-agy/skills/`. |
+| Claude Code | `/oh-my-agy:autopilot` | Via `.claude-plugin` marketplace; do not steal OMC bare `/autopilot`. |
+| Grok | `/oh-my-agy:autopilot` | `grok plugin install` / project `.grok/skills` links. |
+
+Skill bodies lead with in-session steps; `oma …` commands live in skill appendices only. `oma setup` installs slash hosts even if agy plugin setup fails (unless `--host agy`).
 
 ---
 

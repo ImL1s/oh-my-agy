@@ -1,7 +1,7 @@
 {
   "name": "@iml1s/oh-my-agy",
-  "version": "0.2.2",
-  "description": "OMA — slash-first session skills (/oh-my-agy:autopilot) + optional oma CLI ledger for Antigravity",
+  "version": "0.2.3",
+  "description": "OMA — session slash skills (agy /autopilot; Claude/Grok /oh-my-agy:autopilot) + optional oma CLI ledger",
   "main": "dist/bin/oma.js",
   "bin": {
     "oma": "dist/bin/oma.js",
@@ -17,6 +17,7 @@
     "rules",
     "assets",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "package.json"
   ],

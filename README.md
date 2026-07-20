@@ -16,12 +16,12 @@
 **Orchestration layer for Google Antigravity CLI (`agy`).**  
 Sibling of [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (OMC), [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) (OMX), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (OmO), and [oh-my-grok](https://github.com/ImL1s/oh-my-grok) (OMG) — same *orchestration idea*, **Antigravity-native** runtime.
 
-_Don't learn every `agy` flag. Use `oma` / `omy`: launch managed → bind exact_env → **session skills** drive the loop → Stop continue until progress or trip._
+_Don't learn every `agy` flag. Prefer **in-session slash skills** (`/autopilot` on agy, `/oh-my-agy:autopilot` on Claude/Grok). Optional `oma` / `omy` CLI binds managed modes and durable ledger when you need them._
 
-> **CLI vs session skills:** `oma ralph|ultrawork|search|autopilot|team` starts/binds work.  
-> Inside the session, agents must follow plugin skills under `skills/` (injected as `OMA_SKILL_PROTOCOL` on managed launches). This matches OMC/OMX: outer CLI + inner skill bodies.
+> **Session-first (primary):** After `oma setup`, restart the host and run slash skills in-session. On **Antigravity (`agy`)** the plugin skill is bare **`/autopilot`**. On **Claude Code / Grok** use namespaced **`/oh-my-agy:autopilot`** so OMC can keep bare `/autopilot`.  
+> **CLI (secondary):** `oma ralph|ultrawork|search|autopilot|team` for managed exact_env / durable FSM. Skill bodies stay the source of truth for the loop.
 
-> **Unofficial.** Not affiliated with Google / Antigravity. Requires a working, authenticated `agy` on your `PATH`.
+> **Unofficial.** Not affiliated with Google / Antigravity. Requires a working, authenticated `agy` on your `PATH` for managed hooks.
 
 ---
 
@@ -47,18 +47,24 @@ OMA does **not** replace Antigravity.
 
 ## Quick start
 
-### Primary UX (Claude Code / Grok — same habit as `/autopilot`)
+### Primary UX (in-session slash)
 
 After install, **restart the host session** and type:
 
+| Host | Canonical slash |
+|------|-----------------|
+| **Antigravity (`agy`)** | `/autopilot <goal>` (oh-my-agy plugin skill) |
+| **Claude Code / Grok** | `/oh-my-agy:autopilot <goal>` (namespaced; coexist with OMC bare `/autopilot`) |
+
 ```text
+# agy session
+/autopilot <your goal>
+
+# Claude Code / Grok session
 /oh-my-agy:autopilot <your goal>
 ```
 
-That is the OMA equivalent of Claude Code **`/autopilot`**.  
-We use a **namespaced** slash so it does **not** steal bare `/autopilot` from OMC when both are installed.
-
-Also: `/oh-my-agy:ralph`, `/oh-my-agy:ultrawork`, `/oh-my-agy:team`, …
+Also: `ralph`, `ultrawork`, `team`, … (bare on agy; `/oh-my-agy:…` on Claude/Grok).
 
 ### One-shot install (clone)
 
@@ -68,7 +74,9 @@ cd oh-my-agy
 ./scripts/install.sh
 # build + PATH + oma setup (agy plugin + Claude/Grok slash surface)
 oma doctor --no-strict-plugin
-# restart Claude Code / Grok, then: /oh-my-agy:autopilot …
+# restart host, then:
+#   agy:     /autopilot …
+#   Claude/Grok: /oh-my-agy:autopilot …
 ```
 
 ### Optional: Antigravity managed CLI ledger
@@ -78,9 +86,10 @@ oma doctor --no-strict-plugin
 ```bash
 npm ci && npm run build
 ln -sf "$(pwd)/dist/bin/oma.js" ~/.local/bin/oma
-oma setup                    # agy + slash hosts
-oma setup --host claude      # slash only
+oma setup                    # agy plugin + Claude/Grok slash surface
+oma setup --host claude      # slash only (no agy hard-fail)
 oma setup --host agy         # agy plugin only
+oma setup --host all         # same as default; agy fail continues slash install
 oma autopilot start -- "…"   # durable SessionAggregate (optional)
 ```
 
@@ -110,7 +119,7 @@ echo "@iml1s:registry=https://npm.pkg.github.com" >> ~/.npmrc
 npm i -g @iml1s/oh-my-agy@latest
 
 # B) Release tarball (no registry auth)
-npm i -g https://github.com/ImL1s/oh-my-agy/releases/download/v0.2.2/iml1s-oh-my-agy-0.2.2.tgz
+npm i -g https://github.com/ImL1s/oh-my-agy/releases/download/v0.2.3/iml1s-oh-my-agy-0.2.3.tgz
 
 oma setup
 oma doctor
@@ -126,8 +135,8 @@ When the task is non-trivial (**session-first**):
 
 ```text
 1. Install once: ./scripts/install.sh   # or: oma setup
-2. Restart Claude Code / Grok
-3. /oh-my-agy:autopilot <goal>          # deep-interview → ralplan → ultragoal → code-review → ultraqa
+2. Restart agy / Claude Code / Grok
+3. /autopilot <goal>   (agy)  or  /oh-my-agy:autopilot <goal>  (Claude/Grok)
 4. Stay in-session; write artifacts under .agy/
 5. Optional durable ledger (cross-session): oma autopilot start|drive|…
 ```
@@ -137,7 +146,7 @@ Discover skills: host slash menu, or `oma skill list` / `oma skill show autopilo
 
 | If you need… | Use |
 |--------------|-----|
-| Full autonomous delivery | `/oh-my-agy:autopilot <goal>` |
+| Full autonomous delivery | `/autopilot` (agy) or `/oh-my-agy:autopilot` (Claude/Grok) |
 | Persistent single-task loop | `/oh-my-agy:ralph` or `oma ralph -- "…"` |
 | Parallel / high-throughput | `/oh-my-agy:ultrawork` or `oma ultrawork -- "…"` |
 | Read-only plan-style launch | `oma search -- "…"` |
@@ -249,11 +258,12 @@ npm run test:e2e
 Tag example:
 
 ```bash
-# after main is green; tag must match package.json / plugin.json version
-git tag -a v0.2.1 -m "v0.2.1"
-git push origin v0.2.1
+# after main is green; tag must match package.json / plugin.json / .claude-plugin version
+git tag -a v0.2.3 -m "v0.2.3"
+git push origin v0.2.3
 ```
 
+Changelog: **[CHANGELOG.md](CHANGELOG.md)**.  
 npmjs.org remains optional until `NPM_TOKEN` + `@iml1s` scope rights exist (see publishing notes).
 
 ---
