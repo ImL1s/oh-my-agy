@@ -22,8 +22,10 @@ describe('Antigravity package surface', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     expect(pkg.scripts.prepack).not.toMatch(/npm\s+pack|test:package/);
     expect(pkg.files).toEqual(expect.arrayContaining([
-      'dist', 'plugin.json', 'hooks.json', 'skills', 'rules',
+      'dist/bin', 'dist/src', 'plugin.json', 'hooks.json', 'skills', 'rules', 'LICENSE',
     ]));
+    expect(pkg.license).toBe('MIT');
+    expect(pkg.engines?.node).toMatch(/>=\s*20/);
   });
 });
 
