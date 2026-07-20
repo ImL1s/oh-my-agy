@@ -23,9 +23,11 @@ export interface LeaseAggregateV1 {
 
 export class AuthorityLeaseStore {
   readonly key: string;
+  private readonly teamId: string;
   private readonly store: StateStore<LeaseAggregateV1>;
 
   constructor(stateRoot: string, teamId: string) {
+    this.teamId = teamId;
     this.key = `teams/${teamId}/authority-leases`;
     this.store = new StateStore<LeaseAggregateV1>(stateRoot);
   }
@@ -35,8 +37,26 @@ export class AuthorityLeaseStore {
     if (existing.ok) return existing;
     return this.store.create(this.key, {
       schemaVersion: 1,
-      teamId: this.key,
+      teamId: this.teamId,
       leases: {},
+    });
+  }
+
+  async releaseAllForTask(
+    ownerTaskId: string,
+    expectedRevision: number,
+  ): Promise<Result<Snapshot<LeaseAggregateV1>, RuntimeError>> {
+    const before = this.store.read(this.key);
+    if (!before.ok) return before;
+    if (before.value.revision !== expectedRevision) {
+      return err(runtimeError('E_REVISION_CONFLICT', 'Lease aggregate revision changed'));
+    }
+    return this.store.compareAndSwap(this.key, expectedRevision, (agg) => {
+      const leases: Record<string, AuthorityLeaseV1> = {};
+      for (const [key, lease] of Object.entries(agg.leases)) {
+        if (lease.ownerTaskId !== ownerTaskId) leases[key] = lease;
+      }
+      return { ...agg, leases };
     });
   }
 
@@ -132,4 +152,23 @@ export function pathKeysFromWriteScope(
 ): string[] {
   if (writeScope === 'none') return [];
   return writeScope.map((entry) => `${entry.kind}:${entry.path}`);
+}
+
+/** true if two scope keys conflict (exact or dir contains file/dir prefix) */
+export function writeScopesConflict(
+  left: 'none' | readonly { kind: string; path: string }[],
+  right: 'none' | readonly { kind: string; path: string }[],
+): boolean {
+  if (left === 'none' || right === 'none') return false;
+  for (const a of left) {
+    for (const b of right) {
+      if (a.kind === 'file' && b.kind === 'file' && a.path === b.path) return true;
+      if (a.kind === 'dir' && b.kind === 'dir' && (a.path === b.path || a.path.startsWith(`${b.path}/`) || b.path.startsWith(`${a.path}/`))) {
+        return true;
+      }
+      if (a.kind === 'dir' && b.kind === 'file' && (b.path === a.path || b.path.startsWith(`${a.path}/`))) return true;
+      if (b.kind === 'dir' && a.kind === 'file' && (a.path === b.path || a.path.startsWith(`${b.path}/`))) return true;
+    }
+  }
+  return false;
 }

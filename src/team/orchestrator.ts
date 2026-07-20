@@ -124,7 +124,7 @@ export class TeamOrchestrator {
   private readonly tokenFactory: () => string;
   private readonly nowMs: () => number;
   private readonly leaseMs: number;
-  private readonly maxParallelWorkers: number;
+  private maxParallelWorkers: number;
   private readonly tmux: TmuxController;
   private readonly worktrees: GitWorktreeManager;
   private readonly workerExecutablePath: string;
@@ -292,12 +292,22 @@ export class TeamOrchestrator {
       const processLiveness = hb === undefined ? 'unknown' : probeProcessPid(hb.process.pid);
       const assessment = assessWorker(task, hb, this.nowMs(), paneLiveness, processLiveness);
       assessments[task.id] = assessment;
-      if (assessment.status === 'awaiting_interaction' || assessment.status === 'orphan_identity_unproven') {
-        const status = assessment.status === 'awaiting_interaction'
-          ? 'awaiting_interaction' as const
-          : 'orphan_identity_unproven' as const;
-        const updated = await store.setTaskStatus(task.id, revision, status);
-        if (updated.ok) revision = updated.value.revision;
+      if (assessment.status === 'awaiting_interaction') {
+        const updated = await store.setTaskStatus(task.id, revision, 'awaiting_interaction');
+        if (!updated.ok) return updated;
+        revision = updated.value.revision;
+      } else if (assessment.status === 'orphan_identity_unproven' || assessment.status === 'reclaimable') {
+        // orphan/reclaimable：清 claim，避免 ready queue 誤選
+        const released = await store.releaseClaimAfterDeadProof(task.id, revision);
+        if (!released.ok) {
+          // 若非 in_progress 狀態，改 set orphan
+          const updated = await store.setTaskStatus(task.id, revision, 'orphan_identity_unproven');
+          if (!updated.ok) return updated;
+          revision = updated.value.revision;
+        } else {
+          revision = released.value.revision;
+          await this.releaseLeasesForTask(teamId, task.id);
+        }
       }
     }
     return ok({ teamId, revision, assessments });
@@ -307,24 +317,33 @@ export class TeamOrchestrator {
     teamId: string,
     taskId: string,
     expectedRevision: number,
-    paneLiveness: 'alive' | 'dead' | 'unknown',
-    processLiveness: 'alive' | 'dead' | 'unknown',
+    paneLiveness?: 'alive' | 'dead' | 'unknown',
+    processLiveness?: 'alive' | 'dead' | 'unknown',
   ): Promise<Result<ReclaimView, RuntimeError>> {
-    const proof = requireDeadProof(paneLiveness, processLiveness);
-    if (!proof.ok) return proof;
     const store = new TeamStateStore(this.stateRoot, this.repoKey, this.workspaceKey, teamId);
     const snapshot = store.read();
     if (!snapshot.ok) return snapshot;
     const hb = snapshot.value.value.heartbeats[taskId];
-    if (hb !== undefined) {
-      const sessionName = inferSessionName(this.sessionNamePrefix, teamId, taskId, hb);
-      if (this.tmux.hasSession(sessionName)) {
-        const killed = this.tmux.killOwnedSession(sessionName, snapshot.value.value.ownerNonce);
-        if (!killed.ok) return killed;
-      }
+    const sessionName = hb === undefined
+      ? undefined
+      : inferSessionName(this.sessionNamePrefix, teamId, taskId, hb);
+    // 預設 orchestrator 重探；CLI 旗標僅當 probe 失敗時的 fallback
+    const pane = sessionName !== undefined
+      ? probeTmuxSession(sessionName)
+      : (paneLiveness ?? 'unknown');
+    const proc = hb !== undefined
+      ? probeProcessPid(hb.process.pid)
+      : (processLiveness ?? 'unknown');
+    // 若重探結果與呼叫端矛盾且呼叫端宣稱 dead，仍以重探為準
+    const proof = requireDeadProof(pane, proc);
+    if (!proof.ok) return proof;
+    if (sessionName !== undefined && this.tmux.hasSession(sessionName)) {
+      const killed = this.tmux.killOwnedSession(sessionName, snapshot.value.value.ownerNonce);
+      if (!killed.ok) return killed;
     }
     const released = await store.releaseClaimAfterDeadProof(taskId, expectedRevision);
     if (!released.ok) return released;
+    await this.releaseLeasesForTask(teamId, taskId);
     return ok({
       teamId,
       taskId,
@@ -443,6 +462,7 @@ export class TeamOrchestrator {
       validated.value.deliveryDigest,
     );
     if (!integrated.ok) return integrated;
+    await this.releaseLeasesForTask(input.teamId, input.taskId);
 
     return ok({
       teamId: input.teamId,
@@ -486,6 +506,17 @@ export class TeamOrchestrator {
     return ok({ teamId, aggregateRevision: revision, started });
   }
 
+  setMaxParallelWorkers(value: number): void {
+    this.maxParallelWorkers = Math.max(1, value);
+  }
+
+  private async releaseLeasesForTask(teamId: string, taskId: string): Promise<void> {
+    const leases = new AuthorityLeaseStore(this.stateRoot, teamId);
+    const ensured = await leases.ensure();
+    if (!ensured.ok) return;
+    await leases.releaseAllForTask(taskId, ensured.value.revision);
+  }
+
   private async startOneTask(input: {
     store: TeamStateStore;
     teamId: string;
@@ -497,7 +528,6 @@ export class TeamOrchestrator {
     const baseSha = gitHead(this.workspaceRoot);
     if (!baseSha.ok) return baseSha;
     const workerId = input.task.id;
-    const generation = 1;
     const claimToken = this.tokenFactory();
     const claimDigest = sha256(claimToken);
 
@@ -522,17 +552,7 @@ export class TeamOrchestrator {
       }
     }
 
-    const branchName = `oma-team/${input.teamId}/${workerId}-g${generation}-${this.tokenFactory().slice(0, 8)}`;
-    const worktree = this.worktrees.create({
-      teamId: input.teamId,
-      workerId,
-      generation,
-      branchName,
-      baseSha: baseSha.value,
-      ownerNonce: input.ownerNonce,
-    });
-    if (!worktree.ok) return worktree;
-
+    // claim 先 CAS，generation 以結果為準
     const claimed = await input.store.claimTask(
       input.task.id,
       workerId,
@@ -542,8 +562,23 @@ export class TeamOrchestrator {
       claimToken,
     );
     if (!claimed.ok) {
-      this.worktrees.removeIfSafe(worktree.value, { ownerNonce: input.ownerNonce, integrated: true });
+      await this.releaseLeasesForTask(input.teamId, input.task.id);
       return claimed;
+    }
+    const generation = claimed.value.value.tasks[input.task.id]!.claim!.generation;
+
+    const branchName = `oma-team/${input.teamId}/${workerId}-g${generation}-${this.tokenFactory().slice(0, 8)}`;
+    const worktree = this.worktrees.create({
+      teamId: input.teamId,
+      workerId,
+      generation,
+      branchName,
+      baseSha: baseSha.value,
+      ownerNonce: input.ownerNonce,
+    });
+    if (!worktree.ok) {
+      await this.releaseLeasesForTask(input.teamId, input.task.id);
+      return worktree;
     }
 
     const sessionBase = this.sessionNamePrefix ?? `oma-${input.teamId}`;
@@ -588,6 +623,7 @@ export class TeamOrchestrator {
       try { fs.rmSync(descriptorPath, { force: true }); } catch (_) { /* best-effort */ }
       try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
       this.worktrees.removeIfSafe(worktree.value, { ownerNonce: input.ownerNonce, integrated: true });
+      await this.releaseLeasesForTask(input.teamId, input.task.id);
       return pane;
     }
 

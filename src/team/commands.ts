@@ -365,18 +365,9 @@ export async function teamCommand(
 
   if (parsed.value.kind === 'tick') {
     const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    let orch = factory(options.context);
+    const orch = factory(options.context);
     if (parsed.value.maxParallel !== undefined) {
-      orch = new TeamOrchestrator({
-        stateRoot: options.context.stateRoot,
-        workspaceRoot: options.context.workspaceRoot,
-        repoKey: options.context.repoKey,
-        workspaceKey: options.context.workspaceKey,
-        managedWorktreesRoot: path.join(options.context.stateRoot, 'managed-worktrees'),
-        tokenFactory: options.context.tokenFactory,
-        maxParallelWorkers: parsed.value.maxParallel,
-        workerHoldEntryPath: path.resolve(__dirname, 'worker-bootstrap.js'),
-      });
+      orch.setMaxParallelWorkers(parsed.value.maxParallel);
     }
     const result = await orch.tick(parsed.value.teamId, parsed.value.workerMode);
     if (!result.ok) {

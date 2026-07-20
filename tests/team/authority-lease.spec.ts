@@ -1,11 +1,26 @@
 import * as crypto from 'crypto';
-import { AuthorityLeaseStore, pathKeysFromWriteScope } from '../../src/team/authority-lease';
+import {
+  AuthorityLeaseStore,
+  pathKeysFromWriteScope,
+  writeScopesConflict,
+} from '../../src/team/authority-lease';
 import { GitFixture } from '../helpers/git-fixture';
 
 describe('AuthorityLease', () => {
   test('pathKeysFromWriteScope', () => {
     expect(pathKeysFromWriteScope('none')).toEqual([]);
     expect(pathKeysFromWriteScope([{ kind: 'file', path: 'a.ts' }])).toEqual(['file:a.ts']);
+  });
+
+  test('writeScopesConflict detects dir/file overlap', () => {
+    expect(writeScopesConflict(
+      [{ kind: 'dir', path: 'src' }],
+      [{ kind: 'file', path: 'src/a.ts' }],
+    )).toBe(true);
+    expect(writeScopesConflict(
+      [{ kind: 'file', path: 'a.ts' }],
+      [{ kind: 'file', path: 'b.ts' }],
+    )).toBe(false);
   });
 
   test('acquire exclusive, second holder fails, renew and release', async () => {
