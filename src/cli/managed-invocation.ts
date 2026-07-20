@@ -5,6 +5,8 @@ import { OperationIdentity, ProcessIdentity, Result, err, ok } from '../runtime/
 import { ManagedMode, ModeDirectiveRenderer } from '../modes/directives';
 import { buildModeCommand } from '../modes/commands';
 import { guardDangerousArgv } from './dangerous-launch';
+import { wrapManagedSearchLaunch } from '../runtime/sandbox';
+import * as path from 'path';
 
 export interface PreparedManagedInvocation {
   readonly kind: 'launch' | 'resume';
@@ -110,7 +112,16 @@ export class ManagedInvocationService {
       taskDigest: crypto.createHash('sha256').update(taskBytes).digest('hex'),
     });
     if (!prepared.ok) return prepared;
-    return this.runManaged(prepared.value, command.value.argv);
+    let argv = command.value.argv;
+    let launchCommand = this.agyCommand;
+    if (mode === 'search') {
+      const plansDir = path.join(prepared.value.cwd, '.agy', 'plans');
+      const sandboxed = wrapManagedSearchLaunch(this.agyCommand, argv, prepared.value.cwd, plansDir);
+      if (!sandboxed.ok) return sandboxed;
+      launchCommand = sandboxed.value.command;
+      argv = sandboxed.value.argv;
+    }
+    return this.runManaged(prepared.value, argv, launchCommand);
   }
 
   async resumeConversation(
@@ -152,6 +163,7 @@ export class ManagedInvocationService {
   private async runManaged(
     prepared: Readonly<PreparedManagedInvocation>,
     argv: readonly string[],
+    command: string = this.agyCommand,
   ): Promise<Result<ProcessOutcome, RuntimeError>> {
     // defense-in-depth：managed final argv 亦過危險旗標 gate
     const guarded = await guardDangerousArgv(argv, {
@@ -172,7 +184,7 @@ export class ManagedInvocationService {
     if (this.stateRoot) env.OMA_STATE_ROOT = this.stateRoot;
     let spawnRecordError: RuntimeError | undefined;
     const outcome = await this.runner.foregroundInteractive(
-      this.agyCommand,
+      command,
       safeArgv,
       prepared.operationIdentity,
       {

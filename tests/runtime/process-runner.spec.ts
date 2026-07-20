@@ -56,4 +56,41 @@ describe('ProcessRunner contract', () => {
     }));
     expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
+
+  test('maxOutputBytes overflow kills the child (not only truncate)', async () => {
+    const runner = new ProcessRunner();
+    const result = await runner.boundedHeadless(
+      process.execPath,
+      ['-e', 'setInterval(() => process.stdout.write("x".repeat(4096)), 10)'],
+      {
+        deadlineMs: 5_000,
+        terminationGraceMs: 50,
+        maxOutputBytes: 2048,
+      },
+      { operationId: 'overflow', ownerNonce: crypto.randomBytes(16).toString('hex') },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.outputOverflow).toBe(true);
+    expect(result.value.stdout.length).toBeLessThanOrEqual(2048);
+    // killed rather than natural exit 0
+    expect(result.value.code === 0 && result.value.signal === null).toBe(false);
+  }, 10000);
+
+  test('maxProcessCount can be configured (count includes root)', async () => {
+    const runner = new ProcessRunner();
+    const result = await runner.boundedHeadless(
+      process.execPath,
+      ['-e', 'setTimeout(() => process.exit(0), 200)'],
+      {
+        deadlineMs: 5_000,
+        maxProcessCount: 100,
+      },
+      { operationId: 'proc-count', ownerNonce: crypto.randomBytes(16).toString('hex') },
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.processCountOverflow).not.toBe(true);
+    expect(result.value.code).toBe(0);
+  });
 });

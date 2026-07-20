@@ -146,12 +146,13 @@ oma autopilot doctor --session <id>
 oma autopilot review|qa|reset-breaker …   # see oma --help
 
 oma team start --manifest <file> [--worker-mode interactive|headless]
-  # v1.1: validates manifest, creates Team aggregate, starts FIRST ready task
-  # (empty deps) in a managed git worktree + owned tmux pane.
-  # Default bootstrap runs agy via worker-bootstrap (tests may inject hold).
-  # Does NOT yet run full DAG, delivery, or integration.
+  # Ready tasks (deps completed) up to max-parallel; managed worktree + tmux + agy bootstrap.
 oma team status --team <id>
 oma team stop --team <id>
+oma team supervise --team <id>
+oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --process dead
+oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
+oma team tick --team <id> [--max-parallel <n>]
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
 oma setup
 oma doctor [--json] [--no-strict-plugin]

@@ -6,6 +6,10 @@ export interface ProcessOutcome {
   code: number;
   signal: NodeJS.Signals | null;
   timedOut: boolean;
+  /** true when maxOutputBytes 被超過並觸發 kill */
+  outputOverflow?: boolean;
+  /** true when maxProcessCount 被超過並觸發 kill */
+  processCountOverflow?: boolean;
   stdout: string;
   stderr: string;
   processIdentity: ProcessIdentity | null;
@@ -19,6 +23,8 @@ export interface HeadlessPolicy {
   deadlineMs: number;
   terminationGraceMs?: number;
   maxOutputBytes?: number;
+  /** 程序組內最大程序數（含 root）；超過則 SIGTERM/SIGKILL。Linux 量測最準。 */
+  maxProcessCount?: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   onSpawn?: SpawnLifecycleCallback;
@@ -113,18 +119,47 @@ export class ProcessRunner {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       const maxOutputBytes = policy.maxOutputBytes ?? 1024 * 1024;
+      const maxProcessCount = policy.maxProcessCount;
       const observed = child.pid === undefined ? null : this.readIdentity(child.pid, identity);
       let stdout: Buffer = Buffer.alloc(0);
       let stderr: Buffer = Buffer.alloc(0);
       let timedOut = false;
+      let outputOverflow = false;
+      let processCountOverflow = false;
       let settled = false;
       let killTimer: NodeJS.Timeout | undefined;
       let deadlineTimer: NodeJS.Timeout | undefined;
+      let processCountTimer: NodeJS.Timeout | undefined;
       let lifecycleError: RuntimeError | undefined;
 
+      const killOwned = (signal: NodeJS.Signals) => {
+        if (child.pid === undefined || observed === null || !this.proveIdentity(observed, identity)) return;
+        try {
+          if (detached) process.kill(-child.pid, signal);
+          else child.kill(signal);
+        } catch (_) { /* best-effort */ }
+      };
+
+      const triggerKill = (reason: 'output' | 'processCount' | 'deadline') => {
+        if (reason === 'output') outputOverflow = true;
+        if (reason === 'processCount') processCountOverflow = true;
+        if (reason === 'deadline') timedOut = true;
+        killOwned('SIGTERM');
+        if (killTimer !== undefined) clearTimeout(killTimer);
+        killTimer = setTimeout(() => {
+          killOwned('SIGKILL');
+        }, policy.terminationGraceMs ?? 500);
+      };
+
       const append = (current: Buffer, chunk: Buffer): Buffer => {
-        const remaining = Math.max(0, maxOutputBytes - current.length);
-        return remaining === 0 ? current : Buffer.concat([current, chunk.subarray(0, remaining)]);
+        if (outputOverflow) return current;
+        if (current.length + chunk.length > maxOutputBytes) {
+          const remaining = Math.max(0, maxOutputBytes - current.length);
+          const next = remaining === 0 ? current : Buffer.concat([current, chunk.subarray(0, remaining)]);
+          triggerKill('output');
+          return next;
+        }
+        return Buffer.concat([current, chunk]);
       };
       child.stdout.on('data', (chunk: Buffer) => { stdout = append(stdout, chunk); });
       child.stderr.on('data', (chunk: Buffer) => { stderr = append(stderr, chunk); });
@@ -132,6 +167,7 @@ export class ProcessRunner {
         if (settled) return;
         settled = true;
         if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+        if (processCountTimer !== undefined) clearInterval(processCountTimer);
         resolve(err(runtimeError('E_RETRYABLE_BLOCKER', 'Headless process failed to spawn', {
           command,
           cause: error.message,
@@ -142,10 +178,13 @@ export class ProcessRunner {
         settled = true;
         if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
         if (killTimer !== undefined) clearTimeout(killTimer);
+        if (processCountTimer !== undefined) clearInterval(processCountTimer);
         const outcome: ProcessOutcome = {
           code: code ?? signalExitCode(signal),
           signal,
           timedOut,
+          outputOverflow,
+          processCountOverflow,
           stdout: stdout.toString('utf8'),
           stderr: stderr.toString('utf8'),
           processIdentity: observed,
@@ -159,39 +198,57 @@ export class ProcessRunner {
       });
 
       deadlineTimer = setTimeout(() => {
-        timedOut = true;
+        if (settled) return;
         if (child.pid === undefined || observed === null || !this.proveIdentity(observed, identity)) {
-          if (!settled) {
-            settled = true;
-            resolve(err(runtimeError(
-              'E_PROCESS_IDENTITY_UNPROVEN',
-              'Deadline elapsed, but process ownership could not be proven; no group kill was attempted',
-              { pid: child.pid },
-            )));
-          }
+          settled = true;
+          resolve(err(runtimeError(
+            'E_PROCESS_IDENTITY_UNPROVEN',
+            'Deadline elapsed, but process ownership could not be proven; no group kill was attempted',
+            { pid: child.pid },
+          )));
           return;
         }
-        try {
-          if (detached) process.kill(-child.pid, 'SIGTERM');
-          else child.kill('SIGTERM');
-        } catch (_) {}
-        killTimer = setTimeout(() => {
-          if (!this.proveIdentity(observed, identity)) return;
-          try {
-            if (detached) process.kill(-child.pid!, 'SIGKILL');
-            else child.kill('SIGKILL');
-          } catch (_) {}
-        }, policy.terminationGraceMs ?? 500);
+        triggerKill('deadline');
       }, policy.deadlineMs);
+
+      if (maxProcessCount !== undefined && maxProcessCount > 0 && child.pid !== undefined) {
+        processCountTimer = setInterval(() => {
+          if (settled || processCountOverflow) return;
+          const count = countProcessGroup(child.pid!);
+          if (count !== null && count > maxProcessCount) {
+            triggerKill('processCount');
+          }
+        }, 100);
+      }
+
       lifecycleError = invokeSpawnCallback(policy.onSpawn, observed);
       if (lifecycleError !== undefined && child.pid !== undefined
         && observed !== null && this.proveIdentity(observed, identity)) {
-        try {
-          if (detached) process.kill(-child.pid, 'SIGTERM');
-          else child.kill('SIGTERM');
-        } catch (_) {}
+        killOwned('SIGTERM');
       }
     });
+  }
+}
+
+/** 計算 pid 及其子孫數量；darwin/linux 用 pgrep -P 遞迴。失敗回 null。 */
+function countProcessGroup(rootPid: number): number | null {
+  try {
+    const seen = new Set<number>();
+    const queue = [rootPid];
+    while (queue.length > 0) {
+      const pid = queue.pop()!;
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      const listed = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
+      if (listed.status !== 0 && listed.status !== 1) continue;
+      const children = listed.stdout.trim() === ''
+        ? []
+        : listed.stdout.trim().split('\n').map((line) => Number(line)).filter((n) => Number.isFinite(n));
+      for (const child of children) queue.push(child);
+    }
+    return seen.size;
+  } catch (_) {
+    return null;
   }
 }
 

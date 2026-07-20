@@ -22,7 +22,8 @@
 *   **薛西弗斯任務延續執行器 (Sisyphus Continuation Enforcer)**：在 `bin/oma.ts` 執行結束時，透過 `src/enforcer.ts` 檢查 `.agy/todo.json` 中的工作項目。若有未完成的待辦任務，會先進行 2 秒黃色警告倒數，隨後注入 `[SYSTEM REMINDER - TODO CONTINUATION]` 提示詞強迫喚醒 Agent 繼續執行。
 *   **死鎖熔斷器 (Deadlock Circuit Breaker)**：當同一待辦任務連續遭遇 3 次執行失敗（重試次數遞減至 0），系統會自動觸發熔斷，**只將帳本標為 `tripped` 並要求人類介入**；**禁止** `git reset --hard` / `git clean -fd`，以保護使用者工作區並阻止無謂的 Token 燃燒。
 *   **confirmDangerousLaunch**：CLI 偵測 argv exact token `--madmax` / `--yolo`；TTY 需 stdin 輸入 `yes`（非 GUI 彈窗），非 TTY 需 `--i-understand-dangerous-launch`；掛載於 structured pass-through、managed final argv、legacy magic/pass-through。managed mode 與 `--` 之間未知 token 為 `E_DIRECTIVE_INVALID`。
-*   **TeamOrchestrator v1**：`oma team start/status/stop` 接 worktree + claim + tmux worker-hold（真實 agy worker / DAG / deliver 見後續 plan）。
+*   **TeamOrchestrator**：`start/status/stop/supervise/reclaim/deliver/tick`；ready-queue + max-parallel；DeadProof reclaim；deliver→temp integration→FF publish→completed；AuthorityLease 於 write_scope；worker-bootstrap 啟動 agy。
+*   **Runtime 防禦**：headless `maxOutputBytes` 超限 kill；可選 `maxProcessCount`；search managed launch 可走 fail-closed sandbox（`OMA_REQUIRE_SANDBOX=1`，ADR-0001）。
 
 #### 設計藍圖 (Design Blueprint / Future Plans)
 以下進階功能目前在 TypeScript 程式碼庫中尚未完整端到端出貨（零件庫可能已存在）：

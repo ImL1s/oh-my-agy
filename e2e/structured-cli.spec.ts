@@ -12,11 +12,14 @@ const hasTmux = spawnSync('tmux', ['-V'], { encoding: 'utf8' }).status === 0;
 const maybeTmux = hasTmux ? test : test.skip;
 
 describe('Structured CLI e2e baseline', () => {
-  test('TC-S-01: oma --help documents team status/stop and drive', async () => {
+  test('TC-S-01: oma --help documents team status/stop/supervise/deliver and drive', async () => {
     const r = await runOma(['--help']);
     expect(r.code).toBe(0);
     expect(r.stdout).toContain('team status');
     expect(r.stdout).toContain('team stop');
+    expect(r.stdout).toContain('team supervise');
+    expect(r.stdout).toContain('team deliver');
+    expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('autopilot drive');
   });
 

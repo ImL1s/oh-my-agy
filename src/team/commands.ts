@@ -33,6 +33,33 @@ export type ParsedTeamCommand =
   | {
       kind: 'stop';
       teamId: string;
+    }
+  | {
+      kind: 'supervise';
+      teamId: string;
+    }
+  | {
+      kind: 'reclaim';
+      teamId: string;
+      taskId: string;
+      expectedRevision: number;
+      pane: 'alive' | 'dead' | 'unknown';
+      process: 'alive' | 'dead' | 'unknown';
+    }
+  | {
+      kind: 'deliver';
+      teamId: string;
+      taskId: string;
+      expectedRevision: number;
+      claimToken: string;
+      generation: number;
+      worktreePath: string;
+    }
+  | {
+      kind: 'tick';
+      teamId: string;
+      workerMode: 'interactive' | 'headless';
+      maxParallel?: number;
     };
 
 /**
@@ -102,7 +129,95 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
     }
     return ok({ kind: 'stop', teamId: flags.value.get('--team')! });
   }
+  if (subcommand === 'supervise') {
+    const flags = parseStrictFlags(argv.slice(1));
+    if (!flags.ok) return flags;
+    if (!flags.value.has('--team') || flags.value.size !== 1) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'team supervise requires --team'));
+    }
+    return ok({ kind: 'supervise', teamId: flags.value.get('--team')! });
+  }
+  if (subcommand === 'reclaim') {
+    const flags = parseStrictFlags(argv.slice(1));
+    if (!flags.ok) return flags;
+    const required = ['--team', '--task', '--expected-revision', '--pane', '--process'];
+    if (flags.value.size !== required.length || required.some((key) => !flags.value.has(key))) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Invalid or missing flags for team reclaim'));
+    }
+    const expectedRevision = Number(flags.value.get('--expected-revision'));
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'expected-revision must be a non-negative integer'));
+    }
+    const pane = flags.value.get('--pane')!;
+    const processLive = flags.value.get('--process')!;
+    if (!isLiveness(pane) || !isLiveness(processLive)) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'pane/process must be alive|dead|unknown'));
+    }
+    return ok({
+      kind: 'reclaim',
+      teamId: flags.value.get('--team')!,
+      taskId: flags.value.get('--task')!,
+      expectedRevision,
+      pane,
+      process: processLive,
+    });
+  }
+  if (subcommand === 'deliver') {
+    const flags = parseStrictFlags(argv.slice(1));
+    if (!flags.ok) return flags;
+    const required = [
+      '--team', '--task', '--expected-revision', '--claim-token', '--generation', '--worktree',
+    ];
+    if (flags.value.size !== required.length || required.some((key) => !flags.value.has(key))) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Invalid or missing flags for team deliver'));
+    }
+    const expectedRevision = Number(flags.value.get('--expected-revision'));
+    const generation = Number(flags.value.get('--generation'));
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'expected-revision must be a non-negative integer'));
+    }
+    if (!Number.isSafeInteger(generation) || generation < 1) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'generation must be a positive integer'));
+    }
+    return ok({
+      kind: 'deliver',
+      teamId: flags.value.get('--team')!,
+      taskId: flags.value.get('--task')!,
+      expectedRevision,
+      claimToken: flags.value.get('--claim-token')!,
+      generation,
+      worktreePath: flags.value.get('--worktree')!,
+    });
+  }
+  if (subcommand === 'tick') {
+    const flags = parseStrictFlags(argv.slice(1));
+    if (!flags.ok) return flags;
+    if (!flags.value.has('--team')) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'team tick requires --team'));
+    }
+    const workerMode = flags.value.get('--worker-mode') ?? 'headless';
+    if (workerMode !== 'interactive' && workerMode !== 'headless') {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'worker-mode must be interactive or headless'));
+    }
+    let maxParallel: number | undefined;
+    if (flags.value.has('--max-parallel')) {
+      maxParallel = Number(flags.value.get('--max-parallel'));
+      if (!Number.isSafeInteger(maxParallel) || maxParallel! < 1) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'max-parallel must be a positive integer'));
+      }
+    }
+    return ok({
+      kind: 'tick',
+      teamId: flags.value.get('--team')!,
+      workerMode,
+      maxParallel,
+    });
+  }
   return err(runtimeError('E_VALIDATOR_REJECTED', 'Unknown team command'));
+}
+
+function isLiveness(value: string): value is 'alive' | 'dead' | 'unknown' {
+  return value === 'alive' || value === 'dead' || value === 'unknown';
 }
 
 export interface TeamCommandOptions {
@@ -197,6 +312,91 @@ export async function teamCommand(
       return 1;
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-stopped', ...result.value })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'supervise') {
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    const result = await factory(options.context).superviseOnce(parsed.value.teamId);
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return 1;
+    }
+    stdout(`${JSON.stringify({ ok: true, kind: 'team-supervise-report', ...result.value })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'reclaim') {
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    const result = await factory(options.context).reclaimTask(
+      parsed.value.teamId,
+      parsed.value.taskId,
+      parsed.value.expectedRevision,
+      parsed.value.pane,
+      parsed.value.process,
+    );
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return result.error.code === 'E_RECLAIM_IDENTITY_UNPROVEN' || result.error.code === 'E_VALIDATOR_REJECTED'
+        ? 2
+        : 1;
+    }
+    stdout(`${JSON.stringify({ ok: true, kind: 'team-reclaimed', ...result.value })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'deliver') {
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    const result = await factory(options.context).deliverTask({
+      teamId: parsed.value.teamId,
+      taskId: parsed.value.taskId,
+      expectedRevision: parsed.value.expectedRevision,
+      claimToken: parsed.value.claimToken,
+      generation: parsed.value.generation,
+      worktreePath: parsed.value.worktreePath,
+    });
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return 1;
+    }
+    stdout(`${JSON.stringify({ ok: true, kind: 'team-delivered', ...result.value })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'tick') {
+    const factory = options.orchestratorFactory ?? defaultOrchestrator;
+    let orch = factory(options.context);
+    if (parsed.value.maxParallel !== undefined) {
+      orch = new TeamOrchestrator({
+        stateRoot: options.context.stateRoot,
+        workspaceRoot: options.context.workspaceRoot,
+        repoKey: options.context.repoKey,
+        workspaceKey: options.context.workspaceKey,
+        managedWorktreesRoot: path.join(options.context.stateRoot, 'managed-worktrees'),
+        tokenFactory: options.context.tokenFactory,
+        maxParallelWorkers: parsed.value.maxParallel,
+        workerHoldEntryPath: path.resolve(__dirname, 'worker-bootstrap.js'),
+      });
+    }
+    const result = await orch.tick(parsed.value.teamId, parsed.value.workerMode);
+    if (!result.ok) {
+      stderr(`${result.error.code}: ${result.error.message}\n`);
+      return 1;
+    }
+    stdout(`${JSON.stringify({
+      ok: true,
+      kind: 'team-tick',
+      teamId: result.value.teamId,
+      aggregateRevision: result.value.aggregateRevision,
+      started: result.value.started.map((worker) => ({
+        taskId: worker.taskId,
+        generation: worker.generation,
+        sessionName: worker.sessionName,
+        paneId: worker.paneId,
+        worktreePath: worker.worktreePath,
+        claimToken: worker.claimToken,
+      })),
+    })}\n`);
     return 0;
   }
 

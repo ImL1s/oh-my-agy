@@ -39,6 +39,10 @@ Usage:
   oma team start --manifest <file> [--worker-mode interactive|headless]
   oma team status --team <id>
   oma team stop --team <id>
+  oma team supervise --team <id>
+  oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead|alive|unknown --process dead|alive|unknown
+  oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
+  oma team tick --team <id> [--worker-mode headless|interactive] [--max-parallel <n>]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace]
   oma doctor [--json] [--no-strict-plugin]
