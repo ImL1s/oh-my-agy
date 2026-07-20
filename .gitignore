@@ -14,3 +14,8 @@ coverage/
 # workspace-local agent research dumps under .agents (keep hooks.json only)
 .agents/**
 !.agents/hooks.json
+
+# local research / scratch (not shipped)
+ORIGINAL_REQUEST.md
+research_report.md
+test_todo.json
