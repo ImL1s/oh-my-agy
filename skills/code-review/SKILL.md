@@ -1,17 +1,24 @@
 ---
 name: code-review
-description: "OMA merge-readiness gate — independent review artifact with APPROVE+CLEAR or REQUEST CHANGES"
+description: "In-session OMA merge-readiness gate — invoke /oh-my-agy:code-review; write APPROVE+CLEAR or REQUEST CHANGES under .agy/reviews HERE"
 argument-hint: "<change summary or ultragoal handoff path>"
 ---
 
-# code-review (OMA / Antigravity)
+# code-review (OMA / in-session)
+
+## You are already in the agent session
+
+When invoked via **`/oh-my-agy:code-review`** or this **code-review** skill (including as Autopilot Phase 4), treat **`$ARGUMENTS` as the change summary or ultragoal handoff path** and run the review **HERE**.
+
+- Do **not** require terminal `oma autopilot review` / SID / CID / revision to produce the gate.
+- Output is a **review artifact** under `.agy/reviews/`, not more feature code (unless fixing a small review-blocking bug you own in this session).
+- Canonical slash: **`/oh-my-agy:code-review`**.
 
 ## Purpose
 
-**Merge-readiness gate** after `ultragoal` implement+verify and before `ultraqa`. OMX / OMC code-reviewer analogue, Antigravity-native:
+**Merge-readiness gate** after `ultragoal` implement+verify and before `ultraqa`. OMX / OMC code-reviewer analogue, in-session:
 
-- You perform a structured review pass against the approved plan + fresh verify evidence.
-- Output is a **review artifact**, not more feature code (unless fixing a review-blocking bug you own in this session).
+- Structured review pass against the approved plan + fresh verify evidence.
 - Verdict drives Autopilot: clean → advance to `ultraqa`; dirty → return to `ralplan` with reason.
 
 Maps to Autopilot active phase `code-review` (legacy: `review`).
@@ -25,8 +32,8 @@ Maps to Autopilot active phase `code-review` (legacy: `review`).
 ## Do not use when
 
 - Implementation still incomplete → stay in `ultragoal` / `ralph`
-- Docs-only change with no code risk → may be light review, but still write a short artifact
 - User only wants a plan → `ralplan`
+- Docs-only change with no code risk → may be light review, but still write a short artifact
 
 ## Artifacts
 
@@ -79,42 +86,16 @@ When dirty:
 
 | Skill | Relationship |
 |-------|----------------|
-| `skills/ultragoal/SKILL.md` | Prior phase — implementation ledger + verify |
+| `skills/ultragoal/SKILL.md` · `/oh-my-agy:ultragoal` | Prior phase — implementation ledger + verify |
 | `skills/verify/SKILL.md` | Re-run or validate evidence if stale / missing |
-| `skills/ralplan/SKILL.md` | Target on `REQUEST CHANGES` / non-clean gate |
-| `skills/ultraqa/SKILL.md` | Next phase after `APPROVE+CLEAR` |
-| `skills/autopilot/SKILL.md` | Parent loop + CLI gates |
-
-## CLI ledger (outer)
-
-Wire review evidence into Autopilot:
-
-```bash
-# record review artifact
-oma autopilot handoff --session <id> --expected-revision <n> \
-  --key codeReview --path .agy/reviews/code-review-<slug>-verdict.json
-
-# submit review gate evidence (kind: code-review | review)
-oma autopilot review --session <id> --expected-revision <n> \
-  --evidence <path-to-review-evidence.json>
-
-# alias-style advance when using generic gate file
-oma autopilot advance --session <id> --expected-revision <n> \
-  --evidence <path-to-review-evidence.json>
-
-# non-clean: return to planning with reason
-oma autopilot return-ralplan --session <id> --expected-revision <n> \
-  --reason "<findings summary>"
-
-oma autopilot status --session <id>
-```
-
-Evidence file should reference the verdict JSON path and include `clean: true|false` consistent with the artifact. Do not call review "passed" if verdict is `REQUEST CHANGES`.
+| `skills/ralplan/SKILL.md` · `/oh-my-agy:ralplan` | Target on `REQUEST CHANGES` / non-clean gate |
+| `skills/ultraqa/SKILL.md` · `/oh-my-agy:ultraqa` | Next phase after `APPROVE+CLEAR` |
+| `skills/autopilot/SKILL.md` · `/oh-my-agy:autopilot` | Parent loop |
 
 ## Review checklist (minimum)
 
 - [ ] Diff matches approved plan (or plan was revised with recorded reason)
-- [ ] No TODO / `test.skip` / stub "implement later" presented as done
+- [ ] No TODO / `test.skip` / stub “implement later” presented as done
 - [ ] Tests cover new behavior and regressions; verify evidence is real
 - [ ] No secrets committed; no `exec` of shell strings in new tooling
 - [ ] Circuit-breaker / git safety: no `git reset --hard` / `git clean -fd`
@@ -122,17 +103,16 @@ Evidence file should reference the verdict JSON path and include `clean: true|fa
 - [ ] Public CLI / skill / docs updated if user-facing surface changed
 - [ ] Scope creep or silent feature drop called out
 
-## Steps
+## Steps (in-session)
 
-1. **Gather inputs** — plan path, ultragoal ledger/handoff, verify outputs, file list.
+1. **Gather inputs** — plan path, ultragoal ledger/handoff, verify outputs, file list (`$ARGUMENTS` if given).
 2. **Re-verify if needed** — if evidence is missing, stale, or untrusted, run `verify` again.
 3. **Structured review** — walk checklist; write findings with severity.
 4. **Decide verdict** — `APPROVE+CLEAR` only if no blockers/majors remain (nits may remain with explicit deferral).
 5. **Write artifacts** under `.agy/reviews/`.
-6. **CLI wire-up** — `handoff --key codeReview` + `oma autopilot review` (or `advance` with review evidence).
-7. **Branch on verdict**
-   - `APPROVE+CLEAR` → hand off to `ultraqa`
-   - `REQUEST CHANGES` → `return-ralplan` (or fix under ultragoal if tiny and in-scope, then re-review — do not skip the artifact)
+6. **Branch on verdict**
+   - `APPROVE+CLEAR` → hand off to `/oh-my-agy:ultraqa`
+   - `REQUEST CHANGES` → return to ralplan (or fix under ultragoal if tiny and in-scope, then re-review — do not skip the artifact)
 
 ## Verdict rules
 
@@ -141,18 +121,43 @@ Evidence file should reference the verdict JSON path and include `clean: true|fa
 | `APPROVE+CLEAR` | `true` | `ultraqa` phase |
 | `REQUEST CHANGES` | `false` | fix / `ralplan`; do not mark autopilot complete |
 
-Self-approval alone is not enough: the **artifact + CLI evidence** are the gate.
+Self-approval without the **written artifact** is not enough.
 
 ## Anti-patterns (forbidden)
 
 - Rubber-stamp APPROVE without reading diff / evidence
-- Approving with open blockers "to fix later"
+- Approving with open blockers “to fix later”
 - Implementing large new features inside the review skill without returning to plan
 - Claiming merge-ready when verify never ran
+- Blocking review on missing CLI session
 
 ## Final checklist
 
 - [ ] `.agy/reviews/…` markdown + verdict JSON written
 - [ ] Verdict is exactly `APPROVE+CLEAR` or `REQUEST CHANGES`
-- [ ] Autopilot `review` / handoff updated when session-bound
 - [ ] Non-clean path has `returnToRalplanReason` or explicit fix loop
+- [ ] Next step stated (ultraqa vs replan/fix)
+
+---
+
+## Appendix: optional outer ledger
+
+Only when session-bound Autopilot durability is in use:
+
+```bash
+oma autopilot handoff --session <id> --expected-revision <n> \
+  --key codeReview --path .agy/reviews/code-review-<slug>-verdict.json
+
+oma autopilot review --session <id> --expected-revision <n> \
+  --evidence <path-to-review-evidence.json>
+
+oma autopilot advance --session <id> --expected-revision <n> \
+  --evidence <path-to-review-evidence.json>
+
+oma autopilot return-ralplan --session <id> --expected-revision <n> \
+  --reason "<findings summary>"
+
+oma autopilot status --session <id>
+```
+
+Evidence must match the verdict (`clean: true|false`). Do not call review “passed” if verdict is `REQUEST CHANGES`.

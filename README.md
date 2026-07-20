@@ -47,35 +47,41 @@ OMA does **not** replace Antigravity.
 
 ## Quick start
 
-**Requirements:** Node.js **20+** · Antigravity CLI (`agy` on `PATH`, authenticated)
+### Primary UX (Claude Code / Grok — same habit as `/autopilot`)
 
-You need **all three**: `agy` (auth) + **plugin hooks** + **`oma` on PATH**.
+After install, **restart the host session** and type:
 
-### One-shot (recommended from a clone)
+```text
+/oh-my-agy:autopilot <your goal>
+```
+
+That is the OMA equivalent of Claude Code **`/autopilot`**.  
+We use a **namespaced** slash so it does **not** steal bare `/autopilot` from OMC when both are installed.
+
+Also: `/oh-my-agy:ralph`, `/oh-my-agy:ultrawork`, `/oh-my-agy:team`, …
+
+### One-shot install (clone)
 
 ```bash
 git clone https://github.com/ImL1s/oh-my-agy.git
 cd oh-my-agy
 ./scripts/install.sh
-# builds, symlinks oma/omy → ~/.local/bin, runs: oma setup
-oma doctor
+# build + PATH + oma setup (agy plugin + Claude/Grok slash surface)
+oma doctor --no-strict-plugin
+# restart Claude Code / Grok, then: /oh-my-agy:autopilot …
 ```
 
-### Manual (same steps)
+### Optional: Antigravity managed CLI ledger
+
+**Requirements:** Node **20+** · `agy` on `PATH` (for managed modes / hooks)
 
 ```bash
 npm ci && npm run build
 ln -sf "$(pwd)/dist/bin/oma.js" ~/.local/bin/oma
-ln -sf "$(pwd)/dist/bin/oma.js" ~/.local/bin/omy   # ensure ~/.local/bin is on PATH
-
-# Authority is "agy plugin" (singular), not "plugins"
-agy plugin validate .
-agy plugin install .
-agy plugin enable oh-my-agy
-# or one transaction:
-oma setup
-
-oma doctor
+oma setup                    # agy + slash hosts
+oma setup --host claude      # slash only
+oma setup --host agy         # agy plugin only
+oma autopilot start -- "…"   # durable SessionAggregate (optional)
 ```
 
 Optional project-local hooks (some hosts load `.agents/hooks.json` more reliably):
@@ -104,7 +110,7 @@ echo "@iml1s:registry=https://npm.pkg.github.com" >> ~/.npmrc
 npm i -g @iml1s/oh-my-agy@latest
 
 # B) Release tarball (no registry auth)
-npm i -g https://github.com/ImL1s/oh-my-agy/releases/download/v0.2.1/iml1s-oh-my-agy-0.2.1.tgz
+npm i -g https://github.com/ImL1s/oh-my-agy/releases/download/v0.2.2/iml1s-oh-my-agy-0.2.2.tgz
 
 oma setup
 oma doctor
@@ -116,25 +122,24 @@ oma doctor
 
 ## Recommended default flow
 
-When the task is non-trivial:
+When the task is non-trivial (**session-first**):
 
 ```text
-1. oma setup && oma skill list
-2. oma autopilot start -- "<goal>"     # phase=deep-interview (OMX 五階段)
-3. oma autopilot drive …               # inject current-phase skill into session
-4. handoff / advance / consensus       # deep-interview → ralplan → ultragoal → code-review → ultraqa
-5. review + qa evidence; production gate → completed
-6. (or) oma ralph|ultrawork -- "<task>"  # single-mode managed launch
-7. Stop hooks decide continue/allow
+1. Install once: ./scripts/install.sh   # or: oma setup
+2. Restart Claude Code / Grok
+3. /oh-my-agy:autopilot <goal>          # deep-interview → ralplan → ultragoal → code-review → ultraqa
+4. Stay in-session; write artifacts under .agy/
+5. Optional durable ledger (cross-session): oma autopilot start|drive|…
 ```
 
 **OMX-aligned Autopilot phases:** `deep-interview → ralplan → ultragoal → code-review → ultraqa`  
-Discover skills: `oma skill list` / `oma skill show autopilot`.
+Discover skills: host slash menu, or `oma skill list` / `oma skill show autopilot`.
 
 | If you need… | Use |
 |--------------|-----|
-| Persistent completion loop | `oma ralph -- "…"` |
-| Parallel / high-throughput mode | `oma ultrawork -- "…"` |
+| Full autonomous delivery | `/oh-my-agy:autopilot <goal>` |
+| Persistent single-task loop | `/oh-my-agy:ralph` or `oma ralph -- "…"` |
+| Parallel / high-throughput | `/oh-my-agy:ultrawork` or `oma ultrawork -- "…"` |
 | Read-only plan-style launch | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
 | Multi-agent first worker (v1) | `oma team start --manifest …` then `status` / `stop` |

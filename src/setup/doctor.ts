@@ -1,5 +1,6 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { resolveStateRoot } from '../runtime/state-root';
 import { RuntimeError } from '../runtime/errors';
@@ -53,9 +54,12 @@ export async function runDoctor(
   checks.push(checkNodeVersion());
   checks.push(checkPackageRoot(packageRoot, packageVersion));
   checks.push(checkPluginManifestVersion(packageRoot, packageVersion));
+  checks.push(checkClaudePluginManifest(packageRoot));
+  checks.push(checkSlashSkillSurface(packageRoot));
   checks.push(checkHooks(packageRoot));
   checks.push(checkAgyOnPath(agyCommand));
   checks.push(checkStateRoot());
+  checks.push(checkOmcAutopilotCollision());
 
   const adapter = input.adapter ?? defaultAgyListAdapter(agyCommand);
   const pluginCheck = await checkPluginRegistry(packageRoot, adapter, input.strictPlugin !== false);
@@ -122,10 +126,23 @@ function checkPluginManifestVersion(packageRoot: string, packageVersion: string)
         message: `plugin.json version ${raw.version ?? 'missing'} != package.json ${packageVersion}`,
       };
     }
+    // Claude slash surface 必須與 package 同步，否則 marketplace 裝到舊 manifest
+    const claudePath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+    if (fs.existsSync(claudePath)) {
+      const claude = JSON.parse(fs.readFileSync(claudePath, 'utf8')) as { version?: string };
+      if (claude.version !== packageVersion) {
+        return {
+          id: 'version_sync',
+          status: 'fail',
+          message:
+            `.claude-plugin/plugin.json version ${claude.version ?? 'missing'} != package.json ${packageVersion}`,
+        };
+      }
+    }
     return {
       id: 'version_sync',
       status: 'pass',
-      message: `package.json and plugin.json both ${packageVersion}`,
+      message: `package.json, plugin.json, and .claude-plugin all ${packageVersion}`,
       detail: { name: raw.name },
     };
   } catch (error) {
@@ -153,6 +170,93 @@ function checkHooks(packageRoot: string): DoctorCheckV1 {
     status: 'pass',
     message: 'PreInvocation + Stop compiled entrypoints present',
     detail: hooks.value,
+  };
+}
+
+function checkClaudePluginManifest(packageRoot: string): DoctorCheckV1 {
+  const manifest = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+  if (!fs.existsSync(manifest)) {
+    return {
+      id: 'claude_plugin_manifest',
+      status: 'fail',
+      message: 'Missing .claude-plugin/plugin.json (Claude Code slash skills will not register)',
+    };
+  }
+  try {
+    const raw = JSON.parse(fs.readFileSync(manifest, 'utf8')) as {
+      name?: string;
+      skills?: unknown;
+    };
+    if (raw.name !== 'oh-my-agy') {
+      return {
+        id: 'claude_plugin_manifest',
+        status: 'warn',
+        message: `Claude plugin name is ${raw.name ?? 'missing'} (expected oh-my-agy for /oh-my-agy:… slash)`,
+      };
+    }
+    if (!Array.isArray(raw.skills) || raw.skills.length === 0) {
+      return {
+        id: 'claude_plugin_manifest',
+        status: 'fail',
+        message: '.claude-plugin/plugin.json has empty skills[]',
+      };
+    }
+    return {
+      id: 'claude_plugin_manifest',
+      status: 'pass',
+      message: `Claude plugin manifest ok (${raw.skills.length} skills) → /oh-my-agy:autopilot`,
+      detail: { skills: raw.skills.length },
+    };
+  } catch (error) {
+    return {
+      id: 'claude_plugin_manifest',
+      status: 'fail',
+      message: '.claude-plugin/plugin.json unreadable',
+      detail: { cause: error instanceof Error ? error.message : String(error) },
+    };
+  }
+}
+
+function checkSlashSkillSurface(packageRoot: string): DoctorCheckV1 {
+  const autopilot = path.join(packageRoot, 'skills', 'autopilot', 'SKILL.md');
+  if (!fs.existsSync(autopilot)) {
+    return {
+      id: 'slash_skills',
+      status: 'fail',
+      message: 'skills/autopilot/SKILL.md missing',
+    };
+  }
+  const body = fs.readFileSync(autopilot, 'utf8');
+  const inSessionFirst = /already in (the )?agent session|IN-SESSION PRIMARY|slash/i.test(body);
+  return {
+    id: 'slash_skills',
+    status: inSessionFirst ? 'pass' : 'warn',
+    message: inSessionFirst
+      ? 'autopilot skill present (in-session primary language detected)'
+      : 'autopilot skill present but body may still be CLI-first — prefer slash-first wording',
+    detail: { path: autopilot },
+  };
+}
+
+function checkOmcAutopilotCollision(): DoctorCheckV1 {
+  const omcPaths = [
+    path.join(os.homedir(), '.claude', 'skills', 'autopilot', 'SKILL.md'),
+    path.join(os.homedir(), '.claude', 'plugins', 'cache', 'omc'),
+  ];
+  const found = omcPaths.filter((p) => fs.existsSync(p));
+  if (found.length === 0) {
+    return {
+      id: 'slash_collision',
+      status: 'pass',
+      message: 'No obvious OMC bare /autopilot skill at ~/.claude/skills/autopilot',
+    };
+  }
+  return {
+    id: 'slash_collision',
+    status: 'warn',
+    message:
+      'OMC/compat autopilot skill may own bare /autopilot — use /oh-my-agy:autopilot for OMA',
+    detail: { found },
   };
 }
 

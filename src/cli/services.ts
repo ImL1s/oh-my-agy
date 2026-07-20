@@ -180,25 +180,63 @@ export function createDefaultServices(
     },
     async setupCommand(argv) {
       const global = !argv.includes('--workspace');
-      const state = options.stateRoot
-        ? ok({ path: options.stateRoot, source: 'environment' as const })
-        : resolveStateRoot({ create: true });
-      if (!state.ok) {
-        stderr(`${state.error.code}: ${state.error.message}\n`);
-        return 1;
+      const { parseSetupHosts, installSlashHosts } = await import('../setup/host-install');
+      const hosts = parseSetupHosts(argv);
+      if (hosts.length === 0) {
+        stderr('Invalid --host value. Use: all | agy | claude | grok\n');
+        return 2;
       }
-      const adapter = options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand);
-      const transaction = new PluginSetupTransaction({
-        packageRoot,
-        stateRoot: state.value.path,
-        adapter,
-      });
-      const result = await transaction.run();
-      if (!result.ok) {
-        stderr(`${result.error.code}: ${result.error.message}\n`);
-        return 1;
+      const runAgy = hosts.includes('all') || hosts.includes('agy');
+      const runSlash = hosts.includes('all')
+        || hosts.includes('claude')
+        || hosts.includes('grok');
+
+      let agyResult: unknown = null;
+      if (runAgy) {
+        const state = options.stateRoot
+          ? ok({ path: options.stateRoot, source: 'environment' as const })
+          : resolveStateRoot({ create: true });
+        if (!state.ok) {
+          stderr(`${state.error.code}: ${state.error.message}\n`);
+          return 1;
+        }
+        const adapter = options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand);
+        const transaction = new PluginSetupTransaction({
+          packageRoot,
+          stateRoot: state.value.path,
+          adapter,
+        });
+        const result = await transaction.run();
+        if (!result.ok) {
+          stderr(`${result.error.code}: ${result.error.message}\n`);
+          return 1;
+        }
+        agyResult = { ...result.value, mode: global ? 'global' : 'workspace' };
       }
-      stdout(`${JSON.stringify({ ...result.value, mode: global ? 'global' : 'workspace' }, null, 2)}\n`);
+
+      let slashResult: unknown = null;
+      if (runSlash) {
+        const slashHosts = hosts.includes('all')
+          ? (['claude', 'grok'] as const)
+          : hosts.filter((h): h is 'claude' | 'grok' => h === 'claude' || h === 'grok');
+        const installed = installSlashHosts(packageRoot, [...slashHosts]);
+        if (!installed.ok) {
+          stderr(`${installed.error.code}: ${installed.error.message}\n`);
+          return 1;
+        }
+        slashResult = installed.value;
+      }
+
+      stdout(`${JSON.stringify({
+        agy: agyResult,
+        slashHosts: slashResult,
+        primaryUx: 'session slash /oh-my-agy:autopilot (not terminal-first)',
+        next: [
+          'Restart Claude Code / Grok session',
+          'Type /oh-my-agy:autopilot <goal>',
+          'oma doctor --no-strict-plugin',
+        ],
+      }, null, 2)}\n`);
       return 0;
     },
     async doctorCommand(argv) {

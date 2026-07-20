@@ -7,6 +7,9 @@ dist/
 .omc/
 .agy/
 .agy_sandbox_*/
+# project-local slash skill symlinks created by `oma setup` (sources live in skills/)
+.claude/
+.grok/
 *.log
 .DS_Store
 coverage/

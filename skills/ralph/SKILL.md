@@ -1,26 +1,34 @@
 ---
 name: ralph
-description: "OMA persistence loop until PRD stories pass with verification evidence"
+description: "In-session OMA persistence loop — invoke /oh-my-agy:ralph; keep going until PRD stories pass with verify evidence (CLI optional)"
 argument-hint: "<task description>"
 ---
 
-# ralph (OMA / Antigravity)
+# ralph (OMA / in-session)
+
+## You are already in the agent session
+
+When invoked via **`/oh-my-agy:ralph`** or this **ralph** skill, treat **`$ARGUMENTS` as the task** and run the persistence loop **HERE** until stories pass with verification evidence.
+
+- Do **not** require `oma ralph -- …` / terminal / SID as the default path.
+- Outer `oma ralph` is an **optional** managed launch (see [Appendix](#appendix-optional-oma-cli)); it is not required to start.
+- Canonical slash: **`/oh-my-agy:ralph`**.
 
 ## Purpose
 
-Self-referential **persistence loop** until work is actually done. Sibling of OMC/OMX Ralph, adapted for Antigravity:
+Self-referential **persistence loop** until work is actually done. Sibling of OMC/OMX Ralph:
 
-- Outer launch: `oma ralph -- <task>` (managed directive + skill protocol)
-- Inner loop: you keep going until stories pass + verify skill is satisfied
+- Inner loop (primary): you keep going in this session until stories pass + verify skill is satisfied
+- Outer launch (optional): `oma ralph -- <task>` for managed directive + skill protocol
 
 ## Use when
 
-- User says ralph / don't stop / keep going until done / must complete
+- User invokes `/oh-my-agy:ralph` or says ralph / don't stop / keep going until done / must complete
 - Work needs story tracking and anti-premature-stop
 
 ## Do not use when
 
-- Full product-from-idea pipeline → `autopilot`
+- Full product-from-idea pipeline → `/oh-my-agy:autopilot`
 - Pure parallel fan-out without persistence → `ultrawork`
 - Read-only research → `search`
 
@@ -48,11 +56,11 @@ Schema (minimal):
 }
 ```
 
-**Startup gate:** replace any generic criteria ("implementation is complete") with task-specific criteria before coding.
+**Startup gate:** replace any generic criteria (“implementation is complete”) with task-specific criteria before coding.
 
-## Steps
+## Steps (in-session)
 
-1. **Init PRD** — refine stories + acceptance criteria.
+1. **Init PRD** — refine stories + acceptance criteria from `$ARGUMENTS`.
 2. **Pick next story** — highest priority with `passes: false`.
 3. **Implement** — only that story; record files touched.
 4. **Verify story** — for each criterion, produce fresh evidence.
@@ -63,10 +71,11 @@ Schema (minimal):
 
 ## Anti-patterns (forbidden)
 
-- Claiming done because code "looks good"
+- Claiming done because code “looks good”
 - Deleting/skipping tests to go green
 - Stopping after an intermediate approval without final verify
 - Silent scope reduction
+- Telling the user to open a terminal and run `oma ralph` before working
 
 ## Stop conditions
 
@@ -79,4 +88,16 @@ Schema (minimal):
 - [ ] All PRD stories `passes: true`
 - [ ] Acceptance criteria are specific (not boilerplate)
 - [ ] Fresh build/test evidence for the full set
-- [ ] Progress log updated
+- [ ] Progress log updated under `.agy/ralph/`
+
+---
+
+## Appendix: optional `oma` CLI
+
+Use only when the user wants a managed outer launch:
+
+```bash
+oma ralph -- "<task description>"
+```
+
+Managed binding injects skill protocol when configured. The in-session PRD under `.agy/ralph/` remains the progress source of truth for this loop.

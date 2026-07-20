@@ -22,7 +22,8 @@ describe('Antigravity package surface', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     expect(pkg.scripts.prepack).not.toMatch(/npm\s+pack|test:package/);
     expect(pkg.files).toEqual(expect.arrayContaining([
-      'dist/bin', 'dist/src', 'plugin.json', 'hooks.json', 'skills', 'rules', 'LICENSE',
+      'dist/bin', 'dist/src', 'plugin.json', 'hooks.json', '.claude-plugin',
+      'skills', 'rules', 'LICENSE',
     ]));
     expect(pkg.license).toBe('MIT');
     expect(pkg.engines?.node).toMatch(/>=\s*20/);
@@ -34,5 +35,22 @@ describe('Antigravity package surface', () => {
     expect(plugin.version).toBe(pkg.version);
     expect(plugin.name).toBe('oh-my-agy');
   });
+
+  test('Claude slash plugin surface ships with namespaced skills', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    const claude = JSON.parse(
+      fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'),
+    ) as { name?: string; version?: string; skills?: string[] };
+    const marketplace = JSON.parse(
+      fs.readFileSync(path.join(root, '.claude-plugin', 'marketplace.json'), 'utf8'),
+    );
+    expect(claude.name).toBe('oh-my-agy');
+    expect(claude.version).toBe(pkg.version);
+    expect(Array.isArray(claude.skills)).toBe(true);
+    expect(claude.skills!.length).toBeGreaterThanOrEqual(5);
+    expect(claude.skills).toEqual(expect.arrayContaining(['./skills/autopilot/']));
+    expect(marketplace).toBeTruthy();
+  });
 });
+
 

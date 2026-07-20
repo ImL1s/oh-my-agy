@@ -1,7 +1,7 @@
 {
   "name": "@iml1s/oh-my-agy",
-  "version": "0.2.1",
-  "description": "OMA — multi-agent orchestration for Google Antigravity CLI (managed modes, exact_env hooks, Autopilot/Team)",
+  "version": "0.2.2",
+  "description": "OMA — slash-first session skills (/oh-my-agy:autopilot) + optional oma CLI ledger for Antigravity",
   "main": "dist/bin/oma.js",
   "bin": {
     "oma": "dist/bin/oma.js",
@@ -12,6 +12,7 @@
     "dist/src",
     "plugin.json",
     "hooks.json",
+    ".claude-plugin",
     "skills",
     "rules",
     "assets",

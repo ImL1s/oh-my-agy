@@ -36,6 +36,12 @@ describe('oma doctor', () => {
     expect(report.value.checks.find((c) => c.id === 'hooks')?.status).toBe('pass');
     expect(report.value.checks.find((c) => c.id === 'version_sync')?.status).toBe('pass');
     expect(report.value.checks.find((c) => c.id === 'plugin_registry')?.status).toBe('pass');
+    expect(report.value.checks.find((c) => c.id === 'claude_plugin_manifest')?.status).toBe('pass');
+    expect(report.value.checks.find((c) => c.id === 'slash_skills')?.status).toBe('pass');
+    // OMC 可能已安裝 → pass 或 warn 皆可接受
+    const collision = report.value.checks.find((c) => c.id === 'slash_collision');
+    expect(collision).toBeDefined();
+    expect(['pass', 'warn']).toContain(collision!.status);
   });
 
   test('fails closed on inactive plugin when strict', async () => {

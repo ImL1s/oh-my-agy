@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# OMA one-shot local install: build + PATH hint + agy plugin setup
+# OMA install: build + PATH + multi-host setup (agy + Claude/Grok slash skills)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> oh-my-agy install (repo root: $ROOT)"
+echo "    primary UX: session slash /oh-my-agy:autopilot"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "error: node not found (need >=20)" >&2
@@ -38,19 +39,22 @@ if ! echo ":$PATH:" | grep -q ":$BIN_DIR:"; then
   echo "warn: add to PATH: export PATH=\"$BIN_DIR:\$PATH\"" >&2
 fi
 
-if command -v agy >/dev/null 2>&1; then
-  echo "==> oma setup (agy plugin validate/install/enable)"
-  if command -v oma >/dev/null 2>&1; then
-    oma setup || node "$ROOT/dist/bin/oma.js" setup
-  else
-    node "$ROOT/dist/bin/oma.js" setup
-  fi
-  echo "==> oma doctor"
-  node "$ROOT/dist/bin/oma.js" doctor || true
-else
-  echo "warn: agy not on PATH — skip plugin setup. Install Antigravity CLI then run: oma setup" >&2
+OMA_BIN=node
+if command -v oma >/dev/null 2>&1; then
+  OMA_BIN=oma
 fi
 
+echo "==> multi-host setup (agy + claude/grok slash surface)"
+if [[ "$OMA_BIN" == "oma" ]]; then
+  oma setup || node "$ROOT/dist/bin/oma.js" setup
+else
+  node "$ROOT/dist/bin/oma.js" setup
+fi
+
+echo "==> doctor"
+node "$ROOT/dist/bin/oma.js" doctor --no-strict-plugin || true
+
 echo "==> done"
-echo "    try: oma --help"
-echo "    managed: oma ralph -- \"your task\""
+echo "    PRIMARY: restart Claude Code / Grok, then:  /oh-my-agy:autopilot <goal>"
+echo "    optional ledger: oma autopilot start -- \"<goal>\""
+echo "    help: oma --help | oma skill list"

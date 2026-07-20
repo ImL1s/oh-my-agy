@@ -1,0 +1,16 @@
+{
+  "name": "oh-my-agy",
+  "owner": {
+    "name": "ImL1s"
+  },
+  "metadata": {
+    "description": "Local marketplace entry for oh-my-agy slash skills"
+  },
+  "plugins": [
+    {
+      "name": "oh-my-agy",
+      "source": "./",
+      "description": "OMA slash-first autopilot and related session skills (optional oma CLI ledger)"
+    }
+  ]
+}

@@ -96,6 +96,18 @@
 *   **內層監聽者 (`src/hooks/` / Native Plugins)**：註冊為 `agy` 內部的原生插件，在 `PreToolUse` 事件中實現規劃寫入鎖，並在 `工作階段閒置` 事件中檢查未完成任務。
 *   **非同步狀態總線**：內外層不進行強耦合的跨程序通訊（IPC），而是透過共享狀態帳本（實體儲存於工作區外的全域 App Data 目錄 / 平台 state root，或加入 `.gitignore` 的工作區外路徑）進行非同步、事件驅動的通訊，降低系統複雜度。
 
+### 3. Dual-track UX (session slash first)
+
+User-facing workflow priority (does not change Hybrid process architecture above):
+
+| Priority | Surface | Role |
+| :--- | :--- | :--- |
+| **Primary** | Session slash `/oh-my-agy:<skill>` | Happy path inside Claude Code / Grok / Antigravity host. Agent runs the skill protocol **in-session** (e.g. `/oh-my-agy:autopilot`). No terminal or SID required to start. Workspace artifacts under `.agy/`. |
+| **Secondary** | Optional `oma` CLI durable ledger | Cross-session resume, managed binding (`OMA_SESSION_ID` / launch nonce / generation), autopilot FSM drive/advance/handoff, team tmux lifecycle. Use when the user wants durability — never as a gate for in-session work. |
+| **Tertiary** | `agy` managed plugin hooks | PreInvocation / Stop and related hooks from the plugin surface; skill protocol injection on managed launch (`<<<OMA_SKILL_PROTOCOL>>>`). Complements slash + CLI; does not replace in-session skill docs under `skills/*/SKILL.md`. |
+
+Canonical slash form is namespaced: **`/oh-my-agy:<name>`** (bare `/autopilot` may belong to OMC/host if present). Skill bodies lead with in-session steps; `oma …` commands live in skill appendices only.
+
 ---
 
 ## 三、 模組架構 (Module Architecture)

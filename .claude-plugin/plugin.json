@@ -1,0 +1,35 @@
+{
+  "name": "oh-my-agy",
+  "version": "0.2.2",
+  "description": "OMA — session slash skills for autopilot/ralph/team (Claude Code + Grok). Optional oma CLI durable ledger for Antigravity.",
+  "author": {
+    "name": "ImL1s"
+  },
+  "repository": "https://github.com/ImL1s/oh-my-agy",
+  "homepage": "https://github.com/ImL1s/oh-my-agy#readme",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "antigravity",
+    "autopilot",
+    "oma",
+    "slash-skills",
+    "orchestration"
+  ],
+  "skills": [
+    "./skills/autopilot/",
+    "./skills/deep-interview/",
+    "./skills/ralplan/",
+    "./skills/ultragoal/",
+    "./skills/code-review/",
+    "./skills/ultraqa/",
+    "./skills/ralph/",
+    "./skills/ultrawork/",
+    "./skills/search/",
+    "./skills/team/",
+    "./skills/cancel/",
+    "./skills/verify/",
+    "./skills/setup/",
+    "./skills/oma-runtime/"
+  ]
+}

@@ -50,8 +50,12 @@ Usage:
   oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
   oma team tick --team <id> [--worker-mode headless|interactive] [--max-parallel <n>]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
-  oma setup [--global|--workspace]
+  oma setup [--global|--workspace] [--host all|agy|claude|grok]
   oma doctor [--json] [--no-strict-plugin]
+
+Primary UX (Claude Code / Grok session):
+  /oh-my-agy:autopilot <goal>
+  (after: oma setup — installs slash skills; restart host session)
 `;
 
 export async function runCli(
