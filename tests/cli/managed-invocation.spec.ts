@@ -108,6 +108,7 @@ describe('managed invocation', () => {
         OMA_WORKSPACE_PATH: '/workspace',
         OMA_PACKAGE_ROOT: '/pkg/oh-my-agy',
         OMA_STATE_ROOT: '/state/oma',
+        OMA_MANAGED_MODE: mode,
       }),
     }));
     expect(transaction.recordOutcome).toHaveBeenCalledTimes(1);

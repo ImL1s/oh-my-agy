@@ -8,6 +8,7 @@ import {
 import { OperationIdentity, ProcessIdentity, Result, err, ok } from '../runtime/types';
 import { ManagedMode, ModeDirectiveRenderer } from '../modes/directives';
 import { buildModeCommand } from '../modes/commands';
+import { appendSkillProtocol } from '../modes/skill-protocol';
 import { guardDangerousArgv } from './dangerous-launch';
 import { wrapManagedSearchLaunch } from '../runtime/sandbox';
 import * as path from 'path';
@@ -117,12 +118,22 @@ export class ManagedInvocationService {
       new ModeDirectiveRenderer(this.nonceFactory),
     );
     if (!command.ok) return command;
+    // session 內 skill protocol：附加在 OMA_TASK 分隔符外，讓 agy agent 必讀 workflow
+    const directiveWithSkill = appendSkillProtocol(
+      command.value.directive,
+      mode,
+      this.packageRoot,
+    );
+    const argvWithSkill = Object.freeze([
+      ...command.value.argv.slice(0, -1),
+      directiveWithSkill,
+    ]);
     const prepared = await this.transaction.prepareLaunch({
       mode,
       taskDigest: crypto.createHash('sha256').update(taskBytes).digest('hex'),
     });
     if (!prepared.ok) return prepared;
-    let argv = command.value.argv;
+    let argv: readonly string[] = argvWithSkill;
     let launchCommand = this.agyCommand;
     if (mode === 'search') {
       const plansDir = path.join(prepared.value.cwd, '.agy', 'plans');
@@ -131,7 +142,7 @@ export class ManagedInvocationService {
       launchCommand = sandboxed.value.command;
       argv = sandboxed.value.argv;
     }
-    return this.runManaged(prepared.value, argv, launchCommand, mode === 'search');
+    return this.runManaged(prepared.value, argv, launchCommand, mode === 'search', mode);
   }
 
   async resumeConversation(
@@ -153,7 +164,13 @@ export class ManagedInvocationService {
         message: 'Resume transaction did not return the exact conversation and next generation',
       });
     }
-    return this.runManaged(prepared.value, ['--conversation', conversationId], this.agyCommand, false);
+    return this.runManaged(
+      prepared.value,
+      ['--conversation', conversationId],
+      this.agyCommand,
+      false,
+      undefined,
+    );
   }
 
   async passThrough(argv: readonly string[]): Promise<Result<ProcessOutcome, RuntimeError>> {
@@ -175,6 +192,7 @@ export class ManagedInvocationService {
     argv: readonly string[],
     command: string = this.agyCommand,
     preferHeadless = false,
+    managedMode?: ManagedMode,
   ): Promise<Result<ProcessOutcome, RuntimeError>> {
     // defense-in-depth：managed final argv 亦過危險旗標 gate
     const guarded = await guardDangerousArgv(argv, {
@@ -188,6 +206,7 @@ export class ManagedInvocationService {
       OMA_LAUNCH_NONCE: prepared.launchNonce,
       OMA_INVOCATION_GENERATION: String(prepared.invocationGeneration),
     };
+    if (managedMode !== undefined) env.OMA_MANAGED_MODE = managedMode;
     // hook cwd ≠ workspace；必須把 workspace / package / state 顯式注入 child env
     const workspacePath = this.workspacePath ?? prepared.cwd;
     if (workspacePath) env.OMA_WORKSPACE_PATH = workspacePath;

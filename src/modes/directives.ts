@@ -170,9 +170,11 @@ export class ModeDirectiveRenderer {
     const match = start.match(/^<<<OMA_TASK nonce=([a-f0-9]{32}) bytes=(\d+) sha256=([a-f0-9]{64})>>>$/);
     if (match === null) return invalid('Directive start delimiter is invalid');
     const [, nonce, byteLengthText, expectedDigest] = match;
-    const suffix = `\n<<<OMA_TASK_END nonce=${nonce}>>>`;
-    if (!rest.endsWith(suffix)) return invalid('Directive end delimiter is missing or mismatched');
-    const task = Buffer.from(rest.slice(firstNewline + 1, -suffix.length), 'utf8');
+    // 允許 TASK_END 之後附加 skill protocol（OMA_SKILL_PROTOCOL）；不要求整段 endsWith
+    const endMarker = `\n<<<OMA_TASK_END nonce=${nonce}>>>`;
+    const endAt = rest.indexOf(endMarker, firstNewline);
+    if (endAt < 0) return invalid('Directive end delimiter is missing or mismatched');
+    const task = Buffer.from(rest.slice(firstNewline + 1, endAt), 'utf8');
     if (
       task.includes(Buffer.from(nonce))
       || task.length !== Number(byteLengthText)

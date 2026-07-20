@@ -79,8 +79,10 @@ export async function handlePreInvocation(
     writeHookDebug('preinvocation.allow_diagnostic', bound.error);
     return failOpen();
   }
+  // managed exact_env 綁定成功時注入 session skill 提醒（OMC SessionStart / skill-injector 對應）
+  const injectSteps = buildManagedSkillInjectSteps(env, bound.session.sessionId);
   const result: PreInvocationHookResult = {
-    injectSteps: [],
+    injectSteps,
     decision: 'allow',
     ok: true,
     bindingRoute: 'exact_env',
@@ -88,6 +90,33 @@ export async function handlePreInvocation(
   };
   writeHookDebug('preinvocation.bound', result);
   return result;
+}
+
+/**
+ * 設計概念映射：OMC session-start / skill-injector — 在 managed 工作階段提醒 agent 讀取 plugin skills。
+ * host 若不認識 injectSteps 結構會忽略；fail-open。
+ */
+function buildManagedSkillInjectSteps(
+  env: Readonly<NodeJS.ProcessEnv>,
+  sessionId: string,
+): Array<Record<string, unknown>> {
+  const packageRoot = env.OMA_PACKAGE_ROOT?.trim();
+  const mode = env.OMA_MANAGED_MODE?.trim() || 'managed';
+  const skillHint = packageRoot
+    ? `Read OMA skill under ${packageRoot}/skills/ (ralph|ultrawork|search|autopilot|team|cancel|verify) and follow it until verified complete.`
+    : 'Follow OMA managed skill protocols (ralph/ultrawork/search/autopilot/team). Prefer `oma` CLI for team/autopilot state; never claim complete without verification evidence.';
+  return [
+    {
+      type: 'text',
+      text: [
+        '[OMA SESSION SKILL]',
+        `sessionId=${sessionId}`,
+        `mode_hint=${mode}`,
+        skillHint,
+        'CLI alone is not completion. Execute the skill checklist with fresh evidence.',
+      ].join('\n'),
+    },
+  ];
 }
 
 function failOpen(): PreInvocationHookResult {

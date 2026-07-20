@@ -16,7 +16,10 @@
 **Orchestration layer for Google Antigravity CLI (`agy`).**  
 Sibling of [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (OMC), [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) (OMX), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (OmO), and [oh-my-grok](https://github.com/ImL1s/oh-my-grok) (OMG) — same *orchestration idea*, **Antigravity-native** runtime.
 
-_Don't learn every `agy` flag. Use `oma` / `omy`: launch managed → bind exact_env → Stop continue until progress or trip._
+_Don't learn every `agy` flag. Use `oma` / `omy`: launch managed → bind exact_env → **session skills** drive the loop → Stop continue until progress or trip._
+
+> **CLI vs session skills:** `oma ralph|ultrawork|search|autopilot|team` starts/binds work.  
+> Inside the session, agents must follow plugin skills under `skills/` (injected as `OMA_SKILL_PROTOCOL` on managed launches). This matches OMC/OMX: outer CLI + inner skill bodies.
 
 > **Unofficial.** Not affiliated with Google / Antigravity. Requires a working, authenticated `agy` on your `PATH`.
 
@@ -31,6 +34,7 @@ OMA does **not** replace Antigravity.
 | **`agy`** | Agent work (TUI, tools, conversation) |
 | **Plugin + hooks** | `PreInvocation` / `Stop` lifecycle entrypoints |
 | **`oma` CLI** | Managed modes, Autopilot FSM, Team, setup |
+| **Session skills** | Plugin `skills/*` workflows (autopilot/ralph/ultrawork/…) — **in-session** protocol (OMC/OMX-style) |
 | **State root** | Session aggregate, binding, processedStops (owner-only) |
 
 | Component | Role |
