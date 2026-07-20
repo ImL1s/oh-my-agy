@@ -196,6 +196,7 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 - Managed binding requires exact env; ordinary pass-through strips binding env.
 - Launch nonce is capability material — debug logs store fingerprint only, not plaintext.
 - Do not modify `AGENTS.md` without an intentional merge policy.
+- **Dangerous launch gate:** argv tokens `--madmax` / `--yolo` require TTY confirmation (`yes`) before spawning `agy`. Non-TTY fails closed unless you pass `--i-understand-dangerous-launch` (stripped before forward). Managed form `oma ralph --madmax -- task` is **rejected** (no silent drop of tokens before `--`).
 
 ---
 

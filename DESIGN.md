@@ -24,7 +24,7 @@
 
 #### 設計藍圖 (Design Blueprint / Future Plans)
 以下進階功能目前在 TypeScript 程式碼庫中尚未實作，但在 E2E 測試中透過模擬（mock-based）環境與輸出通過了驗證：
-*   **confirmDangerousLaunch**：在 CLI 進入點偵測到 `--madmax` 或 `--yolo` 等高風險標記時，啟動二次確認彈出視窗以防止危險操作。
+*   **confirmDangerousLaunch（已實作）**：CLI 偵測 argv exact token `--madmax` / `--yolo`；TTY 需輸入 `yes`，非 TTY 需 `--i-understand-dangerous-launch`；掛載於 structured pass-through 與 legacy magic/pass-through。managed mode 與 `--` 之間未知 token 改為 `E_DIRECTIVE_INVALID`（不再靜默丟棄）。
 *   **Git Worktree 實體路徑分配**：為多 Agent 並行協同開發（如 Conductor 模式）在 `.agy/team/{team}/worktrees/{worker}` 目錄下為每個 Worker 自動建立與分配獨立的 Git Worktree 隔離路徑。
 *   **髒狀態防護與清理阻擋器 (Dirty Blockers)**：在清理工作區前執行 `git status --porcelain` 進行髒狀態判定，若有未提交的程式碼變更，則將其列為 `blockers` 並拒絕清理以保障安全。
 *   **排它租約與衝突解決 Saga (AuthorityLease & Conflict Resolution Saga)**：當 Looks 視覺微調與 Works 邏輯開發並行修改同一個高度耦合檔案時， Looks 需獲取並定期更新 `AuthorityLease`。若產生衝突，自動啟動 Conflict Resolution Saga 進行分支拆解。

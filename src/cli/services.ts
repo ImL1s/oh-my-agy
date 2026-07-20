@@ -14,6 +14,7 @@ import { RuntimeContext } from '../team/types';
 import { ManagedInvocationService, ordinaryEnvironment } from './managed-invocation';
 import { RuntimeManagedTransactionAdapter } from './runtime-adapter';
 import { CliServices } from './application';
+import { guardDangerousArgv } from './dangerous-launch';
 
 export interface DefaultServicesOptions {
   packageRoot?: string;
@@ -24,6 +25,11 @@ export interface DefaultServicesOptions {
   pluginAdapter?: PluginCommandAdapter;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
+  /** 測試注入：危險旗標確認 */
+  dangerousLaunch?: {
+    isTTY?: boolean;
+    ask?: () => Promise<string>;
+  };
 }
 
 /**
@@ -44,6 +50,7 @@ export function createDefaultServices(
   return {
     version,
     async launchMode(mode, task) {
+      // managed mode 本身不帶 --madmax；仍防 task 字串外的未來 argv 擴充
       const managed = buildManagedService({
         packageRoot,
         cwd,
@@ -56,9 +63,15 @@ export function createDefaultServices(
       return managed.value.launchMode(mode, task);
     },
     async passThrough(argv) {
+      const guarded = await guardDangerousArgv(argv, {
+        isTTY: options.dangerousLaunch?.isTTY ?? Boolean(process.stdin.isTTY),
+        ask: options.dangerousLaunch?.ask,
+        stderr,
+      });
+      if (!guarded.ok) return guarded;
       return runner.foregroundInteractive(
         agyCommand,
-        argv,
+        [...guarded.value],
         { operationId: 'passthrough', ownerNonce: 'ordinary' },
         { env: ordinaryEnvironment(process.env) },
       );
