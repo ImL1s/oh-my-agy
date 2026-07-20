@@ -321,6 +321,63 @@ export class SessionLocator {
     }
   }
 
+  /**
+   * 為既有 Autopilot session 首次 drive 裝填 launch_pending + 明文 nonce。
+   * 若 conversation 已綁定則應改走 prepareResume。
+   */
+  async armExistingSessionForDrive(input: {
+    sessionId: string;
+    conversationId: string;
+    expectedRevision: number;
+    workspacePath: string;
+    ttlMs?: number;
+  }): Promise<Result<PendingSessionV1, RuntimeError>> {
+    const index = this.readConversationIndex(input.conversationId);
+    if (index.ok) {
+      return err(runtimeError(
+        'E_BINDING_CONFLICT',
+        'Conversation already indexed; use prepareResume instead of armExistingSessionForDrive',
+      ));
+    }
+    const launchNonce = this.nonceFactory();
+    const owner = this.resumeOwnerFactory();
+    const store = this.aggregateStore(input.sessionId);
+    const updated = await store.compareAndSwap(input.expectedRevision, (snapshot) => {
+      if (snapshot.autopilot.terminal !== null
+        || ['cancelled', 'failed', 'tripped'].includes(snapshot.autopilot.phase)) {
+        throw new Error('Terminal Autopilot sessions cannot be driven');
+      }
+      if (snapshot.binding.state === 'bound' && snapshot.binding.conversationId === input.conversationId) {
+        throw new Error('Session already bound; use prepareResume');
+      }
+      return {
+        ...snapshot,
+        revision: input.expectedRevision + 1,
+        binding: {
+          ...snapshot.binding,
+          conversationId: input.conversationId,
+          launchNonceDigest: sha256(launchNonce),
+          state: 'launch_pending' as const,
+          bindingRoute: null,
+          owner,
+          expiresAtMs: this.now() + (input.ttlMs ?? this.resumeTtlMs),
+          workspacePath: input.workspacePath || snapshot.binding.workspacePath,
+          activeInvocationGeneration: Math.max(1, snapshot.binding.activeInvocationGeneration || 1),
+        },
+      };
+    });
+    if (!updated.ok) {
+      const current = store.read();
+      if (current.ok && ['cancelled', 'failed', 'tripped'].includes(current.value.autopilot.phase)) {
+        return err(runtimeError('E_TERMINAL_STATE', 'Terminal sessions cannot be driven'));
+      }
+      return updated;
+    }
+    const pending = aggregateToPending(updated.value, launchNonce);
+    this.writeLaunchAudit(pending, 'launch_prepared');
+    return ok(pending);
+  }
+
   async prepareResume(
     conversationId: string,
     expectedRevision: number,

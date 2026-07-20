@@ -54,6 +54,35 @@ describe('Structured CLI e2e baseline', () => {
     }
   }, 30000);
 
+  test('TC-S-03c: autopilot start then drive binds and spawns mock agy', async () => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-e2e-drive-'));
+    fs.chmodSync(stateRoot, 0o700);
+    try {
+      const start = await runOma(
+        ['autopilot', 'start', '--', 'drive e2e goal'],
+        { OMA_STATE_ROOT: stateRoot, OMA_MANAGED_HEADLESS: '1' },
+      );
+      expect(start.code).toBe(0);
+      const body = JSON.parse(start.stdout);
+      const drive = await runOma(
+        [
+          'autopilot', 'drive',
+          '--session', body.sessionId,
+          '--conversation', 'conv-e2e-drive-1',
+          '--expected-revision', String(body.revision),
+        ],
+        { OMA_STATE_ROOT: stateRoot, OMA_MANAGED_HEADLESS: '1' },
+      );
+      expect(drive.code).toBe(0);
+      const driven = JSON.parse(drive.stdout);
+      expect(driven.ok).toBe(true);
+      expect(driven.kind).toBe('autopilot-driven');
+      expect(driven.process.code).toBe(0);
+    } finally {
+      fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+  }, 45000);
+
   test('TC-S-03b: autopilot resume is ledger-only (no crash)', async () => {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-e2e-ap2-'));
     try {

@@ -4,8 +4,8 @@ import * as path from 'path';
 import { AutopilotRuntime } from '../autopilot/runtime';
 import { ProcessRunner } from '../runtime/process';
 import { resolveStateRoot, resolveWorkspaceIdentity } from '../runtime/state-root';
-import { Result, ok } from '../runtime/types';
-import { RuntimeError } from '../runtime/errors';
+import { Result, err, ok } from '../runtime/types';
+import { RuntimeError, runtimeError } from '../runtime/errors';
 import { verifyPluginActive, PluginCommandAdapter } from '../setup/plugin';
 import { PluginSetupTransaction } from '../setup/transaction';
 import { doctorReportToLines, runDoctor } from '../setup/doctor';
@@ -110,14 +110,31 @@ export function createDefaultServices(
           stderr(`${managed.error.code}: ${managed.error.message}\n`);
           return 1;
         }
-        const outcome = await managed.value.resumeConversation(
-          driven.value.launch.sessionId,
-          driven.value.launch.conversationId,
-          driven.value.launch.expectedRevision,
-        );
+        // 首次 drive 不依賴 plugin preflight：arm → spawn → bind。
+        // 已綁定 conversation 則 arm 回 E_BINDING_CONFLICT → 改走 resumeConversation。
+        let outcome = await driveFirstManagedLaunch({
+          sessionId: driven.value.launch.sessionId,
+          conversationId: driven.value.launch.conversationId,
+          expectedRevision: driven.value.launch.expectedRevision,
+          cwd,
+          stateRoot: options.stateRoot,
+          packageRoot,
+          agyCommand,
+          runner,
+          goal: driven.value.view.goal,
+        });
+        if (!outcome.ok && (
+          outcome.error.code === 'E_BINDING_CONFLICT'
+          || outcome.error.code === 'E_CONVERSATION_UNBOUND'
+        )) {
+          outcome = await managed.value.resumeConversation(
+            driven.value.launch.sessionId,
+            driven.value.launch.conversationId,
+            driven.value.launch.expectedRevision,
+          );
+        }
         if (!outcome.ok) {
           stderr(`${outcome.error.code}: ${outcome.error.message}\n`);
-          // 仍輸出 ledger view，方便除錯 binding 與 spawn 分離失敗
           stdout(`${JSON.stringify({
             ok: false,
             kind: 'autopilot-driven',
@@ -246,8 +263,99 @@ function buildManagedService(input: {
     runner: {
       foregroundInteractive: (command, argv, identity, policy) =>
         input.runner.foregroundInteractive(command, argv, identity, policy),
+      boundedHeadless: (command, argv, policy, identity) =>
+        input.runner.boundedHeadless(command, argv, policy, identity),
     },
   }));
+}
+
+/**
+ * 首次 autopilot drive：arm 既有 session → spawn managed agy → bind exact_env。
+ */
+async function driveFirstManagedLaunch(input: {
+  sessionId: string;
+  conversationId: string;
+  expectedRevision: number;
+  cwd: string;
+  stateRoot?: string;
+  packageRoot: string;
+  agyCommand: string;
+  runner: ProcessRunner;
+  goal: string;
+}): Promise<Result<import('../runtime/process').ProcessOutcome, RuntimeError>> {
+  const { SessionLocator } = await import('../continuation/state');
+  const { currentProcessIdentity } = await import('../runtime/process');
+  const { sha256 } = await import('../runtime/atomic');
+  const resolvedStateRoot = input.stateRoot === undefined
+    ? resolveStateRoot({ create: true })
+    : ok({ path: input.stateRoot, source: 'environment' as const });
+  if (!resolvedStateRoot.ok) return resolvedStateRoot;
+  const workspace = resolveWorkspaceIdentity(input.cwd);
+  if (!workspace.ok) return workspace;
+  const locator = new SessionLocator(resolvedStateRoot.value.path, workspace.value.workspaceKey, {
+    resumeOwnerFactory: () => currentProcessIdentity('drive-owner'),
+  });
+  // findLivePending may block if autopilot left launch_pending — armExistingSessionForDrive handles CAS
+  const armed = await locator.armExistingSessionForDrive({
+    sessionId: input.sessionId,
+    conversationId: input.conversationId,
+    expectedRevision: input.expectedRevision,
+    workspacePath: input.cwd,
+    ttlMs: 60_000,
+  });
+  if (!armed.ok) return armed;
+  const pending = armed.value;
+  const capability = locator.managedLaunch(pending);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    OMA_SESSION_ID: pending.sessionId,
+    OMA_LAUNCH_NONCE: pending.launchNonce,
+    OMA_INVOCATION_GENERATION: String(pending.invocationGeneration),
+    OMA_WORKSPACE_PATH: input.cwd,
+    OMA_STATE_ROOT: resolvedStateRoot.value.path,
+    OMA_PACKAGE_ROOT: input.packageRoot,
+    OMA_MANAGED_HEADLESS: '1',
+  };
+  const prompt = input.goal.trim() === '' ? `Continue session ${input.sessionId}` : input.goal;
+  const outcome = await input.runner.boundedHeadless(
+    input.agyCommand,
+    [prompt],
+    {
+      deadlineMs: Number(process.env.OMA_TIMEOUT_MS ?? 30_000),
+      maxOutputBytes: Number(process.env.OMA_MAX_OUTPUT_BYTES ?? 1024 * 1024),
+      cwd: input.cwd,
+      env,
+      onSpawn: (identity) => {
+        const recorded = capability.recordChildSpawned(identity);
+        return recorded.ok ? ok(undefined) : recorded;
+      },
+    },
+    {
+      operationId: `drive:${pending.sessionId}:${pending.invocationGeneration}`,
+      ownerNonce: pending.owner.ownerNonce ?? 'drive-owner',
+    },
+  );
+  if (!outcome.ok) return outcome;
+  const bound = await locator.bindPreInvocation(
+    {
+      conversationId: input.conversationId,
+      workspaceKeys: [workspace.value.workspaceKey],
+    },
+    {
+      OMA_SESSION_ID: pending.sessionId,
+      OMA_LAUNCH_NONCE: pending.launchNonce,
+      OMA_INVOCATION_GENERATION: String(pending.invocationGeneration),
+    },
+  );
+  if (bound.kind !== 'BoundExactEnv') {
+    const diagnostic = bound.kind === 'AllowDiagnostic' ? bound.error : undefined;
+    return err(runtimeError(
+      diagnostic?.code ?? 'E_BINDING_CONFLICT',
+      diagnostic?.message ?? 'Drive spawn completed but exact_env bind failed',
+    ));
+  }
+  void sha256;
+  return outcome;
 }
 
 function buildTeamContext(
