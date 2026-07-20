@@ -168,6 +168,7 @@ export async function teamCommand(
     stderr(`${result.error.code}: ${result.error.message}\n`);
     return 1;
   }
+  // issuedClaimToken 僅 Selected 單次回傳；durable 狀態只存 digest
   stdout(JSON.stringify({
     ok: true,
     kind: result.kind,
@@ -175,6 +176,9 @@ export async function teamCommand(
     forkId: parsed.value.forkId,
     selectedGeneration: result.resolution.selectedGeneration,
     freshClaimTokenDigest: result.resolution.freshClaimTokenDigest,
+    ...(result.kind === 'Selected' && result.issuedClaimToken
+      ? { issuedClaimToken: result.issuedClaimToken }
+      : {}),
   }) + '\n');
   return 0;
 }

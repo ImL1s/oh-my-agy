@@ -126,6 +126,7 @@ describe('typed teamCommand surface', () => {
         forkId: 'fork-a',
         selectedGeneration: 2,
         freshClaimTokenDigest: sha256('fresh-from-cli'),
+        issuedClaimToken: 'fresh-from-cli',
       }));
     } finally {
       fixture.cleanup();

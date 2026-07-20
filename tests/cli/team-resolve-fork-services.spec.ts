@@ -104,6 +104,8 @@ describe('createDefaultServices team resolve-fork (shipped path)', () => {
       }));
       expect(typeof payload.freshClaimTokenDigest).toBe('string');
       expect(payload.freshClaimTokenDigest).toHaveLength(64);
+      expect(typeof payload.issuedClaimToken).toBe('string');
+      expect(payload.issuedClaimToken.length).toBeGreaterThan(16);
     } finally {
       fixture.cleanup();
     }

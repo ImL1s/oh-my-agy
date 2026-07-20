@@ -77,7 +77,10 @@ describe('leader-only recovery fork resolution', () => {
     const selected = await resolver.resolve({ forkId: 'fork-a', winnerGeneration: 2, expectedRevision: 0, evidence: evidence(state, 'op-leader', 2) }, leaderContext(fixture.repo));
     expect(selected.kind).toBe('Selected');
     if (selected.kind !== 'Selected') return;
-    expect(selected.resolution.freshClaimToken).toBe('fresh-token');
+    expect(selected.issuedClaimToken).toBe('fresh-token');
+    expect(selected.resolution.freshClaimTokenDigest).toBe(sha256('fresh-token'));
+    // durable aggregate 不得殘留明文 claim token
+    expect(JSON.stringify(selected.aggregate.fork.resolution)).not.toContain('fresh-token');
     expect(assertRecoveryWriteAuthority(selected.aggregate, 1, 'old-token').ok).toBe(false);
     expect(assertRecoveryWriteAuthority(selected.aggregate, 2, 'new-token').ok).toBe(false);
     expect(assertRecoveryWriteAuthority(selected.aggregate, 2, 'fresh-token').ok).toBe(true);

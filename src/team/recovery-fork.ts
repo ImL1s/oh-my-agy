@@ -25,7 +25,7 @@ export interface RecoveryForkResolutionRecordV1 {
   evidenceDigest: string;
   selectedGeneration: number;
   selectionRevision: number;
-  freshClaimToken: string;
+  /** 僅存 digest；明文 token 只在 Selected 結果以 issuedClaimToken 單次回傳 */
   freshClaimTokenDigest: string;
 }
 
@@ -80,6 +80,8 @@ export interface RecoveryForkResolvedValue {
   aggregate: RecoveryTaskAggregateV1;
   revision: number;
   resolution: RecoveryForkResolutionRecordV1;
+  /** Selected 當下一次性回傳；不得寫入 durable aggregate */
+  issuedClaimToken?: string;
 }
 
 export type RecoveryForkResolveResult =
@@ -121,15 +123,14 @@ export class RecoveryForkResolver {
     }
     const evidence = validateEvidence(input, snapshot.value);
     if (!evidence.ok) return { kind: 'Rejected', error: evidence.error };
-    const freshClaimToken = context.tokenFactory?.() ?? randomToken();
+    const issuedClaimToken = context.tokenFactory?.() ?? randomToken();
     const resolution: RecoveryForkResolutionRecordV1 = {
       schemaVersion: 1,
       operationNonce: input.evidence.operationNonce,
       evidenceDigest,
       selectedGeneration: input.winnerGeneration,
       selectionRevision: input.expectedRevision + 1,
-      freshClaimToken,
-      freshClaimTokenDigest: sha256(freshClaimToken),
+      freshClaimTokenDigest: sha256(issuedClaimToken),
     };
     const committed = await this.store.compareAndSwap(this.key, input.expectedRevision, (current) => ({
       ...current,
@@ -149,6 +150,7 @@ export class RecoveryForkResolver {
       aggregate: committed.value.value,
       revision: committed.value.revision,
       resolution,
+      issuedClaimToken,
     };
   }
 }
