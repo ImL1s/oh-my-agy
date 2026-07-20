@@ -1,0 +1,82 @@
+#!/usr/bin/env node
+const fs = require('fs');
+const path = require('path');
+
+async function run() {
+  // 讀取環境變數來控制 Mock 行為
+  const exitCode = parseInt(process.env.MOCK_AGY_EXIT_CODE || '0', 10);
+  const stdout = process.env.MOCK_AGY_STDOUT || '';
+  const stderr = process.env.MOCK_AGY_STDERR || '';
+
+  // 處理 sleep 超時模擬
+  if (process.env.MOCK_AGY_SLEEP_MS) {
+    const sleepMs = parseInt(process.env.MOCK_AGY_SLEEP_MS, 10);
+    if (process.env.MOCK_AGY_SIGNAL_SLEEPING === 'true') {
+      process.stdout.write('[MOCK_AGY_SLEEPING]\n');
+    }
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
+  }
+
+  // 處理大數據輸出
+  if (process.env.MOCK_AGY_LARGE_DATA === 'true') {
+    const size = 1024 * 1024; // 1MB
+    const buffer = Buffer.alloc(size, 'X');
+    process.stdout.write(buffer);
+  }
+
+  // 處理 stdin 讀取與回顯
+  if (process.env.MOCK_AGY_READ_STDIN === 'true') {
+    try {
+      const stdinBuffer = fs.readFileSync(0); // 讀取 fd 0
+      process.stdout.write(`收到 stdin: ${stdinBuffer.toString().trim()}\n`);
+    } catch (e) {
+      process.stderr.write(`讀取 stdin 失敗: ${e.message}\n`);
+    }
+  }
+
+  // 處理動態寫入 todo.json 狀態
+  if (process.env.MOCK_AGY_WRITE_TODO) {
+    const todoPath = process.env.MOCK_AGY_TODO_PATH || path.join(process.cwd(), '.agy', 'todo.json');
+    try {
+      const todoDir = path.dirname(todoPath);
+      if (!fs.existsSync(todoDir)) {
+        fs.mkdirSync(todoDir, { recursive: true });
+      }
+      fs.writeFileSync(todoPath, process.env.MOCK_AGY_WRITE_TODO, 'utf8');
+    } catch (e) {
+      process.stderr.write(`寫入 todo.json 失敗: ${e.message}\n`);
+    }
+  }
+
+  // 輸出 stdout / stderr
+  if (stdout) {
+    process.stdout.write(stdout + '\n');
+  } else if (process.env.MOCK_AGY_LARGE_DATA !== 'true' && process.env.MOCK_AGY_READ_STDIN !== 'true') {
+    // 預設輸出回顯
+    const args = process.argv.slice(2);
+    process.stdout.write(`實體 agy 執行成功，收到引數: ${args.join(' ')}\n`);
+  }
+
+  if (stderr) {
+    process.stderr.write(stderr + '\n');
+  }
+
+  // 確保 stdio 緩衝區被完全清空再結束，防止 pipe 傳輸因子程序早期退出而發生截斷
+  if (process.stdout.writableLength && process.stdout.writableLength > 0) {
+    await new Promise((resolve) => {
+      process.stdout.once('drain', resolve);
+    });
+  }
+  if (process.stderr.writableLength && process.stderr.writableLength > 0) {
+    await new Promise((resolve) => {
+      process.stderr.once('drain', resolve);
+    });
+  }
+
+  process.exit(exitCode);
+}
+
+run().catch((e) => {
+  process.stderr.write(e.stack + '\n');
+  process.exit(1);
+});

@@ -1,0 +1,16 @@
+# deps / build
+node_modules/
+dist/
+
+# runtime state (do not ship)
+.omx/
+.agy/
+.agy_sandbox_*/
+*.log
+.DS_Store
+coverage/
+*.tsbuildinfo
+
+# workspace-local agent research dumps under .agents (keep hooks.json only)
+.agents/**
+!.agents/hooks.json
