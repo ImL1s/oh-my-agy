@@ -23,6 +23,30 @@ describe('AuthorityLease', () => {
     )).toBe(false);
   });
 
+  test('acquire rejects hierarchical overlap (dir:src vs file:src/a.ts)', async () => {
+    const fixture = GitFixture.create();
+    try {
+      const store = new AuthorityLeaseStore(fixture.stateRoot, 'team-hier');
+      const created = await store.ensure();
+      expect(created.ok).toBe(true);
+      if (!created.ok) return;
+      const digA = crypto.createHash('sha256').update('a').digest('hex');
+      const digB = crypto.createHash('sha256').update('b').digest('hex');
+      const first = await store.acquire('dir:src', 'task-dir', digA, 1_000, 60_000, created.value.revision);
+      expect(first.ok).toBe(true);
+      if (!first.ok) return;
+      const second = await store.acquire(
+        'file:src/a.ts', 'task-file', digB, 1_001, 60_000, first.value.revision,
+      );
+      expect(second.ok).toBe(false);
+      if (!second.ok) {
+        expect(second.error.message).toMatch(/overlap/i);
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('acquire exclusive, second holder fails, renew and release', async () => {
     const fixture = GitFixture.create();
     try {

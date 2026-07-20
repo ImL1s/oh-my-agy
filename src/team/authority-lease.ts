@@ -73,17 +73,19 @@ export class AuthorityLeaseStore {
     if (before.value.revision !== expectedRevision) {
       return err(runtimeError('E_REVISION_CONFLICT', 'Lease aggregate revision changed'));
     }
-    const current = before.value.value.leases[pathKey];
-    if (
-      current !== undefined
-      && current.leasedUntilMs > nowMs
-      && current.ownerTaskId !== ownerTaskId
-    ) {
-      return err(runtimeError('E_REVISION_CONFLICT', 'Authority lease is held by another task', {
-        pathKey,
-        ownerTaskId: current.ownerTaskId,
-      }));
+    // 階層重疊：dir:src 與 file:src/a.ts 不可並行（exact pathKey 不夠）
+    for (const [heldKey, held] of Object.entries(before.value.value.leases)) {
+      if (held.leasedUntilMs <= nowMs) continue;
+      if (held.ownerTaskId === ownerTaskId) continue;
+      if (pathKeysConflict(pathKey, heldKey)) {
+        return err(runtimeError('E_REVISION_CONFLICT', 'Authority lease overlaps an active write scope', {
+          pathKey,
+          heldKey,
+          ownerTaskId: held.ownerTaskId,
+        }));
+      }
     }
+    const current = before.value.value.leases[pathKey];
     const generation = (current?.generation ?? 0) + 1;
     const lease: AuthorityLeaseV1 = {
       schemaVersion: 1,
@@ -154,7 +156,19 @@ export function pathKeysFromWriteScope(
   return writeScope.map((entry) => `${entry.kind}:${entry.path}`);
 }
 
-/** true if two scope keys conflict (exact or dir contains file/dir prefix) */
+export function parsePathKey(pathKey: string): { kind: string; path: string } {
+  const index = pathKey.indexOf(':');
+  if (index <= 0) return { kind: 'file', path: pathKey };
+  return { kind: pathKey.slice(0, index), path: pathKey.slice(index + 1) };
+}
+
+/** lease pathKey 階層衝突（exact 或 dir/file 前綴） */
+export function pathKeysConflict(leftKey: string, rightKey: string): boolean {
+  if (leftKey === rightKey) return true;
+  return writeScopesConflict([parsePathKey(leftKey)], [parsePathKey(rightKey)]);
+}
+
+/** true if two scope entries conflict (exact or dir contains file/dir prefix) */
 export function writeScopesConflict(
   left: 'none' | readonly { kind: string; path: string }[],
   right: 'none' | readonly { kind: string; path: string }[],

@@ -161,6 +161,66 @@ describe('deliver and DAG tick', () => {
     }
   }, 40000);
 
+  maybeTmux('ORCH-R3b startFromManifest fails when active dir lease overlaps file scope', async () => {
+    const fixture = GitFixture.create();
+    const tmux = new TmuxFixture();
+    try {
+      const leader = resolveGitWorktreeIdentity(fixture.repo);
+      const holdJs = path.join(fixture.root, 'hold.js');
+      fs.writeFileSync(holdJs, "require('fs').writeFileSync(process.argv[2],'ready\\n'); setInterval(()=>{},1000);\n");
+      fs.mkdirSync(path.join(fixture.repo, 'src'), { recursive: true });
+      fs.writeFileSync(path.join(fixture.repo, 'src', '.keep'), '');
+      fixture.git(['add', 'src/.keep']);
+      fixture.git(['commit', '-m', 'src']);
+      const sessionNamePrefix = tmux.session('lease');
+      const orch = new TeamOrchestrator({
+        stateRoot: fixture.stateRoot,
+        workspaceRoot: fixture.repo,
+        repoKey: leader.repoKey,
+        workspaceKey: leader.workspaceKey,
+        managedWorktreesRoot: fixture.managedWorktreesRoot,
+        sessionNamePrefix,
+        maxParallelWorkers: 1,
+        tokenFactory: (() => { let n = 0; return () => `lease-tok-${++n}`; })(),
+        workerExecutablePath: process.execPath,
+        workerBootstrapArgv: [holdJs],
+      });
+      // Pre-hold dir:src lease (as if another worker still owns the scope)
+      const { AuthorityLeaseStore } = await import('../../src/team/authority-lease');
+      const dig = (await import('crypto')).createHash('sha256').update('holder').digest('hex');
+      const leaseStore = new AuthorityLeaseStore(fixture.stateRoot, 'lease-team');
+      const ensured = await leaseStore.ensure();
+      expect(ensured.ok).toBe(true);
+      if (!ensured.ok) return;
+      const held = await leaseStore.acquire(
+        'dir:src', 'external-holder', dig, Date.now(), 300_000, ensured.value.revision,
+      );
+      expect(held.ok).toBe(true);
+
+      const manifestPath = path.join(fixture.root, 'm-lease.json');
+      fs.writeFileSync(manifestPath, JSON.stringify({
+        schema: 'oma.team-manifest/v1',
+        teamId: 'lease-team',
+        revision: 1,
+        tasks: [{
+          id: 'narrow',
+          dependencies: [],
+          write_scope: [{ kind: 'file', path: 'src/a.ts' }],
+          mode: 'headless',
+          verification: { version: 1, commands: [], requiredArtifacts: [] },
+        }],
+      }));
+      const started = await orch.startFromManifest(manifestPath, 'headless');
+      expect(started.ok).toBe(false);
+      if (!started.ok) {
+        expect(started.error.message).toMatch(/overlap|lease/i);
+      }
+    } finally {
+      tmux.cleanup();
+      fixture.cleanup();
+    }
+  }, 40000);
+
   maybeTmux('ORCH-T5 maxParallel starts two independent tasks', async () => {
     const fixture = GitFixture.create();
     const tmux = new TmuxFixture();
