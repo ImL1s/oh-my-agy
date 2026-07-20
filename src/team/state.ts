@@ -233,6 +233,39 @@ export class TeamStateStore {
     })));
   }
 
+  /**
+   * DeadProof reclaim：清除 claim、標 orphan_identity_unproven，允許後續 re-claim。
+   * 必須在 requireDeadProof 通過後由 orchestrator 呼叫。
+   */
+  async releaseClaimAfterDeadProof(
+    taskId: string,
+    expectedRevision: number,
+  ): Promise<Result<Snapshot<TeamAggregateV1>, RuntimeError>> {
+    const before = this.requireRevision(expectedRevision);
+    if (!before.ok) return before;
+    const task = before.value.value.tasks[taskId];
+    if (task === undefined) return err(runtimeError('E_NOT_FOUND', 'Team task does not exist', { taskId }));
+    if (task.status !== 'in_progress' && task.status !== 'awaiting_interaction') {
+      return err(runtimeError('E_REVISION_CONFLICT', 'Task is not reclaimable in its current state', {
+        taskId,
+        status: task.status,
+      }));
+    }
+    return this.store.compareAndSwap(this.key, expectedRevision, (current) => {
+      const heartbeats = { ...current.heartbeats };
+      delete heartbeats[taskId];
+      return {
+        ...updateTask(current, taskId, (entry) => ({
+          ...entry,
+          revision: entry.revision + 1,
+          status: 'orphan_identity_unproven',
+          claim: undefined,
+        })),
+        heartbeats,
+      };
+    });
+  }
+
   async sendMailbox(
     expectedRevision: number,
     message: MailboxMessageV1,

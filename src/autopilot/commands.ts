@@ -18,6 +18,13 @@ export type ParsedAutopilotCommand =
       readonly expectedRevision: number;
     }
   | {
+      /** ledger bind + 由 CLI 觸發 managed spawn（非純記帳） */
+      readonly kind: 'drive';
+      readonly sessionId: string;
+      readonly conversationId: string;
+      readonly expectedRevision: number;
+    }
+  | {
       readonly kind: 'cancel';
       readonly sessionId: string;
       readonly expectedRevision: number;
@@ -42,7 +49,7 @@ export function parseAutopilotCommand(
   }
 
   const supported = new Set([
-    'status', 'doctor', 'checkpoint', 'review', 'qa', 'resume', 'cancel', 'reset-breaker',
+    'status', 'doctor', 'checkpoint', 'review', 'qa', 'resume', 'drive', 'cancel', 'reset-breaker',
   ]);
   if (subcommand === undefined || !supported.has(subcommand)) {
     return rejected('Unknown Autopilot command');
@@ -56,6 +63,7 @@ export function parseAutopilotCommand(
     review: ['--session', '--expected-revision', '--evidence'],
     qa: ['--session', '--expected-revision', '--evidence'],
     resume: ['--session', '--conversation', '--expected-revision'],
+    drive: ['--session', '--conversation', '--expected-revision'],
     cancel: ['--session', '--expected-revision', '--reason'],
     'reset-breaker': ['--session', '--expected-revision'],
   };
@@ -79,10 +87,10 @@ export function parseAutopilotCommand(
     if (evidencePath.trim() === '') return rejected('Evidence path must not be empty');
     return ok({ kind: subcommand, sessionId, expectedRevision, evidencePath });
   }
-  if (subcommand === 'resume') {
+  if (subcommand === 'resume' || subcommand === 'drive') {
     const conversationId = flags.value.get('--conversation')!;
     if (conversationId.trim() === '') return rejected('Conversation ID must not be empty');
-    return ok({ kind: 'resume', sessionId, conversationId, expectedRevision });
+    return ok({ kind: subcommand, sessionId, conversationId, expectedRevision });
   }
   if (subcommand === 'cancel') {
     const reason = flags.value.get('--reason')!;

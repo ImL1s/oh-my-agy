@@ -17,6 +17,9 @@ describe('Autopilot command parser', () => {
     ['resume', [
       '--session', 's1', '--conversation', 'c1', '--expected-revision', '9',
     ], { kind: 'resume', sessionId: 's1', conversationId: 'c1', expectedRevision: 9 }],
+    ['drive', [
+      '--session', 's1', '--conversation', 'c1', '--expected-revision', '9',
+    ], { kind: 'drive', sessionId: 's1', conversationId: 'c1', expectedRevision: 9 }],
     ['cancel', [
       '--session', 's1', '--expected-revision', '9', '--reason', 'operator stop',
     ], { kind: 'cancel', sessionId: 's1', expectedRevision: 9, reason: 'operator stop' }],

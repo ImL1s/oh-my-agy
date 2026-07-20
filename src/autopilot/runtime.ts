@@ -108,6 +108,8 @@ export class AutopilotRuntime {
         return this.acceptGate(command.kind, command.sessionId, command.expectedRevision, command.evidencePath);
       case 'resume':
         return this.resume(command.sessionId, command.conversationId, command.expectedRevision);
+      case 'drive':
+        return this.drive(command.sessionId, command.conversationId, command.expectedRevision);
       case 'cancel':
         return this.cancel(command.sessionId, command.expectedRevision, command.reason);
       case 'reset-breaker':
@@ -242,6 +244,40 @@ export class AutopilotRuntime {
     conversationId: string,
     expectedRevision: number,
   ): Promise<Result<AutopilotSessionView, RuntimeError>> {
+    const updated = await this.applyResumeBinding(sessionId, conversationId, expectedRevision);
+    if (!updated.ok) return updated;
+    return ok(this.view(updated.value, this.readGoal(sessionId)));
+  }
+
+  /**
+   * drive：更新 ledger binding 後回傳 launch 座標，由 CLI 呼叫 resumeConversation spawn。
+   * 設計概念映射：與 resume 分離 — resume 純記帳；drive 才接程序。
+   */
+  async drive(
+    sessionId: string,
+    conversationId: string,
+    expectedRevision: number,
+  ): Promise<Result<{
+    view: AutopilotSessionView;
+    launch: { sessionId: string; conversationId: string; expectedRevision: number };
+  }, RuntimeError>> {
+    const updated = await this.applyResumeBinding(sessionId, conversationId, expectedRevision);
+    if (!updated.ok) return updated;
+    return ok({
+      view: this.view(updated.value, this.readGoal(sessionId)),
+      launch: {
+        sessionId,
+        conversationId,
+        expectedRevision: updated.value.revision,
+      },
+    });
+  }
+
+  private async applyResumeBinding(
+    sessionId: string,
+    conversationId: string,
+    expectedRevision: number,
+  ): Promise<Result<SessionAggregateV1, RuntimeError>> {
     const store = this.storeFor(sessionId);
     const current = store.read();
     if (!current.ok) return current;
@@ -263,7 +299,7 @@ export class AutopilotRuntime {
       },
     }));
     if (!updated.ok) return updated;
-    return ok(this.view(updated.value, this.readGoal(sessionId)));
+    return ok(updated.value);
   }
 
   async cancel(

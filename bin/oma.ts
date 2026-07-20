@@ -198,9 +198,19 @@ async function main() {
     // e2e 預設靜音；互動環境可用 OMA_LEGACY_STDIO=inherit 看到輸出
     const legacyStdio = process.env.OMA_LEGACY_STDIO === 'inherit' ? 'inherit' : 'ignore';
 
+    const { guardDangerousArgv } = await import('../src/cli/dangerous-launch');
+    const magicGuarded = await guardDangerousArgv(remainingArgs, {
+      isTTY: Boolean(process.stdin.isTTY),
+    });
+    if (!magicGuarded.ok) {
+      process.stderr.write(`${magicGuarded.error.code}: ${magicGuarded.error.message}\n`);
+      process.exit(2);
+    }
+    const magicArgv = [...magicGuarded.value];
+
     let exitCode = 0;
     try {
-      const child = spawn('agy', remainingArgs, {
+      const child = spawn('agy', magicArgv, {
         stdio: legacyStdio,
         env: childEnvWithPath(),
       });
@@ -268,7 +278,17 @@ async function main() {
     spawnOptions.detached = true;
   }
 
-  const child = spawn('agy', args, spawnOptions);
+  const { guardDangerousArgv: guardPassThrough } = await import('../src/cli/dangerous-launch');
+  const passGuarded = await guardPassThrough(args, {
+    isTTY: Boolean(process.stdin.isTTY),
+  });
+  if (!passGuarded.ok) {
+    process.stderr.write(`${passGuarded.error.code}: ${passGuarded.error.message}\n`);
+    process.exit(2);
+  }
+  const passArgv = [...passGuarded.value];
+
+  const child = spawn('agy', passArgv, spawnOptions);
 
   // 建立虛擬的計時器以維持事件迴圈 (Event Loop) 活性，防止 Stream 因 backpressure 暫停時，因事件迴圈為空而導致主程序提前結束
   const keepAliveTimer = setInterval(() => {}, 1000);

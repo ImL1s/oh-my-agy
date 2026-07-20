@@ -38,4 +38,21 @@ describe('CLI parser', () => {
       code: 'E_DIRECTIVE_INVALID',
     }));
   });
+
+  test('rejects tokens between mode and -- (no silent drop)', () => {
+    const result = parseCliArguments(['ralph', '--madmax', '--', 'ship']);
+    expect(result.kind).toBe('invalid');
+    if (result.kind === 'invalid') {
+      expect(result.code).toBe('E_DIRECTIVE_INVALID');
+      expect(result.message).toMatch(/unexpected token/);
+    }
+  });
+
+  test('allows clean managed form with --', () => {
+    expect(parseCliArguments(['ralph', '--', 'ship'])).toEqual({
+      kind: 'mode',
+      mode: 'ralph',
+      task: 'ship',
+    });
+  });
 });

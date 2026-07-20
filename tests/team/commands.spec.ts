@@ -3,6 +3,7 @@ import * as path from 'path';
 import { sha256 } from '../../src/runtime/atomic';
 import { StateStore } from '../../src/runtime/state-store';
 import { parseTeamCommand, teamCommand } from '../../src/team/commands';
+import { TeamOrchestrator } from '../../src/team/orchestrator';
 import {
   RecoveryTaskAggregateV1,
   digestRecoverySelectionEvidence,
@@ -10,6 +11,7 @@ import {
 import { resolveGitWorktreeIdentity } from '../../src/team/worktree';
 import { RuntimeContext } from '../../src/team/types';
 import { GitFixture } from '../helpers/git-fixture';
+import { TmuxFixture } from '../helpers/tmux-fixture';
 
 function aggregate(root: string): RecoveryTaskAggregateV1 {
   const worktree = resolveGitWorktreeIdentity(root);
@@ -187,4 +189,124 @@ describe('typed teamCommand surface', () => {
       other.cleanup();
     }
   });
+
+  test('parseTeamCommand accepts status and stop', () => {
+    expect(parseTeamCommand(['status', '--team', 'alpha'])).toEqual({
+      ok: true,
+      value: { kind: 'status', teamId: 'alpha' },
+    });
+    expect(parseTeamCommand(['stop', '--team', 'alpha'])).toEqual({
+      ok: true,
+      value: { kind: 'stop', teamId: 'alpha' },
+    });
+  });
+
+  const maybeTmux = TmuxFixture.available() ? test : test.skip;
+
+  maybeTmux('teamCommand start creates tmux worker (not manifest-validated stub)', async () => {
+    const fixture = GitFixture.create();
+    const tmux = new TmuxFixture();
+    try {
+      const leader = resolveGitWorktreeIdentity(fixture.repo);
+      const manifestPath = path.join(fixture.root, 'manifest.json');
+      fs.writeFileSync(manifestPath, JSON.stringify({
+        schema: 'oma.team-manifest/v1',
+        teamId: 'cli-team',
+        revision: 1,
+        tasks: [{
+          id: 't1',
+          dependencies: [],
+          write_scope: [{ kind: 'file', path: 't1.txt' }],
+          mode: 'headless',
+          verification: { version: 1, commands: [], requiredArtifacts: [] },
+        }],
+      }));
+
+      const holdJs = path.join(fixture.root, 'hold.js');
+      fs.writeFileSync(
+        holdJs,
+        "require('fs').writeFileSync(process.argv[2],'ready\\n'); setInterval(()=>{},1000);\n",
+      );
+
+      const sessionNamePrefix = tmux.session('cli');
+      // 預先登記衍生 session 供 fixture cleanup
+      tmux.session('cli-t1-g1');
+
+      const makeOrch = (ctx: RuntimeContext) => new TeamOrchestrator({
+        stateRoot: ctx.stateRoot,
+        workspaceRoot: ctx.workspaceRoot,
+        repoKey: ctx.repoKey,
+        workspaceKey: ctx.workspaceKey,
+        managedWorktreesRoot: fixture.managedWorktreesRoot,
+        sessionNamePrefix,
+        tokenFactory: ctx.tokenFactory ?? (() => {
+          let i = 0;
+          return () => `cli-tok-${++i}`;
+        })(),
+        workerExecutablePath: process.execPath,
+        workerBootstrapArgv: [holdJs],
+      });
+
+      let stdout = '';
+      let stderr = '';
+      const context: RuntimeContext = {
+        stateRoot: fixture.stateRoot,
+        workspaceRoot: fixture.repo,
+        repoKey: leader.repoKey,
+        workspaceKey: leader.workspaceKey,
+        tokenFactory: (() => {
+          let i = 0;
+          return () => `cli-tok-${++i}`;
+        })(),
+      };
+
+      const code = await teamCommand(
+        ['start', '--manifest', manifestPath, '--worker-mode', 'headless'],
+        {
+          context,
+          stdout: (value) => { stdout += value; },
+          stderr: (value) => { stderr += value; },
+          orchestratorFactory: makeOrch,
+        },
+      );
+      expect(stderr).toBe('');
+      expect(code).toBe(0);
+      const body = JSON.parse(stdout);
+      expect(body.ok).toBe(true);
+      expect(body.kind).toBe('team-started');
+      expect(body.workers).toHaveLength(1);
+      expect(body.note).toBeUndefined();
+      expect(tmux.hasSession(body.workers[0].sessionName)).toBe(true);
+
+      let statusOut = '';
+      const statusCode = await teamCommand(
+        ['status', '--team', 'cli-team'],
+        {
+          context,
+          stdout: (value) => { statusOut += value; },
+          stderr: (value) => { stderr += value; },
+          orchestratorFactory: makeOrch,
+        },
+      );
+      expect(statusCode).toBe(0);
+      const statusBody = JSON.parse(statusOut);
+      expect(statusBody.kind).toBe('team-status');
+      expect(statusBody.tasks.t1.status).toBe('in_progress');
+
+      const stopCode = await teamCommand(
+        ['stop', '--team', 'cli-team'],
+        {
+          context,
+          stdout: () => undefined,
+          stderr: (value) => { stderr += value; },
+          orchestratorFactory: makeOrch,
+        },
+      );
+      expect(stopCode).toBe(0);
+      expect(tmux.hasSession(body.workers[0].sessionName)).toBe(false);
+    } finally {
+      tmux.cleanup();
+      fixture.cleanup();
+    }
+  }, 20_000);
 });

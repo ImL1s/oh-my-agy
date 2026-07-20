@@ -1,9 +1,16 @@
 import * as crypto from 'crypto';
 import { RuntimeError } from '../runtime/errors';
-import { InteractivePolicy, ProcessOutcome } from '../runtime/process';
+import {
+  HeadlessPolicy,
+  InteractivePolicy,
+  ProcessOutcome,
+} from '../runtime/process';
 import { OperationIdentity, ProcessIdentity, Result, err, ok } from '../runtime/types';
 import { ManagedMode, ModeDirectiveRenderer } from '../modes/directives';
 import { buildModeCommand } from '../modes/commands';
+import { guardDangerousArgv } from './dangerous-launch';
+import { wrapManagedSearchLaunch } from '../runtime/sandbox';
+import * as path from 'path';
 
 export interface PreparedManagedInvocation {
   readonly kind: 'launch' | 'resume';
@@ -50,6 +57,12 @@ export interface InteractiveRunner {
     argv: readonly string[],
     identity: Readonly<OperationIdentity>,
     policy?: InteractivePolicy,
+  ): Promise<Result<ProcessOutcome, RuntimeError>>;
+  boundedHeadless?(
+    command: string,
+    argv: readonly string[],
+    policy: Readonly<HeadlessPolicy>,
+    identity: Readonly<OperationIdentity>,
   ): Promise<Result<ProcessOutcome, RuntimeError>>;
 }
 
@@ -109,7 +122,16 @@ export class ManagedInvocationService {
       taskDigest: crypto.createHash('sha256').update(taskBytes).digest('hex'),
     });
     if (!prepared.ok) return prepared;
-    return this.runManaged(prepared.value, command.value.argv);
+    let argv = command.value.argv;
+    let launchCommand = this.agyCommand;
+    if (mode === 'search') {
+      const plansDir = path.join(prepared.value.cwd, '.agy', 'plans');
+      const sandboxed = wrapManagedSearchLaunch(this.agyCommand, argv, prepared.value.cwd, plansDir);
+      if (!sandboxed.ok) return sandboxed;
+      launchCommand = sandboxed.value.command;
+      argv = sandboxed.value.argv;
+    }
+    return this.runManaged(prepared.value, argv, launchCommand, mode === 'search');
   }
 
   async resumeConversation(
@@ -131,14 +153,18 @@ export class ManagedInvocationService {
         message: 'Resume transaction did not return the exact conversation and next generation',
       });
     }
-    return this.runManaged(prepared.value, ['--conversation', conversationId]);
+    return this.runManaged(prepared.value, ['--conversation', conversationId], this.agyCommand, false);
   }
 
-  passThrough(argv: readonly string[]): Promise<Result<ProcessOutcome, RuntimeError>> {
+  async passThrough(argv: readonly string[]): Promise<Result<ProcessOutcome, RuntimeError>> {
+    const guarded = await guardDangerousArgv(argv, {
+      isTTY: Boolean(process.stdin.isTTY),
+    });
+    if (!guarded.ok) return guarded;
     const nonce = crypto.randomBytes(16).toString('hex');
     return this.runner.foregroundInteractive(
       this.agyCommand,
-      [...argv],
+      [...guarded.value],
       { operationId: `passthrough:${nonce}`, ownerNonce: nonce },
       { env: ordinaryEnvironment(this.environment) },
     );
@@ -147,7 +173,15 @@ export class ManagedInvocationService {
   private async runManaged(
     prepared: Readonly<PreparedManagedInvocation>,
     argv: readonly string[],
+    command: string = this.agyCommand,
+    preferHeadless = false,
   ): Promise<Result<ProcessOutcome, RuntimeError>> {
+    // defense-in-depth：managed final argv 亦過危險旗標 gate
+    const guarded = await guardDangerousArgv(argv, {
+      isTTY: Boolean(process.stdin.isTTY),
+    });
+    if (!guarded.ok) return guarded;
+    const safeArgv = [...guarded.value];
     const env: NodeJS.ProcessEnv = {
       ...this.environment,
       OMA_SESSION_ID: prepared.sessionId,
@@ -160,21 +194,42 @@ export class ManagedInvocationService {
     if (this.packageRoot) env.OMA_PACKAGE_ROOT = this.packageRoot;
     if (this.stateRoot) env.OMA_STATE_ROOT = this.stateRoot;
     let spawnRecordError: RuntimeError | undefined;
-    const outcome = await this.runner.foregroundInteractive(
-      this.agyCommand,
-      argv,
-      prepared.operationIdentity,
-      {
-        cwd: prepared.cwd,
-        env,
-        onSpawn: (identity) => {
-          const recorded = this.transaction.recordChildSpawned(prepared, identity);
-          if (!recorded.ok) spawnRecordError = recorded.error;
-          // 設計概念映射：ProcessRunner 只在 callback 回傳 Result 時才 lifecycle-kill
-          return recorded;
+    const onSpawn = (identity: ProcessIdentity) => {
+      const recorded = this.transaction.recordChildSpawned(prepared, identity);
+      if (!recorded.ok) spawnRecordError = recorded.error;
+      return recorded;
+    };
+    // search / OMA_MANAGED_HEADLESS=1：走 boundedHeadless 以套用 maxOutputBytes kill
+    const useHeadless = preferHeadless || process.env.OMA_MANAGED_HEADLESS === '1';
+    const maxOutputBytes = process.env.OMA_MAX_OUTPUT_BYTES
+      ? Number(process.env.OMA_MAX_OUTPUT_BYTES)
+      : undefined;
+    const maxProcessCount = process.env.OMA_MAX_PROCESS_COUNT
+      ? Number(process.env.OMA_MAX_PROCESS_COUNT)
+      : undefined;
+    let outcome: Result<ProcessOutcome, RuntimeError>;
+    if (useHeadless && this.runner.boundedHeadless) {
+      outcome = await this.runner.boundedHeadless(
+        command,
+        safeArgv,
+        {
+          deadlineMs: Number(process.env.OMA_TIMEOUT_MS ?? 3_600_000),
+          maxOutputBytes: Number.isFinite(maxOutputBytes!) ? maxOutputBytes : 1024 * 1024,
+          maxProcessCount: Number.isFinite(maxProcessCount!) ? maxProcessCount : undefined,
+          cwd: prepared.cwd,
+          env,
+          onSpawn,
         },
-      },
-    );
+        prepared.operationIdentity,
+      );
+    } else {
+      outcome = await this.runner.foregroundInteractive(
+        command,
+        safeArgv,
+        prepared.operationIdentity,
+        { cwd: prepared.cwd, env, onSpawn },
+      );
+    }
     if (!outcome.ok) return outcome;
     if (spawnRecordError !== undefined) return err(spawnRecordError);
     const recorded = await this.transaction.recordOutcome(prepared, outcome.value);

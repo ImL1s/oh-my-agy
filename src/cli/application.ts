@@ -32,10 +32,17 @@ Usage:
   oma autopilot review --session <id> --expected-revision <n> --evidence <file>
   oma autopilot qa --session <id> --expected-revision <n> --evidence <file>
   oma autopilot resume --session <id> --conversation <id> --expected-revision <n>
+  oma autopilot drive --session <id> --conversation <id> --expected-revision <n>
   oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
   oma autopilot reset-breaker --session <id> --expected-revision <n>
   oma autopilot doctor --session <id>
   oma team start --manifest <file> [--worker-mode interactive|headless]
+  oma team status --team <id>
+  oma team stop --team <id>
+  oma team supervise --team <id>
+  oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead|alive|unknown --process dead|alive|unknown
+  oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
+  oma team tick --team <id> [--worker-mode headless|interactive] [--max-parallel <n>]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace]
   oma doctor [--json] [--no-strict-plugin]
@@ -81,7 +88,10 @@ function outcomeCode(
 ): number {
   if (!result.ok) {
     io.stderr(`${result.error.code}: ${result.error.message}\n`);
-    return 1;
+    // 與 legacy gate / invalid 對齊：validator 類錯誤用 2
+    return result.error.code === 'E_VALIDATOR_REJECTED' || result.error.code === 'E_DIRECTIVE_INVALID'
+      ? 2
+      : 1;
   }
   return result.value.code;
 }

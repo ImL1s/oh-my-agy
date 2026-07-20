@@ -21,8 +21,27 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliCommand {
   const first = argv[0];
   if (isManagedMode(first)) {
     const delimiter = argv.indexOf('--', 1);
-    const taskArgs = delimiter >= 0 ? argv.slice(delimiter + 1) : argv.slice(1);
-    const task = taskArgs.join(' ');
+    if (delimiter >= 0) {
+      const between = argv.slice(1, delimiter);
+      if (between.length > 0) {
+        return {
+          kind: 'invalid',
+          code: 'E_DIRECTIVE_INVALID',
+          message: `${first}: unexpected token(s) before --: ${between.join(' ')}`,
+        };
+      }
+      const task = argv.slice(delimiter + 1).join(' ');
+      if (task.trim() === '') {
+        return {
+          kind: 'invalid',
+          code: 'E_DIRECTIVE_INVALID',
+          message: `${first} requires a non-empty task after --`,
+        };
+      }
+      return { kind: 'mode', mode: first, task };
+    }
+    // 無 `--` 時仍解析為 mode（structured 入口通常要求 `--`；保留相容）
+    const task = argv.slice(1).join(' ');
     if (task.trim() === '') {
       return {
         kind: 'invalid',

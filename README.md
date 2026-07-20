@@ -117,6 +117,7 @@ When the task is non-trivial:
 | Parallel / high-throughput mode | `oma ultrawork -- "…"` |
 | Read-only plan-style launch | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
+| Multi-agent first worker (v1) | `oma team start --manifest …` then `status` / `stop` |
 | Team fork resolution | `oma team resolve-fork …` |
 | Ordinary `agy` | `oma <agy args…>` (pass-through; strips managed binding env) |
 
@@ -137,11 +138,21 @@ oma autopilot start -- <goal>
 oma autopilot status --session <id>
 oma autopilot checkpoint --session <id> --expected-revision <n> --evidence <file>
 oma autopilot resume --session <id> --conversation <id> --expected-revision <n>
+  # ledger-only binding update (no spawn)
+oma autopilot drive --session <id> --conversation <id> --expected-revision <n>
+  # ledger bind + managed agy spawn via resumeConversation (requires prior exact_env bind)
 oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot doctor --session <id>
 oma autopilot review|qa|reset-breaker …   # see oma --help
 
-oma team start --manifest <file>
+oma team start --manifest <file> [--worker-mode interactive|headless]
+  # Ready tasks (deps completed) up to max-parallel; managed worktree + tmux + agy bootstrap.
+oma team status --team <id>
+oma team stop --team <id>
+oma team supervise --team <id>
+oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --process dead
+oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
+oma team tick --team <id> [--max-parallel <n>]
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
 oma setup
 oma doctor [--json] [--no-strict-plugin]
@@ -190,6 +201,7 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 - Managed binding requires exact env; ordinary pass-through strips binding env.
 - Launch nonce is capability material — debug logs store fingerprint only, not plaintext.
 - Do not modify `AGENTS.md` without an intentional merge policy.
+- **Dangerous launch gate:** argv tokens `--madmax` / `--yolo` require TTY confirmation (`yes`) before spawning `agy`. Non-TTY fails closed unless you pass `--i-understand-dangerous-launch` (stripped before forward). Managed form `oma ralph --madmax -- task` is **rejected** (no silent drop of tokens before `--`).
 
 ---
 
