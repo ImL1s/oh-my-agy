@@ -31,6 +31,7 @@ jobs:
 
       - run: npm ci
       - run: npm run build
+
       - name: Assert tag matches package version (tag pushes)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -40,6 +41,7 @@ jobs:
           test "$TAG" = "$PKG"
           PLUG="$(node -p "require('./plugin.json').version")"
           test "$TAG" = "$PLUG"
+
       - run: npm run test:unit
       - run: npm run test:package
       - run: npm run test:e2e
@@ -72,10 +74,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: npm publish (optional)
-        if: |
-          (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch')
-          && (github.event_name != 'workflow_dispatch' || inputs.publish_npm)
-          && secrets.NPM_TOKEN != ''
-        run: npm publish "./$TARBALL" --access public
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          WANT_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_npm || startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "NPM_TOKEN not set — skip npm publish (GH Release still OK)"
+            exit 0
+          fi
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.publish_npm }}" != "true" ]]; then
+            echo "publish_npm=false — skip"
+            exit 0
+          fi
+          npm publish "./$TARBALL" --access public
