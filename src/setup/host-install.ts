@@ -26,8 +26,22 @@ export interface HostInstallReportV1 {
   steps: HostInstallStepV1[];
 }
 
+export interface HostCliResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  error?: string;
+}
+
+/** 可注入 adapter：unit test 禁止碰真 claude/grok CLI。 */
+export interface HostCliAdapter {
+  which(cmd: string): string | null;
+  run(cmd: string, args: readonly string[]): HostCliResult;
+}
+
 /** Host CLI install 不可無限卡住（對齊 doctor agy probe 的 timeout 習慣）。 */
-const HOST_CLI_TIMEOUT_MS = 60_000;
+export const HOST_CLI_TIMEOUT_MS = 60_000;
 
 export function parseSetupHosts(argv: readonly string[]): SetupHost[] {
   const hostIdx = argv.indexOf('--host');
@@ -43,12 +57,18 @@ export function parseSetupHosts(argv: readonly string[]): SetupHost[] {
   return ['all'];
 }
 
+/** slash steps 是否有硬失敗（timeout 等）— setup exit 1。needs_manual 不算 hard fail。 */
+export function slashReportHasHardFailure(report: HostInstallReportV1): boolean {
+  return report.steps.some((s) => s.status === 'failed');
+}
+
 /**
  * 安裝 Claude / Grok slash surface（不取代 agy transaction）。
  */
 export function installSlashHosts(
   packageRoot: string,
   hosts: ReadonlyArray<SetupHost>,
+  adapter: HostCliAdapter = defaultHostCliAdapter(),
 ): Result<HostInstallReportV1, RuntimeError> {
   const root = path.resolve(packageRoot);
   const manifest = path.join(root, '.claude-plugin', 'plugin.json');
@@ -64,10 +84,10 @@ export function installSlashHosts(
   const steps: HostInstallStepV1[] = [];
 
   if (want.has('claude')) {
-    steps.push(installClaudeSlash(root));
+    steps.push(installClaudeSlash(root, adapter));
   }
   if (want.has('grok')) {
-    steps.push(installGrokSlash(root));
+    steps.push(installGrokSlash(root, adapter));
   }
 
   return ok({ schemaVersion: 1, packageRoot: root, steps });
@@ -86,8 +106,8 @@ function expandHosts(hosts: ReadonlyArray<SetupHost>): Set<'claude' | 'grok'> {
   return set;
 }
 
-function installClaudeSlash(packageRoot: string): HostInstallStepV1 {
-  const claude = which('claude');
+function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostInstallStepV1 {
+  const claude = adapter.which('claude');
   const commands = [
     `claude plugin marketplace add ${shellQuote(packageRoot)}`,
     `claude plugin install oh-my-agy@oh-my-agy`,
@@ -95,20 +115,22 @@ function installClaudeSlash(packageRoot: string): HostInstallStepV1 {
     '# slash: /oh-my-agy:autopilot <goal>',
   ];
 
-  // Prefer project-local skill visibility (highest priority for Grok; Claude also scans .claude/skills)
+  // packageRoot 下的 skill link 僅利於「在 OMA repo 當 workspace」的本機開發，不是 global workspace 安裝
   const link = linkProjectSkills(packageRoot, path.join(packageRoot, '.claude', 'skills'));
   if (claude === null) {
     return {
       host: 'claude',
       status: 'needs_manual',
-      message: `claude CLI not on PATH; project skills linked=${link.ok}. Install Claude Code plugin manually.`,
+      message:
+        `claude CLI not on PATH; linked skills under packageRoot (.claude/skills)=${link.ok}. `
+        + 'Install Claude Code plugin manually (see commands).',
       commands,
-      detail: link,
+      detail: { packageRootSkillsLink: link },
     };
   }
 
-  const marketplace = spawnHostCli(claude, ['plugin', 'marketplace', 'add', packageRoot]);
-  const install = spawnHostCli(claude, ['plugin', 'install', 'oh-my-agy@oh-my-agy']);
+  const marketplace = adapter.run(claude, ['plugin', 'marketplace', 'add', packageRoot]);
+  const install = adapter.run(claude, ['plugin', 'install', 'oh-my-agy@oh-my-agy']);
 
   if (install.timedOut || marketplace.timedOut) {
     return {
@@ -116,21 +138,23 @@ function installClaudeSlash(packageRoot: string): HostInstallStepV1 {
       status: 'failed',
       message: 'claude plugin install timed out; run commands below manually',
       commands,
-      detail: { marketplace, install, projectSkillsLink: link },
+      detail: { marketplace, install, packageRootSkillsLink: link },
     };
   }
 
-  if (install.status === 0) {
+  if (install.status === 0 || isAlreadyInstalled(install)) {
     return {
       host: 'claude',
       status: 'ok',
       message:
-        'Claude plugin install exit 0; restart session for /oh-my-agy:autopilot (enable if not listed)',
+        install.status === 0
+          ? 'Claude plugin install exit 0; restart session for /oh-my-agy:autopilot (enable if not listed)'
+          : 'Claude plugin already installed; restart session for /oh-my-agy:autopilot',
       commands,
       detail: {
         marketplaceCode: marketplace.status,
         installStdout: (install.stdout || '').slice(0, 500),
-        projectSkillsLink: link,
+        packageRootSkillsLink: link,
       },
     };
   }
@@ -144,45 +168,49 @@ function installClaudeSlash(packageRoot: string): HostInstallStepV1 {
   return {
     host: 'claude',
     status: 'needs_manual',
-    message: 'Automatic claude plugin install failed; run commands below or use project .claude/skills',
+    message:
+      'Automatic claude plugin install failed; run commands below. '
+      + 'packageRoot .claude/skills is only for OMA-repo local discovery.',
     commands,
     detail: {
       marketplaceCode: marketplace.status,
       marketplaceErr: (marketplace.stderr || marketplace.stdout || '').slice(0, 400),
       installCode: install.status,
       installErr: (install.stderr || install.stdout || '').slice(0, 400),
-      projectSkillsLink: link,
+      packageRootSkillsLink: link,
       userPluginSkillsLink: userLink,
     },
   };
 }
 
-function installGrokSlash(packageRoot: string): HostInstallStepV1 {
-  const grok = which('grok');
+function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostInstallStepV1 {
+  const grok = adapter.which('grok');
   const commands = [
     `grok plugin install ${shellQuote(packageRoot)} --trust`,
     '# slash: /oh-my-agy:autopilot <goal>',
   ];
-  const projectLink = linkProjectSkills(packageRoot, path.join(packageRoot, '.grok', 'skills'));
+  const packageLink = linkProjectSkills(packageRoot, path.join(packageRoot, '.grok', 'skills'));
 
   if (grok === null) {
     return {
       host: 'grok',
       status: 'needs_manual',
-      message: `grok CLI not on PATH; project .grok/skills linked=${projectLink.ok}`,
+      message:
+        `grok CLI not on PATH; linked skills under packageRoot (.grok/skills)=${packageLink.ok}. `
+        + 'Run plugin install manually (see commands).',
       commands,
-      detail: projectLink,
+      detail: { packageRootSkillsLink: packageLink },
     };
   }
 
-  const result = spawnHostCli(grok, ['plugin', 'install', packageRoot, '--trust']);
+  const result = adapter.run(grok, ['plugin', 'install', packageRoot, '--trust']);
   if (result.timedOut) {
     return {
       host: 'grok',
       status: 'failed',
       message: 'grok plugin install timed out; run commands below manually',
       commands,
-      detail: { result, projectSkillsLink: projectLink },
+      detail: { result, packageRootSkillsLink: packageLink },
     };
   }
   if (result.status === 0) {
@@ -193,14 +221,13 @@ function installGrokSlash(packageRoot: string): HostInstallStepV1 {
       commands,
       detail: {
         stdout: (result.stdout || '').slice(0, 500),
-        projectSkillsLink: projectLink,
+        packageRootSkillsLink: packageLink,
       },
     };
   }
 
   // Idempotent: already installed is success for slash-first setup
-  const combined = `${result.stderr || ''}\n${result.stdout || ''}`;
-  if (/already installed/i.test(combined)) {
+  if (isAlreadyInstalled(result)) {
     return {
       host: 'grok',
       status: 'ok',
@@ -208,8 +235,8 @@ function installGrokSlash(packageRoot: string): HostInstallStepV1 {
       commands,
       detail: {
         code: result.status,
-        stdout: combined.slice(0, 500),
-        projectSkillsLink: projectLink,
+        stdout: `${result.stderr || ''}\n${result.stdout || ''}`.slice(0, 500),
+        packageRootSkillsLink: packageLink,
       },
     };
   }
@@ -217,14 +244,20 @@ function installGrokSlash(packageRoot: string): HostInstallStepV1 {
   return {
     host: 'grok',
     status: 'needs_manual',
-    message: 'grok plugin install failed; project skills may still load via .grok/skills',
+    message:
+      'grok plugin install failed; packageRoot .grok/skills is only for OMA-repo local discovery',
     commands,
     detail: {
       code: result.status,
-      err: combined.slice(0, 500),
-      projectSkillsLink: projectLink,
+      err: `${result.stderr || ''}\n${result.stdout || ''}`.slice(0, 500),
+      packageRootSkillsLink: packageLink,
     },
   };
+}
+
+function isAlreadyInstalled(result: HostCliResult): boolean {
+  const combined = `${result.stderr || ''}\n${result.stdout || ''}`;
+  return /already installed/i.test(combined);
 }
 
 /**
@@ -253,7 +286,7 @@ export function linkProjectSkills(
     const src = path.resolve(srcRoot, entry.name);
     try {
       if (fs.lstatSync(dest)) {
-        if (!canReplaceSkillDest(dest, src)) {
+        if (!canReplaceSkillDest(dest, src, srcRoot)) {
           skipped.push(`${entry.name}: existing non-OMA path preserved`);
           continue;
         }
@@ -272,8 +305,11 @@ export function linkProjectSkills(
   return { ok: errors.length === 0 && linked.length > 0, linked, errors, skipped };
 }
 
-/** 僅替換不存在、或已指向 skills 下的 symlink；不刪使用者真實 skill 目錄。 */
-function canReplaceSkillDest(dest: string, expectedSrc: string): boolean {
+/**
+ * 僅替換不存在、或已指向 **此 packageRoot/skills** 的 symlink；
+ * 不刪使用者真實 skill 目錄，也不砍指向其他工具 skills 的 link。
+ */
+function canReplaceSkillDest(dest: string, expectedSrc: string, packageSkillsRoot: string): boolean {
   try {
     const st = fs.lstatSync(dest);
     if (!st.isSymbolicLink()) return false;
@@ -281,49 +317,48 @@ function canReplaceSkillDest(dest: string, expectedSrc: string): boolean {
     const resolved = path.isAbsolute(current)
       ? path.resolve(current)
       : path.resolve(path.dirname(dest), current);
-    // 允許替換舊的相對 OMA skill link，或任何已指向 expectedSrc 的 link
     if (resolved === expectedSrc) return true;
-    // 相對/舊路徑若落在 .../skills/<name> 也視為 OMA 管理
-    const base = path.basename(resolved);
-    const parent = path.basename(path.dirname(resolved));
-    return parent === 'skills' && base === path.basename(expectedSrc);
+    const skillsRoot = path.resolve(packageSkillsRoot);
+    const relative = path.relative(skillsRoot, resolved);
+    return relative !== ''
+      && !relative.startsWith('..')
+      && !path.isAbsolute(relative)
+      && path.basename(resolved) === path.basename(expectedSrc);
   } catch {
     return true;
   }
 }
 
-interface HostCliResult {
-  status: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-  error?: string;
-}
-
-function spawnHostCli(cmd: string, args: string[]): HostCliResult {
-  const result = spawnSync(cmd, args, {
-    encoding: 'utf8',
-    timeout: HOST_CLI_TIMEOUT_MS,
-  });
-  const timedOut = Boolean(result.error && (result.error as NodeJS.ErrnoException).code === 'ETIMEDOUT')
-    || (result.signal === 'SIGTERM' && result.status === null && result.error);
+export function defaultHostCliAdapter(): HostCliAdapter {
   return {
-    status: result.status,
-    stdout: result.stdout || '',
-    stderr: result.stderr || '',
-    timedOut: Boolean(timedOut || (result.error && /ETIMEDOUT|timed out/i.test(result.error.message))),
-    error: result.error ? result.error.message : undefined,
+    which(cmd: string): string | null {
+      const result = spawnSync(process.platform === 'win32' ? 'where' : 'which', [cmd], {
+        encoding: 'utf8',
+        timeout: 5_000,
+      });
+      if (result.status !== 0) return null;
+      const line = (result.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+      return line || null;
+    },
+    run(cmd: string, args: readonly string[]): HostCliResult {
+      const result = spawnSync(cmd, [...args], {
+        encoding: 'utf8',
+        timeout: HOST_CLI_TIMEOUT_MS,
+      });
+      const timedOut = Boolean(
+        result.error && (result.error as NodeJS.ErrnoException).code === 'ETIMEDOUT',
+      ) || Boolean(
+        result.error && /ETIMEDOUT|timed out/i.test(result.error.message),
+      );
+      return {
+        status: result.status,
+        stdout: result.stdout || '',
+        stderr: result.stderr || '',
+        timedOut,
+        error: result.error ? result.error.message : undefined,
+      };
+    },
   };
-}
-
-function which(cmd: string): string | null {
-  const result = spawnSync(process.platform === 'win32' ? 'where' : 'which', [cmd], {
-    encoding: 'utf8',
-    timeout: 5_000,
-  });
-  if (result.status !== 0) return null;
-  const line = (result.stdout || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean);
-  return line || null;
 }
 
 function shellQuote(value: string): string {

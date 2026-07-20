@@ -2,10 +2,43 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  HostCliAdapter,
+  HostCliResult,
   installSlashHosts,
   linkProjectSkills,
   parseSetupHosts,
+  slashReportHasHardFailure,
 } from '../../src/setup/host-install';
+
+function fakeResult(partial: Partial<HostCliResult> = {}): HostCliResult {
+  return {
+    status: 0,
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    ...partial,
+  };
+}
+
+function mockAdapter(opts: {
+  which?: Record<string, string | null>;
+  run?: (cmd: string, args: readonly string[]) => HostCliResult;
+}): HostCliAdapter {
+  const calls: Array<{ cmd: string; args: readonly string[] }> = [];
+  return {
+    which(cmd: string) {
+      if (opts.which && cmd in opts.which) return opts.which[cmd] ?? null;
+      return null;
+    },
+    run(cmd: string, args: readonly string[]) {
+      calls.push({ cmd, args });
+      if (opts.run) return opts.run(cmd, args);
+      return fakeResult({ status: 0, stdout: 'ok' });
+    },
+    // expose for assertions
+    ...({ calls } as object),
+  } as HostCliAdapter & { calls: Array<{ cmd: string; args: readonly string[] }> };
+}
 
 describe('slash host install helpers', () => {
   test('parseSetupHosts defaults to all', () => {
@@ -55,10 +88,28 @@ describe('slash host install helpers', () => {
     }
   });
 
+  test('linkProjectSkills does not replace foreign skills symlink', () => {
+    const packageRoot = path.resolve(__dirname, '../..');
+    const dest = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-skills-foreign-'));
+    const foreignSkills = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-foreign-skills-'));
+    try {
+      const foreign = path.join(foreignSkills, 'autopilot');
+      fs.mkdirSync(foreign);
+      fs.writeFileSync(path.join(foreign, 'SKILL.md'), 'foreign', 'utf8');
+      fs.symlinkSync(foreign, path.join(dest, 'autopilot'), 'dir');
+      const result = linkProjectSkills(packageRoot, dest);
+      expect(result.skipped.some((s) => s.startsWith('autopilot:'))).toBe(true);
+      expect(fs.readFileSync(path.join(dest, 'autopilot', 'SKILL.md'), 'utf8')).toBe('foreign');
+    } finally {
+      fs.rmSync(dest, { recursive: true, force: true });
+      fs.rmSync(foreignSkills, { recursive: true, force: true });
+    }
+  });
+
   test('installSlashHosts fails closed without claude plugin manifest', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-no-manifest-'));
     try {
-      const result = installSlashHosts(tmp, ['claude']);
+      const result = installSlashHosts(tmp, ['claude'], mockAdapter({}));
       expect(result.ok).toBe(false);
       if (result.ok) return;
       expect(result.error.code).toBe('E_CORRUPT_STATE');
@@ -67,17 +118,55 @@ describe('slash host install helpers', () => {
     }
   });
 
-  test('installSlashHosts returns steps for real package root', () => {
+  test('installSlashHosts with mock adapter — CLI missing → needs_manual (no real spawn)', () => {
     const packageRoot = path.resolve(__dirname, '../..');
-    const result = installSlashHosts(packageRoot, ['claude', 'grok']);
+    const adapter = mockAdapter({ which: { claude: null, grok: null } });
+    const result = installSlashHosts(packageRoot, ['claude', 'grok'], adapter);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.value.schemaVersion).toBe(1);
     expect(result.value.steps).toHaveLength(2);
-    expect(result.value.steps.map((s) => s.host).sort()).toEqual(['claude', 'grok']);
-    for (const step of result.value.steps) {
-      expect(['ok', 'needs_manual', 'failed', 'skipped']).toContain(step.status);
-      expect(step.message.length).toBeGreaterThan(0);
-    }
+    expect(result.value.steps.every((s) => s.status === 'needs_manual')).toBe(true);
+    expect(slashReportHasHardFailure(result.value)).toBe(false);
+  });
+
+  test('installSlashHosts with mock adapter — success path', () => {
+    const packageRoot = path.resolve(__dirname, '../..');
+    const adapter = mockAdapter({
+      which: { claude: '/bin/claude', grok: '/bin/grok' },
+      run: () => fakeResult({ status: 0, stdout: 'installed' }),
+    });
+    const result = installSlashHosts(packageRoot, ['claude', 'grok'], adapter);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.steps.every((s) => s.status === 'ok')).toBe(true);
+    expect(slashReportHasHardFailure(result.value)).toBe(false);
+  });
+
+  test('installSlashHosts with mock adapter — already installed → ok', () => {
+    const packageRoot = path.resolve(__dirname, '../..');
+    const adapter = mockAdapter({
+      which: { claude: '/bin/claude', grok: '/bin/grok' },
+      run: () => fakeResult({
+        status: 1,
+        stderr: "Error: repo 'oh-my-agy' already installed\n",
+      }),
+    });
+    const result = installSlashHosts(packageRoot, ['claude', 'grok'], adapter);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.steps.every((s) => s.status === 'ok')).toBe(true);
+  });
+
+  test('installSlashHosts with mock adapter — timeout → failed hard', () => {
+    const packageRoot = path.resolve(__dirname, '../..');
+    const adapter = mockAdapter({
+      which: { claude: '/bin/claude', grok: '/bin/grok' },
+      run: () => fakeResult({ status: null, timedOut: true, error: 'ETIMEDOUT' }),
+    });
+    const result = installSlashHosts(packageRoot, ['claude', 'grok'], adapter);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.steps.every((s) => s.status === 'failed')).toBe(true);
+    expect(slashReportHasHardFailure(result.value)).toBe(true);
   });
 });

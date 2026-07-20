@@ -139,11 +139,14 @@ function checkPluginManifestVersion(packageRoot: string, packageVersion: string)
         };
       }
     }
+    const claudeSynced = fs.existsSync(claudePath);
     return {
       id: 'version_sync',
       status: 'pass',
-      message: `package.json, plugin.json, and .claude-plugin all ${packageVersion}`,
-      detail: { name: raw.name },
+      message: claudeSynced
+        ? `package.json, plugin.json, and .claude-plugin all ${packageVersion}`
+        : `package.json and plugin.json both ${packageVersion} (.claude-plugin absent)`,
+      detail: { name: raw.name, claudePluginSynced: claudeSynced },
     };
   } catch (error) {
     return {
@@ -227,7 +230,9 @@ function checkSlashSkillSurface(packageRoot: string): DoctorCheckV1 {
     };
   }
   const body = fs.readFileSync(autopilot, 'utf8');
-  const inSessionFirst = /already in (the )?agent session|IN-SESSION PRIMARY|slash/i.test(body);
+  // 硬標記：避免僅提到 “slash” 就假綠（CLI-first 文檔也可能含 slash 字樣）
+  const inSessionFirst = /You are already in the agent session/i.test(body)
+    || /IN-SESSION PRIMARY/i.test(body);
   return {
     id: 'slash_skills',
     status: inSessionFirst ? 'pass' : 'warn',
@@ -266,10 +271,13 @@ function checkAgyOnPath(agyCommand: string): DoctorCheckV1 {
     timeout: 15_000,
   });
   if (probe.error) {
+    // slash-first：Claude/Grok 主路徑不強制 agy；缺席改 warn（hooks/managed 才真正需要）
     return {
       id: 'agy_path',
-      status: 'fail',
-      message: `agy not runnable (${agyCommand}): ${probe.error.message}`,
+      status: 'warn',
+      message:
+        `agy not runnable (${agyCommand}): ${probe.error.message} `
+        + '— optional for /oh-my-agy:autopilot slash; required only for managed hooks',
     };
   }
   // help 可能 exit 0 或 1，重點是能 spawn

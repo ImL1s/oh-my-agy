@@ -180,41 +180,62 @@ export function createDefaultServices(
     },
     async setupCommand(argv) {
       const global = !argv.includes('--workspace');
-      const { parseSetupHosts, installSlashHosts } = await import('../setup/host-install');
+      const {
+        parseSetupHosts,
+        installSlashHosts,
+        slashReportHasHardFailure,
+      } = await import('../setup/host-install');
       const hosts = parseSetupHosts(argv);
       if (hosts.length === 0) {
         stderr('Invalid --host value. Use: all | agy | claude | grok\n');
         return 2;
       }
+      const agyOnly = hosts.length === 1 && hosts[0] === 'agy';
       const runAgy = hosts.includes('all') || hosts.includes('agy');
       const runSlash = hosts.includes('all')
         || hosts.includes('claude')
         || hosts.includes('grok');
 
+      // 設計概念映射：slash-first — agy 與 Claude/Grok slash 解耦；
+      // 預設 all 時 agy 失敗只 warn 並繼續裝 slash（僅 --host agy 才 hard-fail）。
       let agyResult: unknown = null;
       if (runAgy) {
         const state = options.stateRoot
           ? ok({ path: options.stateRoot, source: 'environment' as const })
           : resolveStateRoot({ create: true });
         if (!state.ok) {
-          stderr(`${state.error.code}: ${state.error.message}\n`);
-          return 1;
+          if (agyOnly) {
+            stderr(`${state.error.code}: ${state.error.message}\n`);
+            return 1;
+          }
+          stderr(`warn: agy setup skipped (${state.error.code}: ${state.error.message})\n`);
+          agyResult = { status: 'failed', error: state.error };
+        } else {
+          const adapter = options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand);
+          const transaction = new PluginSetupTransaction({
+            packageRoot,
+            stateRoot: state.value.path,
+            adapter,
+          });
+          const result = await transaction.run();
+          if (!result.ok) {
+            if (agyOnly) {
+              stderr(`${result.error.code}: ${result.error.message}\n`);
+              return 1;
+            }
+            stderr(
+              `warn: agy plugin setup failed (${result.error.code}: ${result.error.message}); `
+              + 'continuing slash host install\n',
+            );
+            agyResult = { status: 'failed', error: result.error };
+          } else {
+            agyResult = { ...result.value, mode: global ? 'global' : 'workspace' };
+          }
         }
-        const adapter = options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand);
-        const transaction = new PluginSetupTransaction({
-          packageRoot,
-          stateRoot: state.value.path,
-          adapter,
-        });
-        const result = await transaction.run();
-        if (!result.ok) {
-          stderr(`${result.error.code}: ${result.error.message}\n`);
-          return 1;
-        }
-        agyResult = { ...result.value, mode: global ? 'global' : 'workspace' };
       }
 
       let slashResult: unknown = null;
+      let slashHardFailed = false;
       if (runSlash) {
         const slashHosts = hosts.includes('all')
           ? (['claude', 'grok'] as const)
@@ -225,6 +246,7 @@ export function createDefaultServices(
           return 1;
         }
         slashResult = installed.value;
+        slashHardFailed = slashReportHasHardFailure(installed.value);
       }
 
       stdout(`${JSON.stringify({
@@ -237,6 +259,9 @@ export function createDefaultServices(
           'oma doctor --no-strict-plugin',
         ],
       }, null, 2)}\n`);
+
+      // failed (timeout 等) → 1；agy-only 失敗已 early return；needs_manual 仍 0
+      if (slashHardFailed) return 1;
       return 0;
     },
     async doctorCommand(argv) {
