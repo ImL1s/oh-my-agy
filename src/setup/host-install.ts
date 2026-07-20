@@ -198,6 +198,22 @@ function installGrokSlash(packageRoot: string): HostInstallStepV1 {
     };
   }
 
+  // Idempotent: already installed is success for slash-first setup
+  const combined = `${result.stderr || ''}\n${result.stdout || ''}`;
+  if (/already installed/i.test(combined)) {
+    return {
+      host: 'grok',
+      status: 'ok',
+      message: 'Grok plugin already installed; restart session for /oh-my-agy:autopilot',
+      commands,
+      detail: {
+        code: result.status,
+        stdout: combined.slice(0, 500),
+        projectSkillsLink: projectLink,
+      },
+    };
+  }
+
   return {
     host: 'grok',
     status: 'needs_manual',
@@ -205,7 +221,7 @@ function installGrokSlash(packageRoot: string): HostInstallStepV1 {
     commands,
     detail: {
       code: result.status,
-      err: (result.stderr || result.stdout || '').slice(0, 500),
+      err: combined.slice(0, 500),
       projectSkillsLink: projectLink,
     },
   };
