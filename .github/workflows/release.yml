@@ -7,12 +7,13 @@ on:
   workflow_dispatch:
     inputs:
       publish_npm:
-        description: Also npm publish (needs NPM_TOKEN secret)
+        description: Also npmjs.org publish (needs NPM_TOKEN secret + free package name)
         type: boolean
         default: false
 
 permissions:
   contents: write
+  packages: write
   id-token: write
 
 jobs:
@@ -73,19 +74,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: npm publish (optional)
+      # 公開名 oh-my-agy 已被他人佔用；套件為 @iml1s/oh-my-agy，預設發 GitHub Packages
+      - name: Publish to GitHub Packages
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            echo "@iml1s:registry=https://npm.pkg.github.com"
+            echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}"
+          } > "$RUNNER_TEMP/npmrc-gh"
+          npm publish "./$TARBALL" --access public --userconfig "$RUNNER_TEMP/npmrc-gh" --registry https://npm.pkg.github.com
+
+      - name: npmjs.org publish (optional)
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          WANT_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_npm || startsWith(github.ref, 'refs/tags/v') }}
         run: |
           set -euo pipefail
           if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "NPM_TOKEN not set — skip npm publish (GH Release still OK)"
+            echo "NPM_TOKEN not set — skip npmjs.org publish (GitHub Packages still OK)"
             exit 0
           fi
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.publish_npm }}" != "true" ]]; then
             echo "publish_npm=false — skip"
             exit 0
           fi
-          npm publish "./$TARBALL" --access public
+          # scoped 套件上 npmjs 需帳號有 @iml1s scope 權限；失敗時不拖垮 GH Packages 已成功路徑
+          npm publish "./$TARBALL" --access public --registry https://registry.npmjs.org || {
+            echo "npmjs.org publish failed — see name ownership / scope notes in README"
+            exit 1
+          }

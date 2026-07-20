@@ -1,6 +1,6 @@
 {
-  "name": "oh-my-agy",
-  "version": "0.2.0",
+  "name": "@iml1s/oh-my-agy",
+  "version": "0.2.1",
   "description": "OMA — multi-agent orchestration for Google Antigravity CLI (managed modes, exact_env hooks, Autopilot/Team)",
   "main": "dist/bin/oma.js",
   "bin": {
@@ -47,5 +47,15 @@
   "bugs": {
     "url": "https://github.com/ImL1s/oh-my-agy/issues"
   },
-  "homepage": "https://github.com/ImL1s/oh-my-agy#readme"
+  "homepage": "https://github.com/ImL1s/oh-my-agy#readme",
+  "keywords": [
+    "antigravity",
+    "agy",
+    "oma",
+    "omy",
+    "cli",
+    "agents",
+    "orchestration",
+    "hooks"
+  ]
 }

@@ -87,15 +87,25 @@ oma --help
 oma ralph -- "Reply with exactly one word: pong"
 ```
 
-### Future / npm (when published)
+### Install from release (GitHub Packages or Release tarball)
+
+> **Note:** the unscoped name `oh-my-agy` on **npmjs.org** is already taken by a different project.  
+> This repo publishes as **`@iml1s/oh-my-agy`** (GitHub Packages) and attaches a tarball to [GitHub Releases](https://github.com/ImL1s/oh-my-agy/releases).
 
 ```bash
-npm i -g oh-my-agy@latest
+# A) GitHub Packages (needs a GitHub PAT with read:packages)
+echo "@iml1s:registry=https://npm.pkg.github.com" >> ~/.npmrc
+# //npm.pkg.github.com/:_authToken=YOUR_GH_TOKEN
+npm i -g @iml1s/oh-my-agy@latest
+
+# B) Release tarball (no registry auth)
+npm i -g https://github.com/ImL1s/oh-my-agy/releases/download/v0.2.1/iml1s-oh-my-agy-0.2.1.tgz
+
 oma setup
 oma doctor
 ```
 
-`npm i -g` only puts **`oma` on PATH** — you still need `oma setup` (or `agy plugin install`) for hooks.
+`npm i -g` only puts **`oma` / `omy` on PATH** — you still need `oma setup` (or `agy plugin install`) for hooks.
 
 ---
 
@@ -217,15 +227,15 @@ npm run test:e2e
 | Surface | What |
 |---------|------|
 | **CI** | `.github/workflows/ci.yml` — Node 20/22 build + unit + pack smoke; e2e with mock `agy` |
-| **Release** | `.github/workflows/release.yml` — on tag `v*` (must match `package.json` / `plugin.json`): test, `npm pack`, GH Release asset; optional `npm publish` if `NPM_TOKEN` set |
+| **Release** | `.github/workflows/release.yml` — on tag `v*` (must match `package.json` / `plugin.json`): test, `npm pack`, GH Release asset, **GitHub Packages** (`@iml1s/oh-my-agy`); optional npmjs.org if `NPM_TOKEN` set |
 | **Install script** | `./scripts/install.sh` |
 
 Tag example:
 
 ```bash
-# after main is green
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+# after main is green; tag must match package.json / plugin.json version
+git tag -a v0.2.1 -m "v0.2.1"
+git push origin v0.2.1
 ```
 
 ---
