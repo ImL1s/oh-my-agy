@@ -4,6 +4,7 @@ dist/
 
 # runtime state (do not ship)
 .omx/
+.omc/
 .agy/
 .agy_sandbox_*/
 *.log
