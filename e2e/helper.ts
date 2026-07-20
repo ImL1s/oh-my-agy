@@ -86,6 +86,36 @@ export function runOma(
 }
 
 /**
+ * 判斷子程序是否以 SIGINT 中斷結束。
+ * 設計概念映射：Linux/GHA 上 Node close 常回傳 code=null + signal=SIGINT；
+ * macOS 或 process.exit(130) 路徑則為 code=130。兩者皆視為合法中斷。
+ */
+export function isSigintExit(
+  code: number | null | undefined,
+  signal: NodeJS.Signals | null | undefined
+): boolean {
+  return code === 130 || signal === 'SIGINT';
+}
+
+/**
+ * 等待 spawn 子程序 close，並同時回傳 code 與 signal。
+ * 若程序已結束（exitCode/signalCode 已填），立即 resolve，避免漏接 close。
+ */
+export function waitForClose(
+  child: ReturnType<typeof spawn>
+): Promise<{ code: number | null; signal: NodeJS.Signals | null }> {
+  return new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      resolve({ code: child.exitCode, signal: child.signalCode });
+      return;
+    }
+    child.once('close', (code, signal) => {
+      resolve({ code, signal });
+    });
+  });
+}
+
+/**
  * 寫入 todo.json
  */
 export function writeTodo(data: any): void {

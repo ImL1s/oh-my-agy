@@ -1,4 +1,14 @@
-import { runOma, writeTodo, readTodo, clearTodo, todoExists, TODO_PATH, TODO_DIR } from './helper';
+import {
+  runOma,
+  writeTodo,
+  readTodo,
+  clearTodo,
+  todoExists,
+  TODO_PATH,
+  TODO_DIR,
+  isSigintExit,
+  waitForClose,
+} from './helper';
 import * as fs from 'fs';
 import * as path from 'path';
 import { exec, spawn } from 'child_process';
@@ -252,6 +262,8 @@ describe('Tier 2 E2E 測試 - 邊界與極端情況', () => {
         }
       });
 
+      // 先掛 close，避免 kill 後漏接事件（Linux 上常見）
+      const closed = waitForClose(child);
       let stdoutData = '';
 
       // 用 Promise 監聽 stdout 標誌後再送出 SIGINT，防止時序抖動
@@ -266,9 +278,9 @@ describe('Tier 2 E2E 測試 - 邊界與極端情況', () => {
         child.stdout.on('data', onData);
 
         // 設定一個安全超時，防止 mock 沒有輸出時無限等待
-        child.on('close', (code) => {
+        child.on('close', (code, signal) => {
           child.stdout.off('data', onData);
-          reject(new Error(`程序在輸出 [MOCK_AGY_SLEEPING] 前已結束，退出碼: ${code}`));
+          reject(new Error(`程序在輸出 [MOCK_AGY_SLEEPING] 前已結束，code=${code} signal=${signal}`));
         });
         child.on('error', (err) => {
           child.stdout.off('data', onData);
@@ -281,11 +293,9 @@ describe('Tier 2 E2E 測試 - 邊界與極端情況', () => {
         throw err;
       });
 
-      const code = await new Promise<number | null>((resolve) => {
-        child.on('close', resolve);
-      });
-
-      expect(code).toBe(130);
+      const { code, signal } = await closed;
+      // Linux/GHA: code=null + signal=SIGINT；macOS 或 exit(130): code=130
+      expect(isSigintExit(code, signal)).toBe(true);
     }, 15000);
 
     test('TC-T2-20: 透傳指令執行超時', async () => {

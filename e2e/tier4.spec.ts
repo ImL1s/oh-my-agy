@@ -1,4 +1,13 @@
-import { runOma, writeTodo, readTodo, clearTodo, todoExists, TODO_PATH } from './helper';
+import {
+  runOma,
+  writeTodo,
+  readTodo,
+  clearTodo,
+  todoExists,
+  TODO_PATH,
+  isSigintExit,
+  waitForClose,
+} from './helper';
 import { spawn } from 'child_process';
 import { OMA_PATH, MOCK_AGY_DIR } from './helper';
 import * as fs from 'fs';
@@ -204,6 +213,8 @@ describe('Tier 4 E2E 測試 - 真實世界應用場景', () => {
       }
     });
 
+    // 先掛 close，避免 kill 後漏接事件（Linux 上常見）
+    const closed = waitForClose(child);
     let stdoutData = '';
 
     // 監聽倒數輸出後發送 SIGINT
@@ -217,9 +228,9 @@ describe('Tier 4 E2E 測試 - 真實世界應用場景', () => {
       };
       child.stdout.on('data', onData);
 
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         child.stdout.off('data', onData);
-        reject(new Error(`程序在倒數前已結束，退出碼: ${code}`));
+        reject(new Error(`程序在倒數前已結束，code=${code} signal=${signal}`));
       });
       child.on('error', (err) => {
         child.stdout.off('data', onData);
@@ -232,12 +243,10 @@ describe('Tier 4 E2E 測試 - 真實世界應用場景', () => {
       throw err;
     });
 
-    const code = await new Promise<number | null>((resolve) => {
-      child.on('close', resolve);
-    });
+    const { code, signal } = await closed;
 
-    // 應以 130 結束且無喚醒
-    expect(code).toBe(130);
+    // 應以 SIGINT 中斷結束且無喚醒（Linux 可為 code=null + signal=SIGINT）
+    expect(isSigintExit(code, signal)).toBe(true);
     expect(stdoutData).not.toContain('[SYSTEM REMINDER - TODO CONTINUATION]');
   }, 10000);
 });
