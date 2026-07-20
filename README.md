@@ -146,8 +146,9 @@ oma autopilot doctor --session <id>
 oma autopilot review|qa|reset-breaker …   # see oma --help
 
 oma team start --manifest <file> [--worker-mode interactive|headless]
-  # v1: validates manifest, creates Team aggregate, starts FIRST ready task
-  # (empty deps) in a managed git worktree + owned tmux pane (worker-hold).
+  # v1.1: validates manifest, creates Team aggregate, starts FIRST ready task
+  # (empty deps) in a managed git worktree + owned tmux pane.
+  # Default bootstrap runs agy via worker-bootstrap (tests may inject hold).
   # Does NOT yet run full DAG, delivery, or integration.
 oma team status --team <id>
 oma team stop --team <id>

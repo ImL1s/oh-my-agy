@@ -113,8 +113,8 @@ export class TeamOrchestrator {
     } else if (options.workerHoldEntryPath !== undefined) {
       this.workerBootstrapArgv = [options.workerHoldEntryPath];
     } else {
-      // 生產預設：與本模組同目錄的編譯產物
-      const entry = path.resolve(__dirname, 'worker-hold.js');
+      // 生產預設：agy worker-bootstrap（hold 僅測試注入）
+      const entry = path.resolve(__dirname, 'worker-bootstrap.js');
       this.workerBootstrapArgv = [entry];
     }
   }
@@ -193,6 +193,8 @@ export class TeamOrchestrator {
     const sessionName = sanitizeSession(`${sessionBase}-${workerId}-g${generation}`);
     const markerPath = path.join(worktree.value.path, '.oma-worker-ready');
     const descriptorPath = path.join(worktree.value.path, '.oma-worker-descriptor.json');
+    const sessionId = this.tokenFactory();
+    const launchNonce = this.tokenFactory();
     // descriptor 只存 claimToken digest，不落明文
     const descriptor = {
       schemaVersion: 1 as const,
@@ -204,11 +206,21 @@ export class TeamOrchestrator {
       claimTokenDigest: sha256(claimToken),
       worktreePath: worktree.value.path,
       stateRoot: this.stateRoot,
+      sessionId,
+      launchNonce,
+      invocationGeneration: 1,
+      taskPrompt: `Execute team task ${ready.id}`,
+      agyCommand: 'agy',
     };
     fs.writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, 'utf8');
+    // capability 檔（0o600）：明文 claim 僅此短生命週期 side-channel
+    const omaDir = path.join(worktree.value.path, '.oma');
+    fs.mkdirSync(omaDir, { recursive: true, mode: 0o700 });
+    const capPath = path.join(omaDir, 'worker-capability.json');
+    fs.writeFileSync(capPath, `${JSON.stringify({ claimToken })}\n`, { encoding: 'utf8', mode: 0o600 });
 
     const workerNonce = this.tokenFactory();
-    // shellCommand = [executable, ...bootstrapArgv, descriptor] → hold 收到 marker 再 descriptor
+    // shellCommand = [executable, ...bootstrapArgv, descriptor] → bootstrap 收到 marker 再 descriptor
     const pane = this.tmux.startWorker({
       sessionName,
       cwd: worktree.value.path,
@@ -221,17 +233,22 @@ export class TeamOrchestrator {
     if (!pane.ok) {
       // descriptor 落在 worktree 內會讓 status 變 dirty；先移除再 best-effort cleanup
       try { fs.rmSync(descriptorPath, { force: true }); } catch (_) { /* best-effort */ }
+      try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
       this.worktrees.removeIfSafe(worktree.value, { ownerNonce, integrated: true });
       return pane;
     }
 
-    // startMarker 編碼 sessionName，供 status/stop 回復
+    const panePid = readPanePid(sessionName);
+    // startMarker 編碼 sessionName，供 status/stop 回復；pid 優先 pane（非 orchestrator）
     const heartbeat: SupervisorHeartbeatV1 = {
       schemaVersion: 1,
       workerId,
       ownerNonce,
       workerNonce,
-      process: { pid: process.pid, startMarker: `tmux:${sessionName}` },
+      process: {
+        pid: panePid ?? process.pid,
+        startMarker: `tmux:${sessionName}`,
+      },
       paneId: pane.value.paneId,
       recordedAtMs: this.nowMs(),
     };
@@ -341,4 +358,17 @@ function gitHead(cwd: string): Result<string, RuntimeError> {
     }));
   }
   return ok(result.stdout.trim());
+}
+
+/** 讀取 tmux session 第一個 pane 的 shell pid（worker 側 process 身分） */
+function readPanePid(sessionName: string): number | null {
+  const result = spawnSync(
+    'tmux',
+    ['list-panes', '-t', sessionName, '-F', '#{pane_pid}'],
+    { encoding: 'utf8' },
+  );
+  if (result.status !== 0) return null;
+  const line = result.stdout.trim().split('\n')[0];
+  const pid = Number(line);
+  return Number.isFinite(pid) && pid > 0 ? pid : null;
 }

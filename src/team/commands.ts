@@ -119,7 +119,8 @@ export interface TeamCommandOptions {
 
 function defaultOrchestrator(context: RuntimeContext): TeamOrchestrator {
   const managedRoot = path.join(context.stateRoot, 'managed-worktrees');
-  const holdEntry = path.resolve(__dirname, 'worker-hold.js');
+  // 生產預設 worker-bootstrap（真 agy）；測試仍可 inject hold
+  const bootstrapEntry = path.resolve(__dirname, 'worker-bootstrap.js');
   return new TeamOrchestrator({
     stateRoot: context.stateRoot,
     workspaceRoot: context.workspaceRoot,
@@ -127,7 +128,7 @@ function defaultOrchestrator(context: RuntimeContext): TeamOrchestrator {
     workspaceKey: context.workspaceKey,
     managedWorktreesRoot: managedRoot,
     tokenFactory: context.tokenFactory,
-    workerHoldEntryPath: holdEntry,
+    workerHoldEntryPath: bootstrapEntry,
   });
 }
 
