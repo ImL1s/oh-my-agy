@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/hooks-PreInvocation%20%2B%20Stop-blue" alt="hooks">
 </p>
 
-**Orchestration layer for [Google Antigravity CLI](https://github.com/) (`agy`).**  
+**Orchestration layer for Google Antigravity CLI (`agy`).**  
 Sibling of [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (OMC), [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) (OMX), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (OmO), and [oh-my-grok](https://github.com/ImL1s/oh-my-grok) (OMG) — same *orchestration idea*, **Antigravity-native** runtime.
 
 _Don't learn every `agy` flag. Use `oma` / `omy`: launch managed → bind exact_env → Stop continue until progress or trip._
