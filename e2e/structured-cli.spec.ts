@@ -21,6 +21,18 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team deliver');
     expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('autopilot drive');
+    expect(r.stdout).toContain('skill list');
+  });
+
+  test('TC-S-01b: oma skill list returns JSON skill catalog', async () => {
+    const r = await runOma(['skill', 'list']);
+    expect(r.code).toBe(0);
+    const body = JSON.parse(r.stdout);
+    expect(Array.isArray(body.skills)).toBe(true);
+    const names = body.skills.map((s: { name: string }) => s.name);
+    expect(names).toEqual(expect.arrayContaining([
+      'autopilot', 'deep-interview', 'ralplan', 'ultragoal', 'code-review', 'ultraqa',
+    ]));
   });
 
   test('TC-S-02: oma doctor --no-strict-plugin exits 0|1|2', async () => {
@@ -41,6 +53,8 @@ describe('Structured CLI e2e baseline', () => {
       const body = JSON.parse(start.stdout);
       expect(body.sessionId).toBeTruthy();
       expect(typeof body.revision).toBe('number');
+      expect(body.phase).toBe('deep-interview');
+      expect(body.phaseCycle).toEqual(expect.arrayContaining(['deep-interview', 'ralplan', 'ultragoal']));
 
       const status = await runOma(
         ['autopilot', 'status', '--session', body.sessionId],

@@ -28,6 +28,14 @@ export interface AutopilotSessionView {
   retryableBlocker: SessionAggregateV1['autopilot']['retryableBlocker'];
   terminal: SessionAggregateV1['autopilot']['terminal'];
   acceptedEvidenceCount: number;
+  /** OMX pipeline (session 完整使用) */
+  phaseCycle: string[];
+  iteration: number;
+  reviewCycle: number;
+  handoffArtifacts: SessionAggregateV1['autopilot']['handoffArtifacts'];
+  reviewVerdict: SessionAggregateV1['autopilot']['reviewVerdict'];
+  qaVerdict: SessionAggregateV1['autopilot']['qaVerdict'];
+  returnToRalplanReason: string | null;
 }
 
 export interface AutopilotRuntimeOptions {
@@ -40,12 +48,22 @@ export interface AutopilotRuntimeOptions {
   gateValidator?: GateValidator;
 }
 
+import {
+  OMX_PHASE_CYCLE,
+  gateMatchesPhase,
+  nextOmxPhaseAfterGate,
+  toOmxPhaseName,
+} from './phases';
+
 const PHASE_ORDER: readonly AutopilotActivePhase[] = [
+  ...OMX_PHASE_CYCLE,
+  // legacy accepted during migration reads
   'requirements', 'planning', 'executing', 'review', 'qa',
 ];
 
 /**
- * 設計概念映射：Autopilot FSM 對齊 oh-my-codex ADR-005 gate protocol。
+ * 設計概念映射：Autopilot FSM 完整對齊 OMX 五階段
+ * deep-interview → ralplan → ultragoal → code-review → ultraqa（+ production 終端 gate）。
  * 狀態唯一 authority 為 SessionAggregateV1；argv 解析與 phase mutation 分離。
  */
 export class AutopilotRuntime {
@@ -103,6 +121,8 @@ export class AutopilotRuntime {
       case 'doctor':
         return this.doctor(command.sessionId);
       case 'checkpoint':
+      case 'advance':
+        return this.acceptGate('checkpoint', command.sessionId, command.expectedRevision, command.evidencePath);
       case 'review':
       case 'qa':
         return this.acceptGate(command.kind, command.sessionId, command.expectedRevision, command.evidencePath);
@@ -114,6 +134,23 @@ export class AutopilotRuntime {
         return this.cancel(command.sessionId, command.expectedRevision, command.reason);
       case 'reset-breaker':
         return this.resetBreaker(command.sessionId, command.expectedRevision);
+      case 'handoff':
+        return this.recordHandoff(
+          command.sessionId,
+          command.expectedRevision,
+          command.key,
+          command.path,
+        );
+      case 'consensus':
+        return this.recordConsensus(
+          command.sessionId,
+          command.expectedRevision,
+          command.role,
+          command.verdict,
+          command.note,
+        );
+      case 'return-ralplan':
+        return this.returnToRalplan(command.sessionId, command.expectedRevision, command.reason);
     }
   }
 
@@ -129,7 +166,7 @@ export class AutopilotRuntime {
       repoKey: this.repoKey,
       workspaceKey: this.workspaceKey,
       launchNonceDigest: sha256(crypto.randomBytes(32)),
-      phase: 'requirements',
+      phase: 'deep-interview',
       workspacePath: process.cwd(),
     });
     const created = await store.initialize(aggregate);
@@ -207,6 +244,18 @@ export class AutopilotRuntime {
         acceptedEvidenceRevisionsAndDigests: acceptedEvidence,
         verifiedArtifactDigests: verifiedArtifacts,
       });
+      const gateOmx = toOmxPhaseName(evidence.value.kind);
+      let reviewVerdict = snapshot.autopilot.reviewVerdict;
+      let qaVerdict = snapshot.autopilot.qaVerdict;
+      let returnToRalplanReason = snapshot.autopilot.returnToRalplanReason;
+      if (gateOmx === 'code-review' || evidence.value.kind === 'review') {
+        reviewVerdict = { clean: true, recommendation: 'APPROVE', at: now };
+        returnToRalplanReason = null;
+      }
+      if (gateOmx === 'ultraqa' || evidence.value.kind === 'qa') {
+        qaVerdict = { clean: true, skipped: false, reason: null, at: now };
+        returnToRalplanReason = null;
+      }
       const autopilot = {
         ...snapshot.autopilot,
         phase: nextPhase.phase,
@@ -218,6 +267,9 @@ export class AutopilotRuntime {
         progressFingerprint,
         noProgressStreak: 0,
         retryableBlocker: null,
+        reviewVerdict,
+        qaVerdict,
+        returnToRalplanReason,
         terminal: nextPhase.phase === 'completed'
           ? {
             phase: 'completed' as const,
@@ -407,18 +459,137 @@ export class AutopilotRuntime {
   }
 
   private view(aggregate: SessionAggregateV1, goal: string): AutopilotSessionView {
+    const ap = aggregate.autopilot;
     return {
       sessionId: aggregate.sessionId,
       revision: aggregate.revision,
-      phase: aggregate.autopilot.phase,
-      lastActivePhase: aggregate.autopilot.lastActivePhase,
+      phase: ap.phase,
+      lastActivePhase: ap.lastActivePhase,
       goal,
       conversationId: aggregate.binding.conversationId,
-      noProgressStreak: aggregate.autopilot.noProgressStreak,
-      retryableBlocker: aggregate.autopilot.retryableBlocker,
-      terminal: aggregate.autopilot.terminal,
-      acceptedEvidenceCount: aggregate.autopilot.acceptedEvidence.length,
+      noProgressStreak: ap.noProgressStreak,
+      retryableBlocker: ap.retryableBlocker,
+      terminal: ap.terminal,
+      acceptedEvidenceCount: ap.acceptedEvidence.length,
+      phaseCycle: ap.phaseCycle ?? [...OMX_PHASE_CYCLE],
+      iteration: ap.iteration ?? 1,
+      reviewCycle: ap.reviewCycle ?? 0,
+      handoffArtifacts: ap.handoffArtifacts,
+      reviewVerdict: ap.reviewVerdict ?? null,
+      qaVerdict: ap.qaVerdict ?? null,
+      returnToRalplanReason: ap.returnToRalplanReason ?? null,
     };
+  }
+
+  async recordHandoff(
+    sessionId: string,
+    expectedRevision: number,
+    key: 'deepInterview' | 'ralplan' | 'ultragoal' | 'codeReview' | 'ultraqa',
+    artifactPath: string,
+  ): Promise<Result<AutopilotSessionView, RuntimeError>> {
+    if (artifactPath.trim() === '') {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'handoff path must not be empty'));
+    }
+    const store = this.storeFor(sessionId);
+    const current = store.read();
+    if (!current.ok) return current;
+    if (isTerminal(current.value.autopilot.phase)) {
+      return err(runtimeError('E_TERMINAL_STATE', 'Terminal Autopilot sessions cannot record handoff'));
+    }
+    const updated = await store.compareAndSwap(expectedRevision, (snapshot) => {
+      const handoff = {
+        ...snapshot.autopilot.handoffArtifacts,
+        [key]: artifactPath,
+      };
+      return {
+        ...snapshot,
+        revision: expectedRevision + 1,
+        autopilot: {
+          ...snapshot.autopilot,
+          handoffArtifacts: handoff,
+        },
+      };
+    });
+    if (!updated.ok) return updated;
+    return ok(this.view(updated.value, this.readGoal(sessionId)));
+  }
+
+  async recordConsensus(
+    sessionId: string,
+    expectedRevision: number,
+    role: 'architect' | 'critic',
+    verdict: 'approve' | 'revise',
+    note: string,
+  ): Promise<Result<AutopilotSessionView, RuntimeError>> {
+    const store = this.storeFor(sessionId);
+    const current = store.read();
+    if (!current.ok) return current;
+    if (isTerminal(current.value.autopilot.phase)) {
+      return err(runtimeError('E_TERMINAL_STATE', 'Terminal Autopilot sessions cannot record consensus'));
+    }
+    const updated = await store.compareAndSwap(expectedRevision, (snapshot) => {
+      const now = this.now().toISOString();
+      const gate = { ...snapshot.autopilot.handoffArtifacts.ralplanConsensusGate };
+      const entry = { verdict, at: now, note };
+      if (role === 'architect') gate.architectReview = entry;
+      else gate.criticReview = entry;
+      gate.complete = gate.architectReview?.verdict === 'approve'
+        && gate.criticReview?.verdict === 'approve';
+      return {
+        ...snapshot,
+        revision: expectedRevision + 1,
+        autopilot: {
+          ...snapshot.autopilot,
+          handoffArtifacts: {
+            ...snapshot.autopilot.handoffArtifacts,
+            ralplanConsensusGate: gate,
+          },
+        },
+      };
+    });
+    if (!updated.ok) return updated;
+    return ok(this.view(updated.value, this.readGoal(sessionId)));
+  }
+
+  async returnToRalplan(
+    sessionId: string,
+    expectedRevision: number,
+    reason: string,
+  ): Promise<Result<AutopilotSessionView, RuntimeError>> {
+    if (reason.trim() === '') {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'return-ralplan reason must not be empty'));
+    }
+    const store = this.storeFor(sessionId);
+    const current = store.read();
+    if (!current.ok) return current;
+    if (isTerminal(current.value.autopilot.phase)) {
+      return err(runtimeError('E_TERMINAL_STATE', 'Terminal Autopilot sessions cannot return to ralplan'));
+    }
+    const updated = await store.compareAndSwap(expectedRevision, (snapshot) => ({
+      ...snapshot,
+      revision: expectedRevision + 1,
+      autopilot: {
+        ...snapshot.autopilot,
+        phase: 'ralplan',
+        lastActivePhase: 'ralplan',
+        returnToRalplanReason: reason,
+        reviewCycle: (snapshot.autopilot.reviewCycle ?? 0) + 1,
+        iteration: (snapshot.autopilot.iteration ?? 1) + 1,
+        reviewVerdict: snapshot.autopilot.reviewVerdict
+          ? { ...snapshot.autopilot.reviewVerdict, clean: false }
+          : { clean: false, recommendation: 'REQUEST CHANGES', at: this.now().toISOString() },
+        handoffArtifacts: {
+          ...snapshot.autopilot.handoffArtifacts,
+          ralplanConsensusGate: {
+            complete: false,
+            architectReview: null,
+            criticReview: null,
+          },
+        },
+      },
+    }));
+    if (!updated.ok) return updated;
+    return ok(this.view(updated.value, this.readGoal(sessionId)));
   }
 
   private diagnose(aggregate: SessionAggregateV1): string[] {
@@ -449,36 +620,43 @@ function gateKindFor(
   phase: AutopilotPhase,
   evidenceKind: GateKind,
 ): Result<GateKind, RuntimeError> {
+  const phaseOmx = toOmxPhaseName(phase);
+  const kindOmx = toOmxPhaseName(evidenceKind);
   if (commandKind === 'review') {
-    if (phase !== 'review' && phase !== 'executing') {
-      return err(runtimeError('E_VALIDATOR_REJECTED', 'review is only valid in executing/review phase'));
+    if (phaseOmx !== 'code-review' && phaseOmx !== 'ultragoal') {
+      return err(runtimeError(
+        'E_VALIDATOR_REJECTED',
+        'review is only valid in ultragoal/code-review phase',
+      ));
     }
-    if (evidenceKind !== 'review') {
-      return err(runtimeError('E_VALIDATOR_REJECTED', 'review command requires review evidence'));
+    if (kindOmx !== 'code-review' && evidenceKind !== 'review') {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'review command requires code-review evidence'));
     }
-    return ok('review');
+    return ok(evidenceKind === 'review' ? 'review' : 'code-review');
   }
   if (commandKind === 'qa') {
-    if (phase !== 'qa' && phase !== 'review') {
-      return err(runtimeError('E_VALIDATOR_REJECTED', 'qa is only valid in review/qa phase'));
+    if (phaseOmx !== 'ultraqa' && phaseOmx !== 'code-review') {
+      return err(runtimeError(
+        'E_VALIDATOR_REJECTED',
+        'qa is only valid in code-review/ultraqa phase',
+      ));
     }
-    if (evidenceKind !== 'qa') {
-      return err(runtimeError('E_VALIDATOR_REJECTED', 'qa command requires qa evidence'));
+    if (kindOmx !== 'ultraqa' && evidenceKind !== 'qa') {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'qa command requires ultraqa/qa evidence'));
     }
-    return ok('qa');
+    return ok(evidenceKind === 'qa' ? 'qa' : 'ultraqa');
   }
-  // production gate only completes Autopilot (PRD completed requires production_verified evidence).
-  if (phase === 'qa' && evidenceKind === 'production') {
+  // production gate only completes Autopilot (must follow ultraqa)
+  if ((phaseOmx === 'ultraqa' || phase === 'qa') && evidenceKind === 'production') {
     return ok('production');
   }
-  // checkpoint: evidence kind must match current active phase
   if (!isActivePhase(phase)) {
     return err(runtimeError('E_VALIDATOR_REJECTED', 'checkpoint requires an active Autopilot phase'));
   }
-  if (evidenceKind !== phase) {
+  if (!gateMatchesPhase(phase, evidenceKind)) {
     return err(runtimeError(
       'E_VALIDATOR_REJECTED',
-      `checkpoint evidence kind must match phase ${phase}`,
+      `checkpoint evidence kind must match phase ${phaseOmx}`,
     ));
   }
   return ok(evidenceKind);
@@ -492,13 +670,9 @@ function nextPhaseAfter(
   current: AutopilotPhase,
   gate: GateKind,
 ): { phase: AutopilotPhase; active: AutopilotActivePhase } {
-  // PRD：qa 不得直接 completed；必須獨立 production causal-trace gate。
-  if (gate === 'production') return { phase: 'completed', active: 'qa' };
-  if (gate === 'qa') return { phase: 'qa', active: 'qa' };
-  if (gate === 'review') return { phase: 'qa', active: 'qa' };
-  if (gate === 'executing') return { phase: 'review', active: 'review' };
-  if (gate === 'planning') return { phase: 'executing', active: 'executing' };
-  if (gate === 'requirements') return { phase: 'planning', active: 'planning' };
-  const active = isActivePhase(current) ? current : 'requirements';
-  return { phase: current === 'completed' ? 'completed' : active, active };
+  const next = nextOmxPhaseAfterGate(current, gate);
+  return {
+    phase: next.phase as AutopilotPhase,
+    active: next.active as AutopilotActivePhase,
+  };
 }

@@ -19,8 +19,9 @@
 
 #### 當前已實作功能 (Currently Implemented Features)
 *   **CLI 進入點 (bin/oma.ts)**：作為 CLI 進入點接管並解析命令列引數，攔截魔術關鍵字（`ralph`, `ultrawork`, `search`），將其對應模式的提示詞（System Prompt）注入，並將其餘指令透傳給實體 `agy` 指令程序。
-*   **Session skill 面（`skills/*`）**：對齊 OMC/OMX 的 session 內 workflow（`autopilot` / `deep-interview` / `ralplan` / `ralph` / `ultrawork` / `search` / `team` / `cancel` / `verify` / `setup` + index `oma-runtime`）。managed launch 會在 `OMA_TASK` 分隔符外附加 `<<<OMA_SKILL_PROTOCOL>>>`；PreInvocation 在 exact_env 綁定成功時注入 skill 提醒。**CLI 負責啟動與帳本；skill 負責 session 內如何做完。**
-*   **發佈管道說明**：見 `docs/npm-publishing.md` — GH Release + GitHub Packages 已出貨；npmjs.org 因 token/scope/名稱佔用而暫緩。
+*   **Session skill 面（`skills/*`）**：完整 OMX 對齊 workflow（`autopilot` / `deep-interview` / `ralplan` / `ultragoal` / `code-review` / `ultraqa` / `ralph` / `ultrawork` / `search` / `team` / `cancel` / `verify` / `setup` + index）。`oma skill list|show` 供 session 發現。managed launch 注入 `<<<OMA_SKILL_PROTOCOL>>>`。
+*   **Autopilot 五階段 FSM（OMX）**：`deep-interview → ralplan → ultragoal → code-review → ultraqa`（+ production 終端 gate → completed）；CLI：`advance`/`handoff`/`consensus`/`return-ralplan`；aggregate 含 handoffArtifacts / consensus gate / returnToRalplanReason。legacy phase 名仍可作 evidence 相容。
+*   **發佈管道說明**：見 `docs/npm-publishing.md`。
 *   **薛西弗斯任務延續執行器 (Sisyphus Continuation Enforcer)**：在 `bin/oma.ts` 執行結束時，透過 `src/enforcer.ts` 檢查 `.agy/todo.json` 中的工作項目。若有未完成的待辦任務，會先進行 2 秒黃色警告倒數，隨後注入 `[SYSTEM REMINDER - TODO CONTINUATION]` 提示詞強迫喚醒 Agent 繼續執行。
 *   **死鎖熔斷器 (Deadlock Circuit Breaker)**：當同一待辦任務連續遭遇 3 次執行失敗（重試次數遞減至 0），系統會自動觸發熔斷，**只將帳本標為 `tripped` 並要求人類介入**；**禁止** `git reset --hard` / `git clean -fd`，以保護使用者工作區並阻止無謂的 Token 燃燒。
 *   **confirmDangerousLaunch**：CLI 偵測 argv exact token `--madmax` / `--yolo`；TTY 需 stdin 輸入 `yes`（非 GUI 彈窗），非 TTY 需 `--i-understand-dangerous-launch`；掛載於 structured pass-through、managed final argv、legacy magic/pass-through。managed mode 與 `--` 之間未知 token 為 `E_DIRECTIVE_INVALID`。

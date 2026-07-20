@@ -223,6 +223,21 @@ export function createDefaultServices(
       }
       return report.value.exitCode;
     },
+    async skillCommand(argv) {
+      const { parseSkillCommand, runSkillCommand } = await import('./skill-commands');
+      const parsed = parseSkillCommand(argv);
+      if (!parsed.ok) {
+        stderr(`${parsed.error.code}: ${parsed.error.message}\n`);
+        return 2;
+      }
+      const result = runSkillCommand(parsed.value, packageRoot);
+      if (!result.ok) {
+        stderr(`${result.error.code}: ${result.error.message}\n`);
+        return result.error.code === 'E_NOT_FOUND' ? 1 : 2;
+      }
+      stdout(`${JSON.stringify(result.value, null, 2)}\n`);
+      return 0;
+    },
   };
 }
 

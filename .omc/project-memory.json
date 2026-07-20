@@ -1,0 +1,303 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1784557381991,
+  "projectRoot": "/Users/iml1s/Documents/mine/oh-my-agy",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": ">=20",
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "jest",
+        "version": "29.7.0",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": "Node.js 20"
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": null,
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {
+      "build": "tsc",
+      "prepack": "npm run build",
+      "test:unit": "jest --config jest.unit.config.js --runInBand",
+      "test:e2e": "jest --config jest.config.js --runInBand",
+      "test:package": "jest --config jest.unit.config.js --runInBand tests/package",
+      "smoke": "bash scripts/smoke.sh",
+      "install:local": "bash scripts/install.sh"
+    }
+  },
+  "conventions": {
+    "namingStyle": "camelCase",
+    "importStyle": "ES modules",
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "assets",
+      "bin",
+      "scripts",
+      "src",
+      "tests"
+    ],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "assets": {
+      "path": "assets",
+      "purpose": "Static assets",
+      "fileCount": 2,
+      "lastAccessed": 1784557381951,
+      "keyFiles": [
+        "oma-character.jpg",
+        "oma-character.png"
+      ]
+    },
+    "bin": {
+      "path": "bin",
+      "purpose": "Executable scripts",
+      "fileCount": 1,
+      "lastAccessed": 1784557381952,
+      "keyFiles": [
+        "oma.ts"
+      ]
+    },
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 0,
+      "lastAccessed": 1784557381963,
+      "keyFiles": []
+    },
+    "e2e": {
+      "path": "e2e",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1784557381963,
+      "keyFiles": [
+        "helper.ts",
+        "tier1.spec.ts",
+        "tier2.spec.ts",
+        "tier3.spec.ts",
+        "tier4.spec.ts"
+      ]
+    },
+    "rules": {
+      "path": "rules",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1784557381964,
+      "keyFiles": [
+        "runtime.md"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 2,
+      "lastAccessed": 1784557381964,
+      "keyFiles": [
+        "install.sh",
+        "smoke.sh"
+      ]
+    },
+    "skills": {
+      "path": "skills",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1784557381964,
+      "keyFiles": []
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1784557381965,
+      "keyFiles": [
+        "enforcer.ts",
+        "types.ts"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1784557381966,
+      "keyFiles": []
+    },
+    "dist/bin": {
+      "path": "dist/bin",
+      "purpose": "Executable scripts",
+      "fileCount": 1,
+      "lastAccessed": 1784557381967,
+      "keyFiles": [
+        "oma.js"
+      ]
+    },
+    "dist/src": {
+      "path": "dist/src",
+      "purpose": "Source code",
+      "fileCount": 2,
+      "lastAccessed": 1784557381967,
+      "keyFiles": [
+        "enforcer.js",
+        "types.js"
+      ]
+    },
+    "dist/tests": {
+      "path": "dist/tests",
+      "purpose": "Test files",
+      "fileCount": 0,
+      "lastAccessed": 1784557381968,
+      "keyFiles": []
+    },
+    "e2e/mocks": {
+      "path": "e2e/mocks",
+      "purpose": "Mock data",
+      "fileCount": 1,
+      "lastAccessed": 1784557381969,
+      "keyFiles": [
+        "agy"
+      ]
+    },
+    "tests/helpers": {
+      "path": "tests/helpers",
+      "purpose": "Helper functions",
+      "fileCount": 5,
+      "lastAccessed": 1784557381971,
+      "keyFiles": [
+        "git-fixture.ts",
+        "hook-fixture.ts",
+        "process-fixture.ts"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "src/autopilot/runtime.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784557468903,
+      "type": "file"
+    },
+    {
+      "path": "src/cli/parser.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784560924938,
+      "type": "file"
+    },
+    {
+      "path": "src/team/commands.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784560936340,
+      "type": "file"
+    },
+    {
+      "path": "src/team/tmux.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784560936466,
+      "type": "file"
+    },
+    {
+      "path": "bin/oma.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784560948038,
+      "type": "file"
+    },
+    {
+      "path": "src/cli/application.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784560964159,
+      "type": "file"
+    },
+    {
+      "path": "src/cli/services.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784560964636,
+      "type": "file"
+    },
+    {
+      "path": "src/team/worktree.ts",
+      "accessCount": 2,
+      "lastAccessed": 1784561017636,
+      "type": "file"
+    },
+    {
+      "path": "src/team/supervisor.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557434971,
+      "type": "file"
+    },
+    {
+      "path": "src/cli/managed-invocation.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557444132,
+      "type": "file"
+    },
+    {
+      "path": "src/modes/directives.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557463420,
+      "type": "file"
+    },
+    {
+      "path": "src/hooks/pre-invocation.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557477746,
+      "type": "file"
+    },
+    {
+      "path": "src/hooks/stop.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557478376,
+      "type": "file"
+    },
+    {
+      "path": "src/enforcer.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557485883,
+      "type": "file"
+    },
+    {
+      "path": "tests/team/tmux.spec.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784557533760,
+      "type": "file"
+    },
+    {
+      "path": "src/team/orchestrator.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784560925118,
+      "type": "file"
+    },
+    {
+      "path": "src/team/worker-hold.ts",
+      "accessCount": 1,
+      "lastAccessed": 1784560936620,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

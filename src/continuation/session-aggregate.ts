@@ -14,7 +14,14 @@ import { Result, err, ok } from '../runtime/types';
 import { ProcessIdentity } from '../runtime/types';
 import { StopEventIdentity, stopEventKey, validateStopEventIdentity } from './event-identity';
 
+/** OMX canonical + legacy aliases + terminals */
 export type AutopilotPhase =
+  | 'deep-interview'
+  | 'ralplan'
+  | 'ultragoal'
+  | 'code-review'
+  | 'ultraqa'
+  // legacy aliases (仍可出現在舊 aggregate / 測試)
   | 'requirements'
   | 'planning'
   | 'executing'
@@ -25,7 +32,17 @@ export type AutopilotPhase =
   | 'tripped'
   | 'cancelled';
 
-export type AutopilotActivePhase = 'requirements' | 'planning' | 'executing' | 'review' | 'qa';
+export type AutopilotActivePhase =
+  | 'deep-interview'
+  | 'ralplan'
+  | 'ultragoal'
+  | 'code-review'
+  | 'ultraqa'
+  | 'requirements'
+  | 'planning'
+  | 'executing'
+  | 'review'
+  | 'qa';
 
 export interface AcceptedRevisionRefV1 {
   id: string;
@@ -78,6 +95,22 @@ export interface AutopilotTerminalRecordV1 {
   at: string;
 }
 
+export interface RalplanConsensusGateV1 {
+  complete: boolean;
+  architectReview: { verdict: string; at: string; note?: string } | null;
+  criticReview: { verdict: string; at: string; note?: string } | null;
+}
+
+export interface AutopilotHandoffArtifactsV1 {
+  contextSnapshotPath: string | null;
+  deepInterview: string | null;
+  ralplan: string | null;
+  ralplanConsensusGate: RalplanConsensusGateV1;
+  ultragoal: string | null;
+  codeReview: string | null;
+  ultraqa: string | null;
+}
+
 export interface AutopilotAggregateV1 {
   phase: AutopilotPhase;
   lastActivePhase: AutopilotActivePhase;
@@ -92,6 +125,14 @@ export interface AutopilotAggregateV1 {
   progressFingerprint: string;
   lastEligibleFingerprint: string | null;
   noProgressStreak: number;
+  /** OMX 五階段 pipeline 欄位（session 內完整使用） */
+  phaseCycle: string[];
+  iteration: number;
+  reviewCycle: number;
+  handoffArtifacts: AutopilotHandoffArtifactsV1;
+  reviewVerdict: { clean: boolean; recommendation: string; at: string } | null;
+  qaVerdict: { clean: boolean; skipped: boolean; reason: string | null; at: string } | null;
+  returnToRalplanReason: string | null;
 }
 
 export interface StopEffectV1 {
@@ -211,8 +252,8 @@ export function createInitialSessionAggregate(
       expiresAtMs: input.expiresAtMs ?? null,
     },
     autopilot: {
-      phase: input.phase ?? 'requirements',
-      lastActivePhase: isActivePhase(input.phase) ? input.phase : 'requirements',
+      phase: input.phase ?? 'deep-interview',
+      lastActivePhase: isActivePhase(input.phase) ? input.phase : 'deep-interview',
       terminal: null,
       retryableBlocker: null,
       interactionBlocker: null,
@@ -224,13 +265,53 @@ export function createInitialSessionAggregate(
       progressFingerprint: '',
       lastEligibleFingerprint: null,
       noProgressStreak: 0,
+      phaseCycle: [
+        'deep-interview',
+        'ralplan',
+        'ultragoal',
+        'code-review',
+        'ultraqa',
+      ],
+      iteration: 1,
+      reviewCycle: 0,
+      handoffArtifacts: emptyHandoffArtifacts(),
+      reviewVerdict: null,
+      qaVerdict: null,
+      returnToRalplanReason: null,
     },
     processedStops: {},
   };
 }
 
+export function emptyHandoffArtifacts(): AutopilotHandoffArtifactsV1 {
+  return {
+    contextSnapshotPath: null,
+    deepInterview: null,
+    ralplan: null,
+    ralplanConsensusGate: {
+      complete: false,
+      architectReview: null,
+      criticReview: null,
+    },
+    ultragoal: null,
+    codeReview: null,
+    ultraqa: null,
+  };
+}
+
 function isActivePhase(phase: AutopilotPhase | undefined): phase is AutopilotActivePhase {
-  return phase !== undefined && ['requirements', 'planning', 'executing', 'review', 'qa'].includes(phase);
+  return phase !== undefined && [
+    'deep-interview',
+    'ralplan',
+    'ultragoal',
+    'code-review',
+    'ultraqa',
+    'requirements',
+    'planning',
+    'executing',
+    'review',
+    'qa',
+  ].includes(phase);
 }
 
 export class SessionAggregateStore {
@@ -437,7 +518,45 @@ function validateAggregate(value: unknown): Result<SessionAggregateV1, RuntimeEr
   ) {
     return err(runtimeError('E_CORRUPT_STATE', 'Session aggregate shape is invalid'));
   }
-  return ok(structuredClone(candidate as SessionAggregateV1));
+  const migrated = structuredClone(candidate as SessionAggregateV1);
+  migrated.autopilot = migrateAutopilotAggregate(migrated.autopilot);
+  return ok(migrated);
+}
+
+/** 舊 aggregate 補 OMX pipeline 欄位，並把 phase 映到 canonical 名。 */
+export function migrateAutopilotAggregate(raw: AutopilotAggregateV1): AutopilotAggregateV1 {
+  const phaseMap: Record<string, AutopilotPhase> = {
+    requirements: 'deep-interview',
+    planning: 'ralplan',
+    executing: 'ultragoal',
+    review: 'code-review',
+    qa: 'ultraqa',
+  };
+  const phase = (phaseMap[raw.phase] ?? raw.phase) as AutopilotPhase;
+  const lastActive = (phaseMap[raw.lastActivePhase] ?? raw.lastActivePhase) as AutopilotActivePhase;
+  const handoff = raw.handoffArtifacts ?? emptyHandoffArtifacts();
+  return {
+    ...raw,
+    phase,
+    lastActivePhase: isActivePhase(lastActive) ? lastActive : 'deep-interview',
+    phaseCycle: raw.phaseCycle ?? [
+      'deep-interview', 'ralplan', 'ultragoal', 'code-review', 'ultraqa',
+    ],
+    iteration: typeof raw.iteration === 'number' ? raw.iteration : 1,
+    reviewCycle: typeof raw.reviewCycle === 'number' ? raw.reviewCycle : 0,
+    handoffArtifacts: {
+      ...emptyHandoffArtifacts(),
+      ...handoff,
+      ralplanConsensusGate: {
+        complete: handoff.ralplanConsensusGate?.complete ?? false,
+        architectReview: handoff.ralplanConsensusGate?.architectReview ?? null,
+        criticReview: handoff.ralplanConsensusGate?.criticReview ?? null,
+      },
+    },
+    reviewVerdict: raw.reviewVerdict ?? null,
+    qaVerdict: raw.qaVerdict ?? null,
+    returnToRalplanReason: raw.returnToRalplanReason ?? null,
+  };
 }
 
 function validateCandidate(

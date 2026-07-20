@@ -9,17 +9,20 @@ function digest(value: string): string {
 }
 
 function gateEvidence(
-  kind: 'requirements' | 'planning' | 'executing' | 'review' | 'qa' | 'production',
+  kind:
+    | 'deep-interview' | 'ralplan' | 'ultragoal' | 'code-review' | 'ultraqa'
+    | 'requirements' | 'planning' | 'executing' | 'review' | 'qa' | 'production',
   workspaceKey: string,
 ) {
   const now = new Date().toISOString();
-  const validatorId = kind === 'review'
+  const omxish = kind === 'code-review' || kind === 'review'
     ? 'oma.review/v1'
-    : kind === 'qa'
+    : kind === 'ultraqa' || kind === 'qa'
       ? 'oma.qa/v1'
       : kind === 'production'
         ? 'oma.production-causal-trace/v1'
         : `oma.gate/${kind}`;
+  const validatorId = omxish;
   return {
     schemaVersion: 1 as const,
     kind,
@@ -61,25 +64,26 @@ describe('Autopilot durable FSM runtime', () => {
         value: expect.objectContaining({
           sessionId: 'session-fixed',
           revision: 0,
-          phase: 'requirements',
+          phase: 'deep-interview',
           goal: 'ship production runtime',
+          phaseCycle: expect.arrayContaining(['deep-interview', 'ralplan', 'ultragoal']),
         }),
       }));
 
-      const evidencePath = fixture.path('requirements.json');
-      fs.writeFileSync(evidencePath, JSON.stringify(gateEvidence('requirements', 'ws-a')));
+      const evidencePath = fixture.path('deep-interview.json');
+      fs.writeFileSync(evidencePath, JSON.stringify(gateEvidence('deep-interview', 'ws-a')));
       const checkpoint = await runtime.value.dispatch([
-        'checkpoint', '--session', 'session-fixed', '--expected-revision', '0', '--evidence', evidencePath,
+        'advance', '--session', 'session-fixed', '--expected-revision', '0', '--evidence', evidencePath,
       ]);
       expect(checkpoint).toEqual(expect.objectContaining({
         ok: true,
-        value: expect.objectContaining({ phase: 'planning', revision: 1, acceptedEvidenceCount: 1 }),
+        value: expect.objectContaining({ phase: 'ralplan', revision: 1, acceptedEvidenceCount: 1 }),
       }));
 
       const status = await runtime.value.dispatch(['status', '--session', 'session-fixed']);
       expect(status).toEqual(expect.objectContaining({
         ok: true,
-        value: expect.objectContaining({ phase: 'planning', revision: 1 }),
+        value: expect.objectContaining({ phase: 'ralplan', revision: 1 }),
       }));
 
       const resumed = await runtime.value.dispatch([
@@ -94,7 +98,7 @@ describe('Autopilot durable FSM runtime', () => {
       expect(doctor.ok).toBe(true);
       if (doctor.ok) {
         expect(doctor.value).toEqual(expect.objectContaining({
-          phase: 'planning',
+          phase: 'ralplan',
           healthy: true,
           aggregatePath: expect.stringContaining(path.join('sessions')),
         }));
@@ -134,7 +138,7 @@ describe('Autopilot durable FSM runtime', () => {
       if (!runtime.ok) throw new Error(runtime.error.message);
       await runtime.value.start('finish gates');
 
-      for (const kind of ['requirements', 'planning', 'executing'] as const) {
+      for (const kind of ['deep-interview', 'ralplan', 'ultragoal'] as const) {
         const current = await runtime.value.status('session-gates');
         if (!current.ok) throw new Error(current.error.message);
         const evidencePath = fixture.path(`${kind}.json`);
@@ -150,10 +154,10 @@ describe('Autopilot durable FSM runtime', () => {
 
       let current = await runtime.value.status('session-gates');
       if (!current.ok) throw new Error(current.error.message);
-      expect(current.value.phase).toBe('review');
+      expect(current.value.phase).toBe('code-review');
 
       const reviewPath = fixture.path('review.json');
-      fs.writeFileSync(reviewPath, JSON.stringify(gateEvidence('review', 'ws-b')));
+      fs.writeFileSync(reviewPath, JSON.stringify(gateEvidence('code-review', 'ws-b')));
       const reviewed = await runtime.value.dispatch([
         'review', '--session', 'session-gates',
         '--expected-revision', String(current.value.revision),
@@ -161,13 +165,13 @@ describe('Autopilot durable FSM runtime', () => {
       ]);
       expect(reviewed).toEqual(expect.objectContaining({
         ok: true,
-        value: expect.objectContaining({ phase: 'qa' }),
+        value: expect.objectContaining({ phase: 'ultraqa' }),
       }));
 
       current = await runtime.value.status('session-gates');
       if (!current.ok) throw new Error(current.error.message);
       const qaPath = fixture.path('qa.json');
-      fs.writeFileSync(qaPath, JSON.stringify(gateEvidence('qa', 'ws-b')));
+      fs.writeFileSync(qaPath, JSON.stringify(gateEvidence('ultraqa', 'ws-b')));
       const qad = await runtime.value.dispatch([
         'qa', '--session', 'session-gates',
         '--expected-revision', String(current.value.revision),
@@ -177,7 +181,7 @@ describe('Autopilot durable FSM runtime', () => {
       expect(qad).toEqual(expect.objectContaining({
         ok: true,
         value: expect.objectContaining({
-          phase: 'qa',
+          phase: 'ultraqa',
           terminal: null,
         }),
       }));

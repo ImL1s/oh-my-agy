@@ -41,6 +41,10 @@ describe('CLI application wiring', () => {
         ReturnType<CliServices['doctorCommand']>,
         Parameters<CliServices['doctorCommand']>
       >(async () => 0),
+      skillCommand: jest.fn<
+        ReturnType<CliServices['skillCommand']>,
+        Parameters<CliServices['skillCommand']>
+      >(async () => 0),
     };
     const io = {
       stdout: (value: string) => { stdout += value; },

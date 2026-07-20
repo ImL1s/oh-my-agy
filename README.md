@@ -119,12 +119,17 @@ oma doctor
 When the task is non-trivial:
 
 ```text
-1. oma setup                         # plugin + preflight
-2. oma ralph -- "<task>"             # managed Sisyphus-style loop
-3. (or) oma ultrawork -- "<task>"    # high-throughput managed mode
-4. oma autopilot start -- "<goal>"   # durable FSM when you need gates
-5. Stop hooks decide continue/allow  # exact_env + ProgressOracle
+1. oma setup && oma skill list
+2. oma autopilot start -- "<goal>"     # phase=deep-interview (OMX 五階段)
+3. oma autopilot drive …               # inject current-phase skill into session
+4. handoff / advance / consensus       # deep-interview → ralplan → ultragoal → code-review → ultraqa
+5. review + qa evidence; production gate → completed
+6. (or) oma ralph|ultrawork -- "<task>"  # single-mode managed launch
+7. Stop hooks decide continue/allow
 ```
+
+**OMX-aligned Autopilot phases:** `deep-interview → ralplan → ultragoal → code-review → ultraqa`  
+Discover skills: `oma skill list` / `oma skill show autopilot`.
 
 | If you need… | Use |
 |--------------|-----|

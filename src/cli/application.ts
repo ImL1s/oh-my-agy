@@ -12,6 +12,7 @@ export interface CliServices {
   teamCommand(argv: readonly string[]): Promise<number>;
   setupCommand(argv: readonly string[]): Promise<number>;
   doctorCommand(argv: readonly string[]): Promise<number>;
+  skillCommand(argv: readonly string[]): Promise<number>;
 }
 
 export interface CliIo {
@@ -26,9 +27,14 @@ Usage:
   oma ralph -- <task>
   oma ultrawork -- <task>
   oma search -- <read-only query>
+  oma skill list
+  oma skill show <name>
   oma autopilot start -- <goal>
   oma autopilot status --session <id>
-  oma autopilot checkpoint --session <id> --expected-revision <n> --evidence <file>
+  oma autopilot advance|checkpoint --session <id> --expected-revision <n> --evidence <file>
+  oma autopilot handoff --session <id> --expected-revision <n> --key <deepInterview|…> --path <file>
+  oma autopilot consensus --session <id> --expected-revision <n> --role architect|critic --verdict approve|revise --note <text>
+  oma autopilot return-ralplan --session <id> --expected-revision <n> --reason <text>
   oma autopilot review --session <id> --expected-revision <n> --evidence <file>
   oma autopilot qa --session <id> --expected-revision <n> --evidence <file>
   oma autopilot resume --session <id> --conversation <id> --expected-revision <n>
@@ -79,6 +85,8 @@ export async function runCli(
       return services.setupCommand(command.args);
     case 'doctor':
       return services.doctorCommand(command.args);
+    case 'skill':
+      return services.skillCommand(command.args);
   }
 }
 

@@ -1,8 +1,16 @@
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { SessionAggregateV1 } from '../continuation/session-aggregate';
+import { toOmxPhaseName } from '../autopilot/phases';
 
 export type GateKind =
+  // OMX canonical
+  | 'deep-interview'
+  | 'ralplan'
+  | 'ultragoal'
+  | 'code-review'
+  | 'ultraqa'
+  // legacy aliases
   | 'requirements'
   | 'planning'
   | 'executing'
@@ -54,7 +62,9 @@ export class GateValidator {
   ): GateValidationResult {
     const parsed = parseEvidence(evidence);
     if (!parsed.ok) return { kind: 'Rejected', error: parsed.error };
-    if (parsed.value.kind !== kind) {
+    const want = toOmxPhaseName(kind);
+    const got = toOmxPhaseName(parsed.value.kind);
+    if (got !== want && !(kind === 'production' && parsed.value.kind === 'production')) {
       return reject('Gate evidence kind does not match the requested gate');
     }
     if (
@@ -69,10 +79,12 @@ export class GateValidator {
     if (Date.parse(parsed.value.command.startedAt) > Date.parse(parsed.value.command.finishedAt)) {
       return reject('Gate evidence timestamps are reversed');
     }
-    if (kind === 'review' && !parsed.value.validator.id.startsWith('oma.review/')) {
+    const reviewish = want === 'code-review' || kind === 'review' || got === 'code-review';
+    const qaish = want === 'ultraqa' || kind === 'qa' || got === 'ultraqa';
+    if (reviewish && !parsed.value.validator.id.startsWith('oma.review/')) {
       return reject('Review evidence must come from the independent review runner');
     }
-    if (kind === 'qa' && !parsed.value.validator.id.startsWith('oma.qa/')) {
+    if (qaish && !parsed.value.validator.id.startsWith('oma.qa/')) {
       return reject('QA evidence must come from the QA runner');
     }
     if (kind === 'production' && parsed.value.validator.id !== 'oma.production-causal-trace/v1') {
@@ -92,7 +104,10 @@ function parseEvidence(evidence: unknown): Result<GateEvidenceV1, RuntimeError> 
   }
   if (
     candidate.schemaVersion !== 1
-    || !['requirements', 'planning', 'executing', 'review', 'qa', 'production'].includes(candidate.kind ?? '')
+    || ![
+      'deep-interview', 'ralplan', 'ultragoal', 'code-review', 'ultraqa',
+      'requirements', 'planning', 'executing', 'review', 'qa', 'production',
+    ].includes(candidate.kind ?? '')
     || typeof candidate.actor !== 'string'
     || candidate.actor.trim() === ''
     || typeof candidate.validator !== 'object'

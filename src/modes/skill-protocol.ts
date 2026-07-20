@@ -4,6 +4,7 @@
  */
 import { ManagedMode } from './directives';
 import {
+  OmaWorkflowSkill,
   compactSkillForInjection,
   loadSkillMarkdown,
   skillNameForManagedMode,
@@ -17,13 +18,22 @@ export function appendSkillProtocol(
   mode: ManagedMode,
   packageRoot: string | undefined,
 ): string {
+  return appendNamedSkillProtocol(directive, skillNameForManagedMode(mode), packageRoot, mode);
+}
+
+/** 依任意 skill 名注入（autopilot 當前 phase skill）。 */
+export function appendNamedSkillProtocol(
+  directive: string,
+  skill: string,
+  packageRoot: string | undefined,
+  modeLabel = skill,
+): string {
   if (packageRoot === undefined || packageRoot.trim() === '') return directive;
-  const skill = skillNameForManagedMode(mode);
-  const body = loadSkillMarkdown(packageRoot, skill);
+  const body = loadSkillMarkdown(packageRoot, skill as OmaWorkflowSkill);
   if (body === null) return directive;
   const compact = compactSkillForInjection(body);
   const block = [
-    `${PROTOCOL_START} mode=${mode} skill=${skill}>>>`,
+    `${PROTOCOL_START} mode=${modeLabel} skill=${skill}>>>`,
     'You are inside an OMA managed session. Follow this skill protocol for the whole run.',
     'Do not treat the CLI wrapper alone as completion — execute the skill steps with evidence.',
     '',
