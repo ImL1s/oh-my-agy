@@ -74,7 +74,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 公開名 oh-my-agy 已被他人佔用；套件為 @iml1s/oh-my-agy，預設發 GitHub Packages
+      # 公開 unscoped oh-my-agy 已被他人佔用；套件為 @iml1s/oh-my-agy。
+      # npmjs 需 NPM_TOKEN + @iml1s scope — 詳見 docs/npm-publishing.md
       - name: Publish to GitHub Packages
         if: startsWith(github.ref, 'refs/tags/v')
         env:

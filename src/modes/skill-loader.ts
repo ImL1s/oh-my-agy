@@ -9,6 +9,8 @@ import { ManagedMode } from './directives';
 export type OmaWorkflowSkill =
   | ManagedMode
   | 'autopilot'
+  | 'deep-interview'
+  | 'ralplan'
   | 'team'
   | 'cancel'
   | 'verify'

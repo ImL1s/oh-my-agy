@@ -14,6 +14,8 @@ You are running under **oh-my-agy (OMA)** — the Antigravity orchestration laye
 | User intent | Skill | CLI helper |
 |-------------|-------|------------|
 | Full autonomous delivery | `skills/autopilot/SKILL.md` | `oma autopilot start|drive|status|resume` |
+| Clarify requirements first | `skills/deep-interview/SKILL.md` | (session skill; feeds autopilot) |
+| Consensus-style plan gate | `skills/ralplan/SKILL.md` | (session skill; feeds implement) |
 | Persist until verified done | `skills/ralph/SKILL.md` | `oma ralph -- <task>` |
 | Parallel independent work | `skills/ultrawork/SKILL.md` | `oma ultrawork -- <task>` |
 | Read-only research | `skills/search/SKILL.md` | `oma search -- <query>` |

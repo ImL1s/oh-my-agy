@@ -15,10 +15,18 @@ Maps to OMC/OMX autopilot **phase contract**, but tools are Antigravity-native +
 ## Default loop (strict)
 
 ```text
-clarify → plan → implement(+team if needed) → verify → review/QA → complete
+deep-interview (clarify) → ralplan (plan) → implement(+team if needed)
+  → verify → review/QA → complete
 ```
 
-If review or QA is not clean, return to **plan** with findings — do not ad-hoc patch outside the loop.
+Canonical skill handoffs (OMC/OMX-shaped, Antigravity-native tools):
+
+1. `skills/deep-interview/SKILL.md` → `.agy/specs/…`
+2. `skills/ralplan/SKILL.md` → `.agy/plans/…` with critic **APPROVE**
+3. implement via `ralph` / `ultrawork` / `team` as appropriate
+4. `skills/verify/SKILL.md` then review/QA
+
+If review or QA is not clean, return to **ralplan** with findings — do not ad-hoc patch outside the loop.
 
 ## Use when
 
@@ -68,15 +76,16 @@ Minimum state fields:
 
 ## Steps
 
-### 1. Clarify
+### 1. Clarify (`deep-interview`)
+- Follow `skills/deep-interview/SKILL.md`.
 - Restate goal, non-goals, constraints, acceptance.
 - If still vague (no paths/APIs/anchors): ask focused questions (max 3) **or** write an explicit skip rationale authorized by user.
-- Handoff: short spec markdown path recorded in state.
+- Handoff: spec path under `.agy/specs/` recorded in state.
 
-### 2. Plan
+### 2. Plan (`ralplan`)
+- Follow `skills/ralplan/SKILL.md` (author + steelman + critic; verdict APPROVE).
 - Produce implementation plan with ordered tasks, risks, test plan.
-- Prefer steelman: note at least one alternative and why rejected.
-- Handoff: plan path; do not implement until plan is written.
+- Handoff: plan path under `.agy/plans/`; do not implement until critic **APPROVE**.
 
 ### 3. Implement
 - Execute plan with evidence.

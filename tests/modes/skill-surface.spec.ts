@@ -15,6 +15,8 @@ describe('OMA session skill surface', () => {
     const required = [
       'oma-runtime',
       'autopilot',
+      'deep-interview',
+      'ralplan',
       'ralph',
       'ultrawork',
       'search',

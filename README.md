@@ -93,8 +93,9 @@ oma ralph -- "Reply with exactly one word: pong"
 
 ### Install from release (GitHub Packages or Release tarball)
 
-> **Note:** the unscoped name `oh-my-agy` on **npmjs.org** is already taken by a different project.  
-> This repo publishes as **`@iml1s/oh-my-agy`** (GitHub Packages) and attaches a tarball to [GitHub Releases](https://github.com/ImL1s/oh-my-agy/releases).
+> **npmjs.org is not the primary channel yet.**  
+> Unscoped `oh-my-agy` on npmjs is **another project**; this repo ships **`@iml1s/oh-my-agy`** via **GitHub Packages** + **Release tarball**.  
+> Full blockers and “how to enable npmjs later”: **[docs/npm-publishing.md](docs/npm-publishing.md)**.
 
 ```bash
 # A) GitHub Packages (needs a GitHub PAT with read:packages)
@@ -233,6 +234,7 @@ npm run test:e2e
 | **CI** | `.github/workflows/ci.yml` — Node 20/22 build + unit + pack smoke; e2e with mock `agy` |
 | **Release** | `.github/workflows/release.yml` — on tag `v*` (must match `package.json` / `plugin.json`): test, `npm pack`, GH Release asset, **GitHub Packages** (`@iml1s/oh-my-agy`); optional npmjs.org if `NPM_TOKEN` set |
 | **Install script** | `./scripts/install.sh` |
+| **Publishing notes** | [docs/npm-publishing.md](docs/npm-publishing.md) — why npmjs is skipped, name collision, how to enable |
 
 Tag example:
 
@@ -241,6 +243,8 @@ Tag example:
 git tag -a v0.2.1 -m "v0.2.1"
 git push origin v0.2.1
 ```
+
+npmjs.org remains optional until `NPM_TOKEN` + `@iml1s` scope rights exist (see publishing notes).
 
 ---
 
