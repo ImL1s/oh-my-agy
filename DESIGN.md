@@ -21,10 +21,11 @@
 *   **CLI 進入點 (bin/oma.ts)**：作為 CLI 進入點接管並解析命令列引數，攔截魔術關鍵字（`ralph`, `ultrawork`, `search`），將其對應模式的提示詞（System Prompt）注入，並將其餘指令透傳給實體 `agy` 指令程序。
 *   **薛西弗斯任務延續執行器 (Sisyphus Continuation Enforcer)**：在 `bin/oma.ts` 執行結束時，透過 `src/enforcer.ts` 檢查 `.agy/todo.json` 中的工作項目。若有未完成的待辦任務，會先進行 2 秒黃色警告倒數，隨後注入 `[SYSTEM REMINDER - TODO CONTINUATION]` 提示詞強迫喚醒 Agent 繼續執行。
 *   **死鎖熔斷器 (Deadlock Circuit Breaker)**：當同一待辦任務連續遭遇 3 次執行失敗（重試次數遞減至 0），系統會自動觸發熔斷，**只將帳本標為 `tripped` 並要求人類介入**；**禁止** `git reset --hard` / `git clean -fd`，以保護使用者工作區並阻止無謂的 Token 燃燒。
+*   **confirmDangerousLaunch**：CLI 偵測 argv exact token `--madmax` / `--yolo`；TTY 需 stdin 輸入 `yes`（非 GUI 彈窗），非 TTY 需 `--i-understand-dangerous-launch`；掛載於 structured pass-through、managed final argv、legacy magic/pass-through。managed mode 與 `--` 之間未知 token 為 `E_DIRECTIVE_INVALID`。
+*   **TeamOrchestrator v1**：`oma team start/status/stop` 接 worktree + claim + tmux worker-hold（真實 agy worker / DAG / deliver 見後續 plan）。
 
 #### 設計藍圖 (Design Blueprint / Future Plans)
-以下進階功能目前在 TypeScript 程式碼庫中尚未實作，但在 E2E 測試中透過模擬（mock-based）環境與輸出通過了驗證：
-*   **confirmDangerousLaunch（已實作）**：CLI 偵測 argv exact token `--madmax` / `--yolo`；TTY 需輸入 `yes`，非 TTY 需 `--i-understand-dangerous-launch`；掛載於 structured pass-through 與 legacy magic/pass-through。managed mode 與 `--` 之間未知 token 改為 `E_DIRECTIVE_INVALID`（不再靜默丟棄）。
+以下進階功能目前在 TypeScript 程式碼庫中尚未完整端到端出貨（零件庫可能已存在）：
 *   **Git Worktree 實體路徑分配**：為多 Agent 並行協同開發（如 Conductor 模式）在 `.agy/team/{team}/worktrees/{worker}` 目錄下為每個 Worker 自動建立與分配獨立的 Git Worktree 隔離路徑。
 *   **髒狀態防護與清理阻擋器 (Dirty Blockers)**：在清理工作區前執行 `git status --porcelain` 進行髒狀態判定，若有未提交的程式碼變更，則將其列為 `blockers` 並拒絕清理以保障安全。
 *   **排它租約與衝突解決 Saga (AuthorityLease & Conflict Resolution Saga)**：當 Looks 視覺微調與 Works 邏輯開發並行修改同一個高度耦合檔案時， Looks 需獲取並定期更新 `AuthorityLease`。若產生衝突，自動啟動 Conflict Resolution Saga 進行分支拆解。

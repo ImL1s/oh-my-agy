@@ -4,6 +4,7 @@ import { InteractivePolicy, ProcessOutcome } from '../runtime/process';
 import { OperationIdentity, ProcessIdentity, Result, err, ok } from '../runtime/types';
 import { ManagedMode, ModeDirectiveRenderer } from '../modes/directives';
 import { buildModeCommand } from '../modes/commands';
+import { guardDangerousArgv } from './dangerous-launch';
 
 export interface PreparedManagedInvocation {
   readonly kind: 'launch' | 'resume';
@@ -134,11 +135,15 @@ export class ManagedInvocationService {
     return this.runManaged(prepared.value, ['--conversation', conversationId]);
   }
 
-  passThrough(argv: readonly string[]): Promise<Result<ProcessOutcome, RuntimeError>> {
+  async passThrough(argv: readonly string[]): Promise<Result<ProcessOutcome, RuntimeError>> {
+    const guarded = await guardDangerousArgv(argv, {
+      isTTY: Boolean(process.stdin.isTTY),
+    });
+    if (!guarded.ok) return guarded;
     const nonce = crypto.randomBytes(16).toString('hex');
     return this.runner.foregroundInteractive(
       this.agyCommand,
-      [...argv],
+      [...guarded.value],
       { operationId: `passthrough:${nonce}`, ownerNonce: nonce },
       { env: ordinaryEnvironment(this.environment) },
     );
@@ -148,6 +153,12 @@ export class ManagedInvocationService {
     prepared: Readonly<PreparedManagedInvocation>,
     argv: readonly string[],
   ): Promise<Result<ProcessOutcome, RuntimeError>> {
+    // defense-in-depth：managed final argv 亦過危險旗標 gate
+    const guarded = await guardDangerousArgv(argv, {
+      isTTY: Boolean(process.stdin.isTTY),
+    });
+    if (!guarded.ok) return guarded;
+    const safeArgv = [...guarded.value];
     const env: NodeJS.ProcessEnv = {
       ...this.environment,
       OMA_SESSION_ID: prepared.sessionId,
@@ -162,7 +173,7 @@ export class ManagedInvocationService {
     let spawnRecordError: RuntimeError | undefined;
     const outcome = await this.runner.foregroundInteractive(
       this.agyCommand,
-      argv,
+      safeArgv,
       prepared.operationIdentity,
       {
         cwd: prepared.cwd,

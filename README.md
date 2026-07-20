@@ -138,6 +138,9 @@ oma autopilot start -- <goal>
 oma autopilot status --session <id>
 oma autopilot checkpoint --session <id> --expected-revision <n> --evidence <file>
 oma autopilot resume --session <id> --conversation <id> --expected-revision <n>
+  # ledger-only binding update (no spawn)
+oma autopilot drive --session <id> --conversation <id> --expected-revision <n>
+  # ledger bind + managed agy spawn via resumeConversation (requires prior exact_env bind)
 oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot doctor --session <id>
 oma autopilot review|qa|reset-breaker …   # see oma --help

@@ -32,6 +32,7 @@ Usage:
   oma autopilot review --session <id> --expected-revision <n> --evidence <file>
   oma autopilot qa --session <id> --expected-revision <n> --evidence <file>
   oma autopilot resume --session <id> --conversation <id> --expected-revision <n>
+  oma autopilot drive --session <id> --conversation <id> --expected-revision <n>
   oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
   oma autopilot reset-breaker --session <id> --expected-revision <n>
   oma autopilot doctor --session <id>
@@ -83,7 +84,10 @@ function outcomeCode(
 ): number {
   if (!result.ok) {
     io.stderr(`${result.error.code}: ${result.error.message}\n`);
-    return 1;
+    // 與 legacy gate / invalid 對齊：validator 類錯誤用 2
+    return result.error.code === 'E_VALIDATOR_REJECTED' || result.error.code === 'E_DIRECTIVE_INVALID'
+      ? 2
+      : 1;
   }
   return result.value.code;
 }

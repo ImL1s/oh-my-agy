@@ -85,6 +85,61 @@ export function createDefaultServices(
         stderr(`${runtime.error.code}: ${runtime.error.message}\n`);
         return 1;
       }
+      // drive：ledger + ManagedInvocationService.resumeConversation（production 呼叫者）
+      const { parseAutopilotCommand } = await import('../autopilot/commands');
+      const parsed = parseAutopilotCommand(argv);
+      if (parsed.ok && parsed.value.kind === 'drive') {
+        const driven = await runtime.value.drive(
+          parsed.value.sessionId,
+          parsed.value.conversationId,
+          parsed.value.expectedRevision,
+        );
+        if (!driven.ok) {
+          stderr(`${driven.error.code}: ${driven.error.message}\n`);
+          return driven.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
+        }
+        const managed = buildManagedService({
+          packageRoot,
+          cwd,
+          agyCommand,
+          stateRoot: options.stateRoot,
+          pluginAdapter: options.pluginAdapter,
+          runner,
+        });
+        if (!managed.ok) {
+          stderr(`${managed.error.code}: ${managed.error.message}\n`);
+          return 1;
+        }
+        const outcome = await managed.value.resumeConversation(
+          driven.value.launch.sessionId,
+          driven.value.launch.conversationId,
+          driven.value.launch.expectedRevision,
+        );
+        if (!outcome.ok) {
+          stderr(`${outcome.error.code}: ${outcome.error.message}\n`);
+          // 仍輸出 ledger view，方便除錯 binding 與 spawn 分離失敗
+          stdout(`${JSON.stringify({
+            ok: false,
+            kind: 'autopilot-driven',
+            view: driven.value.view,
+            launch: driven.value.launch,
+            error: outcome.error,
+          }, null, 2)}\n`);
+          return 1;
+        }
+        stdout(`${JSON.stringify({
+          ok: true,
+          kind: 'autopilot-driven',
+          view: driven.value.view,
+          launch: driven.value.launch,
+          process: {
+            code: outcome.value.code,
+            signal: outcome.value.signal,
+            timedOut: outcome.value.timedOut,
+          },
+        }, null, 2)}\n`);
+        return outcome.value.code === 0 ? 0 : 1;
+      }
       const result = await runtime.value.dispatch(argv);
       if (!result.ok) {
         stderr(`${result.error.code}: ${result.error.message}\n`);
