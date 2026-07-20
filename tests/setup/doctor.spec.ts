@@ -4,6 +4,8 @@ import { PluginCommandAdapter } from '../../src/setup/plugin';
 
 describe('oma doctor', () => {
   const packageRoot = path.resolve(__dirname, '../..');
+  // 必須與 package.json / plugin.json 同步，避免 release bump 後硬編碼版本炸 CI
+  const packageVersion = require('../../package.json').version as string;
 
   test('passes hooks/version when plugin registry is active', async () => {
     const adapter: PluginCommandAdapter = {
@@ -13,7 +15,7 @@ describe('oma doctor', () => {
             argv,
             code: 0,
             stdout: JSON.stringify({
-              imports: [{ name: 'oh-my-agy', enabled: true, version: '0.1.0', source: 'test' }],
+              imports: [{ name: 'oh-my-agy', enabled: true, version: packageVersion, source: 'test' }],
             }),
             stderr: '',
           };
@@ -23,7 +25,7 @@ describe('oma doctor', () => {
     };
     const report = await runDoctor({
       packageRoot,
-      packageVersion: '0.1.0',
+      packageVersion,
       adapter,
       strictPlugin: true,
       // CI 可能沒有 agy；echo 可 spawn 即通過 path 檢查
@@ -52,7 +54,7 @@ describe('oma doctor', () => {
     };
     const report = await runDoctor({
       packageRoot,
-      packageVersion: '0.1.0',
+      packageVersion,
       adapter,
       strictPlugin: true,
       agyCommand: 'echo',
