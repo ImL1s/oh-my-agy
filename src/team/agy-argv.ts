@@ -50,15 +50,18 @@ export function buildAgy115Argv(
         'Headless print timeout must be a positive Go duration no greater than 5m0s',
       ));
     }
+    // Antigravity 1.1.5 parses --print/--prompt-interactive as taking the
+    // prompt as their immediate value; trailing prompts swallow later flags
+    // into the prompt text (verified against the live CLI).
     const argv = [
       ...prefix,
       '--print',
+      prompt.value,
       '--print-timeout',
       duration,
       '--mode',
       mode,
       ...(input.capabilityMode === 'read-only' ? ['--sandbox'] : []),
-      prompt.value,
     ];
     return validateFrozenArgv(argv, prompt.value);
   }
@@ -66,10 +69,10 @@ export function buildAgy115Argv(
   const argv = [
     ...prefix,
     '--prompt-interactive',
+    prompt.value,
     '--mode',
     mode,
     ...(input.capabilityMode === 'read-only' ? ['--sandbox'] : []),
-    prompt.value,
   ];
   return validateFrozenArgv(argv, prompt.value);
 }
@@ -94,8 +97,16 @@ function validateFrozenArgv(argv: string[], prompt: string): Result<readonly str
   if (argv.includes('--dangerously-skip-permissions')) {
     return err(runtimeError('E_VALIDATOR_REJECTED', 'Dangerous permission bypass is forbidden'));
   }
-  if (argv.filter((entry) => entry === prompt).length !== 1 || argv[argv.length - 1] !== prompt) {
-    return err(runtimeError('E_CORRUPT_STATE', 'Worker prompt must be one final argv element'));
+  const promptIndex = argv.indexOf(prompt);
+  if (
+    argv.filter((entry) => entry === prompt).length !== 1
+    || promptIndex < 1
+    || !['--print', '--prompt-interactive'].includes(argv[promptIndex - 1])
+  ) {
+    return err(runtimeError(
+      'E_CORRUPT_STATE',
+      'Worker prompt must be the single value of --print/--prompt-interactive',
+    ));
   }
   if (argv.some((entry) => entry.includes('\0'))) {
     return err(runtimeError('E_VALIDATOR_REJECTED', 'Worker argv contains a NUL byte'));
