@@ -36,7 +36,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   realpath'd for macOS `/tmp` symlinks.
 - `production probe plugin-discovery` binds `installed_version` to the observed
   public CLI version; the packaged workflow definition is stored in canonical
-  bytes so the probe's canonical-JSON read admits it.
+  bytes so the probe's canonical-JSON read admits it. The fresh-session canary
+  tolerates agy 1.1.5's trailing double newline and pins its model.
+- Bounded processes force-settle after the deadline even when an agy grandchild
+  holds the inherited stdout/stderr pipe open, so `boundedHeadless` can no
+  longer hang past its bound; version/help probe timeouts widened (2s/5s → 15s)
+  for fork+exec under host memory pressure.
+- Workflow stages clean their proposal root before every attempt (idempotent
+  against a stale proposal) and carry a retry budget so a single transient agy
+  turn does not fail the whole DAG.
+
+Full seven-seam `oma production verify` (installed plugin discovery, managed
+lifecycle, exact resume, interactive/headless worker, MCP+LSP status,
+workflow DAG replay/review, independent review + UltraQA) passes on a real
+Antigravity 1.1.5 host for this release.
 
 ### Changed
 
