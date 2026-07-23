@@ -23,7 +23,7 @@ function agy(): AgyCliProbeV1 {
     versionOutputHash: digest('version'),
     helpOutputHash: digest('help'),
     requiredFlags: [
-      '--conversation', '--mode', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
+      '--add-dir', '--conversation', '--mode', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
     ],
     observedAtMs: now,
     headlessCanary: {
@@ -88,7 +88,7 @@ describe('fail-closed worker provider order', () => {
       fs.writeFileSync(executable, [
         '#!/usr/bin/env node',
         "if (process.argv[2] === '--version') process.stdout.write('1.1.5\\n');",
-        "else if (process.argv[2] === '--help') process.stderr.write('--conversation --mode --print --print-timeout --prompt-interactive --sandbox\\n');",
+        "else if (process.argv[2] === '--help') process.stderr.write('--add-dir --conversation --mode --print --print-timeout --prompt-interactive --sandbox\\n');",
         'else process.exit(2);',
         '',
       ].join('\n'));
@@ -103,7 +103,7 @@ describe('fail-closed worker provider order', () => {
       expect(probed.value.headlessCanary).toBeUndefined();
       expect(probed.value.interactiveCanary).toBeUndefined();
       expect(probed.value.helpOutputHash).toBe(digest(
-        '--conversation --mode --print --print-timeout --prompt-interactive --sandbox\n',
+        '--add-dir --conversation --mode --print --print-timeout --prompt-interactive --sandbox\n',
       ));
     } finally {
       fs.rmSync(root, { recursive: true, force: true });

@@ -6,6 +6,7 @@ export const AGY_DEFAULT_HEADLESS_TIMEOUT = '5m0s' as const;
 export const AGY_MAX_HEADLESS_TIMEOUT_MS = 300_000;
 
 export const AGY_REQUIRED_HELP_FLAGS = Object.freeze([
+  '--add-dir',
   '--conversation',
   '--mode',
   '--print',
@@ -20,6 +21,10 @@ export interface AgyLaunchArgvInputV1 {
   prompt: string;
   conversationId?: string;
   boundedDuration?: string;
+  /** Directories mounted into the worker workspace via repeatable --add-dir.
+   * Headless agy binds its own workspace, not the process cwd, so a worker
+   * cannot see the repository unless it is added explicitly. */
+  workspaceDirectories?: readonly string[];
 }
 
 /**
@@ -38,6 +43,13 @@ export function buildAgy115Argv(
       return err(runtimeError('E_VALIDATOR_REJECTED', 'Antigravity conversation ID is invalid'));
     }
     prefix.push('--conversation', input.conversationId);
+  }
+  for (const directory of input.workspaceDirectories ?? []) {
+    if (directory.trim() === '' || directory.includes('\0')
+      || directory.includes('\n') || directory.startsWith('-')) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Workspace directory is invalid'));
+    }
+    prefix.push('--add-dir', directory);
   }
 
   const mode = input.capabilityMode === 'read-only' ? 'plan' : 'accept-edits';

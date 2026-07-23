@@ -963,6 +963,7 @@ async function dispatchProductWorkflowTask(
     'Negative decisions are reject, no_ship, or failed and must include at least one finding.',
     'Approval, status, verification, and ship proof are computed only by the OMA parent from this exact verdict plus real verification exits.',
     `Stage kind: ${input.stage.kind}`,
+    `Repository root (mounted in your workspace): ${context.repository_root}`,
     `Permission envelope: ${canonicalBytesV1(input.permission.envelope).toString('utf8')}`,
     `Workflow input: ${canonicalBytesV1(context.workflow_input).toString('utf8')}`,
   ].join('\n');
@@ -971,6 +972,7 @@ async function dispatchProductWorkflowTask(
     capabilityMode: input.permission.envelope.capability_mode,
     prompt,
     boundedDuration: `${Math.max(1, Math.ceil(input.stage.timeout_ms / 1000))}s`,
+    workspaceDirectories: [context.repository_root],
   });
   if (!argv.ok) return productFailure(input, 'blocked', true);
   const launchOperation = `workflow:${input.task.task_id}:${input.attempt}`;
@@ -980,6 +982,25 @@ async function dispatchProductWorkflowTask(
     productBoundedPolicy(input.stage.timeout_ms, context),
     productOperation(launchOperation, input.permission.envelope_digest),
   );
+  if (process.env.OMA_WORKER_DEBUG === '1') {
+    try {
+      fs.writeFileSync(
+        path.join(os.tmpdir(), `oma-worker-debug-${input.task.task_id.slice(0, 8)}-${input.attempt}.json`),
+        JSON.stringify({
+          ok: launch.ok,
+          code: launch.ok ? launch.value.code : null,
+          error: launch.ok ? null : launch.error,
+          timedOut: launch.ok ? launch.value.timedOut : null,
+          outputOverflow: launch.ok ? launch.value.outputOverflow : null,
+          processCountOverflow: launch.ok ? launch.value.processCountOverflow : null,
+          identity: launch.ok ? launch.value.processIdentity !== null : null,
+          stdout: launch.ok ? launch.value.stdout.slice(0, 4096) : null,
+          stderr: launch.ok ? launch.value.stderr.slice(0, 4096) : null,
+        }),
+        { mode: 0o600 },
+      );
+    } catch { /* diagnostics never block the dispatch */ }
+  }
   if (!launch.ok || !successfulProductProcess(launch.value)
     || launch.value.processIdentity === null) {
     return productFailure(input, 'failed');

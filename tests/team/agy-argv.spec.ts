@@ -42,7 +42,7 @@ describe('Antigravity 1.1.5 frozen worker argv', () => {
 
   test('version/help table requires every documented 1.1.5 flag', () => {
     const help = [
-      '--conversation', '--mode', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
+      '--add-dir', '--conversation', '--mode', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
     ].join('\n');
     expect(validateAgy115Help('1.1.5\n', help).ok).toBe(true);
     expect(validateAgy115Help('1.1.4\n', help).ok).toBe(false);
