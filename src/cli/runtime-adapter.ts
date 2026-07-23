@@ -1176,6 +1176,30 @@ function productFailure(
   };
 }
 
+/** Last balanced top-level {...} in the text (string/escape aware), or null. */
+function extractLastJsonObject(text: string): string | null {
+  let end = -1;
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  for (let index = text.length - 1; index >= 0; index -= 1) {
+    const character = text[index];
+    if (end === -1) {
+      if (character === '}') { end = index; depth = 1; }
+      continue;
+    }
+    if (character === '"' && text[index - 1] !== '\\') inString = !inString;
+    if (inString) continue;
+    if (character === '}') depth += 1;
+    else if (character === '{') {
+      depth -= 1;
+      if (depth === 0) { start = index; break; }
+    }
+  }
+  if (end === -1 || start === -1) return null;
+  return text.slice(start, end + 1);
+}
+
 function stripSingleJsonFence(text: string): string {
   const match = /^```(?:json)?\r?\n([\s\S]*?)\r?\n```$/u.exec(text);
   return match === null ? text : match[1].trim();
@@ -1241,10 +1265,14 @@ function parseProductWorkerResult(
   verdict: ProductWorkflowVerdictV1;
 } | null {
   if (Buffer.byteLength(stdout, 'utf8') > 1_048_576) return null;
-  // Live workers cannot guarantee byte-canonical JSON; unambiguity is kept by
-  // rejecting duplicate keys outright, and every accepted object is
-  // re-serialized canonically before hashing or storage.
-  const trimmed = stripSingleJsonFence(stdout.trim());
+  // Live workers narrate progress on stdout before the final answer and
+  // cannot guarantee byte-canonical JSON; the verdict is the LAST balanced
+  // top-level JSON object. Unambiguity is kept by rejecting duplicate keys
+  // outright, and every accepted object is re-serialized canonically before
+  // hashing or storage.
+  const extracted = extractLastJsonObject(stripSingleJsonFence(stdout.trim()));
+  if (extracted === null) return null;
+  const trimmed = extracted;
   if (jsonTextHasDuplicateKeys(trimmed)) return null;
   let value: unknown;
   try {
