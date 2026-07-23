@@ -30,7 +30,7 @@ describe('prepared worker control plane', () => {
     if (!result.ok) return;
     expect(result.value.launch).toEqual({
       executable: 'agy', shell: false,
-      argv: ['--print', 'Implement owned task', '--print-timeout', '5m0s', '--mode', 'accept-edits'],
+      argv: ['--model', 'gemini-3.6-flash-high', '--print', 'Implement owned task', '--print-timeout', '5m0s', '--mode', 'accept-edits'],
     });
     expect(result.value.binding).toMatchObject({
       provider: 'agy_headless', generation: 1, state: 'claimed', transitionSequence: 0,

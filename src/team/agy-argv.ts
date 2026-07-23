@@ -4,11 +4,17 @@ import { Result, err, ok } from '../runtime/types';
 export const AGY_WORKER_VERSION = '1.1.5' as const;
 export const AGY_DEFAULT_HEADLESS_TIMEOUT = '5m0s' as const;
 export const AGY_MAX_HEADLESS_TIMEOUT_MS = 300_000;
+// Pin an explicit model: relying on agy's ambient default is fragile — a stale
+// default (e.g. a retired gemini-2.5-pro) makes every worker fail with
+// "Agent execution terminated due to error". Must be a current `agy models` id.
+export const AGY_WORKER_MODEL = 'gemini-3.6-flash-high' as const;
+export const AGY_MODEL_ID = /^[a-z0-9][a-z0-9.-]{0,63}$/;
 
 export const AGY_REQUIRED_HELP_FLAGS = Object.freeze([
   '--add-dir',
   '--conversation',
   '--mode',
+  '--model',
   '--print',
   '--print-timeout',
   '--prompt-interactive',
@@ -25,6 +31,9 @@ export interface AgyLaunchArgvInputV1 {
    * Headless agy binds its own workspace, not the process cwd, so a worker
    * cannot see the repository unless it is added explicitly. */
   workspaceDirectories?: readonly string[];
+  /** Pinned model id (defaults to AGY_WORKER_MODEL). Must be a current
+   * `agy models` dash-id; an invalid or retired id fails the whole session. */
+  model?: string;
 }
 
 /**
@@ -51,6 +60,11 @@ export function buildAgy115Argv(
     }
     prefix.push('--add-dir', directory);
   }
+  const model = input.model ?? AGY_WORKER_MODEL;
+  if (!AGY_MODEL_ID.test(model)) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'Antigravity model id is invalid'));
+  }
+  prefix.push('--model', model);
 
   const mode = input.capabilityMode === 'read-only' ? 'plan' : 'accept-edits';
   if (input.launchMode === 'headless') {

@@ -9,14 +9,14 @@ describe('Antigravity 1.1.5 frozen worker argv', () => {
   const prompt = 'Review the owned task safely';
 
   test.each([
-    ['headless', 'read-only', undefined, ['--print', prompt, '--print-timeout', '5m0s', '--mode', 'plan', '--sandbox']],
-    ['headless', 'read-write', undefined, ['--print', prompt, '--print-timeout', '5m0s', '--mode', 'accept-edits']],
-    ['interactive', 'read-only', undefined, ['--prompt-interactive', prompt, '--mode', 'plan', '--sandbox']],
-    ['interactive', 'read-write', undefined, ['--prompt-interactive', prompt, '--mode', 'accept-edits']],
-    ['headless', 'read-only', 'conversation-1', ['--conversation', 'conversation-1', '--print', prompt, '--print-timeout', '5m0s', '--mode', 'plan', '--sandbox']],
-    ['headless', 'read-write', 'conversation-1', ['--conversation', 'conversation-1', '--print', prompt, '--print-timeout', '5m0s', '--mode', 'accept-edits']],
-    ['interactive', 'read-only', 'conversation-1', ['--conversation', 'conversation-1', '--prompt-interactive', prompt, '--mode', 'plan', '--sandbox']],
-    ['interactive', 'read-write', 'conversation-1', ['--conversation', 'conversation-1', '--prompt-interactive', prompt, '--mode', 'accept-edits']],
+    ['headless', 'read-only', undefined, ['--model', 'gemini-3.6-flash-high', '--print', prompt, '--print-timeout', '5m0s', '--mode', 'plan', '--sandbox']],
+    ['headless', 'read-write', undefined, ['--model', 'gemini-3.6-flash-high', '--print', prompt, '--print-timeout', '5m0s', '--mode', 'accept-edits']],
+    ['interactive', 'read-only', undefined, ['--model', 'gemini-3.6-flash-high', '--prompt-interactive', prompt, '--mode', 'plan', '--sandbox']],
+    ['interactive', 'read-write', undefined, ['--model', 'gemini-3.6-flash-high', '--prompt-interactive', prompt, '--mode', 'accept-edits']],
+    ['headless', 'read-only', 'conversation-1', ['--conversation', 'conversation-1', '--model', 'gemini-3.6-flash-high', '--print', prompt, '--print-timeout', '5m0s', '--mode', 'plan', '--sandbox']],
+    ['headless', 'read-write', 'conversation-1', ['--conversation', 'conversation-1', '--model', 'gemini-3.6-flash-high', '--print', prompt, '--print-timeout', '5m0s', '--mode', 'accept-edits']],
+    ['interactive', 'read-only', 'conversation-1', ['--conversation', 'conversation-1', '--model', 'gemini-3.6-flash-high', '--prompt-interactive', prompt, '--mode', 'plan', '--sandbox']],
+    ['interactive', 'read-write', 'conversation-1', ['--conversation', 'conversation-1', '--model', 'gemini-3.6-flash-high', '--prompt-interactive', prompt, '--mode', 'accept-edits']],
   ] as const)('%s %s conversation=%s', (launchMode, capabilityMode, conversationId, expected) => {
     const result = buildAgy115Argv({ launchMode, capabilityMode, prompt, conversationId });
     expect(result.ok).toBe(true);
@@ -42,7 +42,7 @@ describe('Antigravity 1.1.5 frozen worker argv', () => {
 
   test('version/help table requires every documented 1.1.5 flag', () => {
     const help = [
-      '--add-dir', '--conversation', '--mode', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
+      '--add-dir', '--conversation', '--mode', '--model', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
     ].join('\n');
     expect(validateAgy115Help('1.1.5\n', help).ok).toBe(true);
     expect(validateAgy115Help('1.1.4\n', help).ok).toBe(false);

@@ -22,6 +22,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 - Managed team/runtime hardening for Antigravity 1.1.5, worker envelopes,
   mailbox/control-plane fencing, lifecycle hooks, compaction, and redaction.
 
+### Fixed
+
+- Live-host worker dispatch, fixed across seams that only a real Antigravity
+  1.1.5 session exposes: `--print`/`--prompt-interactive` take the prompt as
+  their immediate value; the repository is mounted into the worker workspace
+  with `--add-dir`; the model is pinned to a current `agy models` id
+  (`gemini-3.6-flash-high`) instead of agy's ambient default (a retired default
+  such as `gemini-2.5-pro` fails every worker with "Agent execution terminated
+  due to error"); worker stdout is parsed as the last balanced JSON object
+  (live sessions narrate before the answer) with explicit duplicate-key
+  rejection; stage budgets are 300s; and the workflow probe scratch dir is
+  realpath'd for macOS `/tmp` symlinks.
+- `production probe plugin-discovery` binds `installed_version` to the observed
+  public CLI version; the packaged workflow definition is stored in canonical
+  bytes so the probe's canonical-JSON read admits it.
+
 ### Changed
 
 - Public manifests and package surface are synchronized at `0.3.0` and include

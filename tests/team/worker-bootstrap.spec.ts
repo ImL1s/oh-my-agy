@@ -71,7 +71,7 @@ describe('worker-bootstrap', () => {
       const recorded = fs.readFileSync(outFile, 'utf8').trim().split('\n');
       const argv = JSON.parse(recorded[3]) as string[];
       expect(argv).toEqual([
-        '--print', 'Execute mock task', '--print-timeout', '5m0s', '--mode', 'accept-edits',
+        '--model', 'gemini-3.6-flash-high', '--print', 'Execute mock task', '--print-timeout', '5m0s', '--mode', 'accept-edits',
       ]);
       expect(argv).not.toContain('--dangerously-skip-permissions');
       expect(argv.filter((entry) => entry === 'Execute mock task')).toHaveLength(1);
