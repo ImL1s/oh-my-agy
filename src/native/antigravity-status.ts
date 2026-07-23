@@ -56,6 +56,11 @@ export interface AntigravityStatusOptionsV1 {
 export const DISCOVERY_PROOF_TOKEN_V1 =
   'OMA_DISCOVERY_PROOF_V1_7f39c2e81d4ab6059fa47c13d86e502bf971a640ec28d35b';
 export const DISCOVERY_PROOF_ARGV_V1 = [
+  // Pin the model: agy's ambient default can be retired (observed with
+  // gemini-2.5-pro), which kills the fresh-session canary with a generic
+  // "Agent execution terminated due to error" and downgrades discovery to T0.
+  '--model',
+  'gemini-3.6-flash-high',
   '--print-timeout',
   '90s',
   '-p',
