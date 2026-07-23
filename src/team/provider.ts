@@ -133,11 +133,16 @@ export function selectWorkerProvider(
 }
 
 /** Bounded, read-only version/help probe.  It deliberately does not invent canary proof. */
+// 15s, not 5s: `--version`/`--help` are effectively instant, but fork+exec of a
+// fresh interpreter can stall well past 5s on a memory-pressured host (observed
+// with a multi-GB sibling agy session), which would spuriously block the
+// provider. The generous bound still fails fast on a genuine hang.
+const AGY_PROBE_TIMEOUT_MS = 15_000;
 export function probeAgy115(executable = 'agy', nowMs = Date.now()): Result<AgyCliProbeV1, RuntimeError> {
   const resolved = resolveExecutable(executable);
   if (resolved === null) return providerBlocked('agy_headless', 'Antigravity CLI executable is not installed');
-  const version = spawnSync(resolved, ['--version'], { encoding: 'utf8', timeout: 5_000, shell: false });
-  const help = spawnSync(resolved, ['--help'], { encoding: 'utf8', timeout: 5_000, shell: false });
+  const version = spawnSync(resolved, ['--version'], { encoding: 'utf8', timeout: AGY_PROBE_TIMEOUT_MS, shell: false });
+  const help = spawnSync(resolved, ['--help'], { encoding: 'utf8', timeout: AGY_PROBE_TIMEOUT_MS, shell: false });
   if (version.status !== 0 || help.status !== 0 || version.error !== undefined || help.error !== undefined) {
     return providerBlocked('agy_headless', 'Antigravity CLI version/help probe failed');
   }

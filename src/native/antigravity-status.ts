@@ -239,10 +239,18 @@ export async function inspectFreshPluginDiscovery(
       maximumOutputBytes: DISCOVERY_MAXIMUM_OUTPUT_BYTES,
     });
     const exactOutput = `${DISCOVERY_PROOF_TOKEN_V1}\n`;
+    // agy 1.1.5 print mode terminates the answer with an extra trailing
+    // newline (the token followed by "\n\n"). Accept the exact token followed
+    // by one or more trailing newlines and NOTHING else, then canonicalize the
+    // stored bytes to `${token}\n` so the receipt stdout and the frozen
+    // validator hash agree on a single stable form.
+    const canonicalCanaryOutput = new RegExp(`^${DISCOVERY_PROOF_TOKEN_V1}\\n+$`).test(outcome.stdout)
+      ? exactOutput
+      : outcome.stdout;
     const observed = Number.isSafeInteger(outcome.pid) && Number(outcome.pid) > 0
       && outcome.status === 0 && outcome.signal === null && outcome.error === undefined
       && outcome.timedOut === false && outcome.outputOverflow === false
-      && outcome.stdout === exactOutput && outcome.stderr === '';
+      && canonicalCanaryOutput === exactOutput && outcome.stderr === '';
     return {
       ...base,
       status: observed ? 'observed' : 'unobserved',
@@ -254,9 +262,9 @@ export async function inspectFreshPluginDiscovery(
       process_signal: outcome.signal,
       timed_out: outcome.timedOut,
       output_overflow: outcome.outputOverflow,
-      canary_output_sha256: sha256(outcome.stdout),
+      canary_output_sha256: sha256(canonicalCanaryOutput),
       canary_stderr_sha256: sha256(outcome.stderr),
-      stdout: outcome.stdout,
+      stdout: canonicalCanaryOutput,
       stderr: outcome.stderr,
     };
   } finally {

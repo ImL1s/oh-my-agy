@@ -105,9 +105,39 @@ describe('public Antigravity status adapter', () => {
     expect(fs.existsSync(request!.cwd)).toBe(false);
   });
 
+  test('observes agy 1.1.5 trailing double-newline and canonicalizes stored output', async () => {
+    const result = await inspectFreshPluginDiscovery({
+      executableRealpath: '/opt/agy',
+      version: '1.1.5',
+      environment: {},
+      candidateOid: 'a'.repeat(40),
+      packageDigest: 'b'.repeat(64),
+      installedDigest: 'b'.repeat(64),
+      installedRealpath: '/opt/oh-my-agy',
+      installedVersion: '1.1.5',
+      registryListSha256: 'c'.repeat(64),
+      runner: async () => ({
+        pid: 4243,
+        status: 0,
+        signal: null,
+        stdout: `${DISCOVERY_PROOF_TOKEN_V1}\n\n`,
+        stderr: '',
+        timedOut: false,
+        outputOverflow: false,
+      }),
+    });
+    expect(result).toEqual(expect.objectContaining({
+      status: 'observed',
+      evidence_tier: 'T2',
+      detail_code: 'FRESH_SESSION_CANARY_OBSERVED',
+      stdout: `${DISCOVERY_PROOF_TOKEN_V1}\n`,
+    }));
+  });
+
   test.each([
     ['near-miss output', `${DISCOVERY_PROOF_TOKEN_V1}x\n`, '', 0, null],
     ['missing newline', DISCOVERY_PROOF_TOKEN_V1, '', 0, null],
+    ['token with leading noise', `noise\n${DISCOVERY_PROOF_TOKEN_V1}\n`, '', 0, null],
     ['extra stderr', `${DISCOVERY_PROOF_TOKEN_V1}\n`, 'warning\n', 0, null],
     ['failed process', `${DISCOVERY_PROOF_TOKEN_V1}\n`, '', 1, null],
   ])('keeps %s at T0', async (_label, stdout, stderr, status, signal) => {
