@@ -1,109 +1,65 @@
-name: release
+name: release-verification
 
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      publish_npm:
-        description: Also npmjs.org publish (needs NPM_TOKEN secret + free package name)
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
-  packages: write
-  id-token: write
+  contents: read
+  packages: read
 
 jobs:
-  release:
+  verify:
+    name: Verify immutable release candidate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-          registry-url: https://registry.npmjs.org
-
       - run: npm ci
       - run: npm run build
-
-      - name: Assert tag matches package version (tag pushes)
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG="$(node -p "require('./package.json').version")"
-          test "$TAG" = "$PKG"
-          PLUG="$(node -p "require('./plugin.json').version")"
-          test "$TAG" = "$PLUG"
-
       - run: npm run test:unit
       - run: npm run test:package
       - run: npm run test:e2e
-
-      - name: Create npm pack artifact
+      - run: npm run smoke
+      - name: Verify tag and manifest versions
         run: |
           set -euo pipefail
-          TARBALL="$(npm pack --silent)"
-          echo "TARBALL=$TARBALL" >> "$GITHUB_ENV"
-          mkdir -p release-assets
-          cp "$TARBALL" release-assets/
-          tar -tzf "$TARBALL" | grep -E 'package/dist/src/hooks/(pre-invocation|stop)\.js'
-
-      - name: Smoke packed CLI
-        run: |
-          set -euo pipefail
-          PREFIX="$RUNNER_TEMP/oma-pack-smoke"
-          npm install --ignore-scripts --prefix "$PREFIX" "./$TARBALL"
-          "$PREFIX/node_modules/.bin/oma" --help
-          "$PREFIX/node_modules/.bin/oma" --version
-
-      - name: GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-assets/*
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 公開 unscoped oh-my-agy 已被他人佔用；套件為 @iml1s/oh-my-agy。
-      # npmjs 需 NPM_TOKEN + @iml1s scope — 詳見 docs/npm-publishing.md
-      - name: Publish to GitHub Packages
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          {
-            echo "@iml1s:registry=https://npm.pkg.github.com"
-            echo "//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}"
-          } > "$RUNNER_TEMP/npmrc-gh"
-          npm publish "./$TARBALL" --access public --userconfig "$RUNNER_TEMP/npmrc-gh" --registry https://npm.pkg.github.com
-
-      - name: npmjs.org publish (optional)
-        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "NPM_TOKEN not set — skip npmjs.org publish (GitHub Packages still OK)"
-            exit 0
+          PKG="$(node -p "require('./package.json').version")"
+          PLUGIN="$(node -p "require('./plugin.json').version")"
+          MARKET="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          test "$PKG" = "$PLUGIN"
+          test "$PKG" = "$MARKET"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            test "${GITHUB_REF_NAME#v}" = "$PKG"
           fi
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.publish_npm }}" != "true" ]]; then
-            echo "publish_npm=false — skip"
-            exit 0
-          fi
-          # scoped 套件上 npmjs 需帳號有 @iml1s scope 權限；失敗時不拖垮 GH Packages 已成功路徑
-          npm publish "./$TARBALL" --access public --registry https://registry.npmjs.org || {
-            echo "npmjs.org publish failed — see name ownership / scope notes in README"
+      - name: Verify package readback surface
+        run: |
+          set -euo pipefail
+          npm pack --dry-run 2>&1 | tee pack.txt
+          grep -E 'dist/bin/oma\.js' pack.txt
+          grep -E 'dist/src/mcp/server\.js' pack.txt
+          grep -E 'dist/src/workflows/runner\.js' pack.txt
+          grep -E 'scripts/install\.sh' pack.txt
+          grep -E '\.mcp\.json' pack.txt
+          grep -E '\.agents/workflows/production-safety-review\.md' pack.txt
+          grep -E 'skills/workflow/SKILL\.md' pack.txt
+          grep -E 'tests/fixtures/workflow/production-safety-review-v1\.json' pack.txt
+          grep -E 'docs/RELEASE\.md' pack.txt
+          grep -E 'docs/capabilities\.md' pack.txt
+          grep -E 'docs/security\.md' pack.txt
+          grep -E 'docs/workflows\.md' pack.txt
+      - name: Verify live production gate fails closed without evidence
+        run: |
+          set -euo pipefail
+          if npm run test:production > production.txt 2>&1; then
+            echo 'production gate unexpectedly passed without live evidence' >&2
             exit 1
-          }
+          fi
+          grep -E 'E_PRODUCTION_EVIDENCE' production.txt

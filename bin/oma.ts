@@ -63,7 +63,13 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
   if (args.length === 0) return false;
   const first = args[0];
   // bare `help`/`version` 仍透傳給 agy（e2e 與 legacy 相容）；只有 --help/-h/--version/-v 走 oma help。
-  if (['--help', '-h', '--version', '-v', 'autopilot', 'team', 'setup', 'doctor', 'skill'].includes(first)) {
+  if ([
+    '--help', '-h', '--version', '-v',
+    'autopilot', 'team', 'setup', 'doctor', 'skill',
+    'workflow', 'mcp-server', 'wiki', 'hud',
+    'native-status', 'lsp-status', 'sidecar-status', 'notify',
+    'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
+  ].includes(first)) {
     return true;
   }
   // 明確 managed：mode 後必須有 `--` 分隔 task
@@ -424,4 +430,3 @@ main().catch((e) => {
   process.stderr.write(`非預期錯誤: ${e.message}\n`);
   process.exit(1);
 });
-

@@ -4,6 +4,8 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
   ensureContainedPath,
+  externalStatePathKey,
+  platformSessionAggregateRelativePath,
   resolveStateRoot,
   resolveWorkspaceIdentity,
   verifyStateRootIgnoredForWrite,
@@ -87,5 +89,16 @@ describe('external state-root and workspace identity', () => {
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
     }
+  });
+
+  test('raw external identifiers are hashed before becoming aggregate path components', () => {
+    const rawWorkspace = 'workspace/../secret?token=value';
+    const rawSession = 'conversation/raw/id';
+    const relative = platformSessionAggregateRelativePath(rawWorkspace, rawSession);
+    expect(relative).not.toContain(rawWorkspace);
+    expect(relative).not.toContain(rawSession);
+    expect(relative).toContain(externalStatePathKey(rawWorkspace));
+    expect(relative).toContain(externalStatePathKey(rawSession));
+    expect(relative).not.toContain('..');
   });
 });

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "oh-my-agy": {
+      "command": "node",
+      "args": [
+        "${extensionPath}/dist/bin/oma.js",
+        "mcp-server"
+      ],
+      "env": {
+        "OMA_PACKAGE_ROOT": "${extensionPath}"
+      }
+    }
+  }
+}

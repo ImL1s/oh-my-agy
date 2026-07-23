@@ -1,0 +1,678 @@
+{
+  "schema_version": 1,
+  "error_vectors": [
+    {
+      "name": "immutable_sha_mismatch_blocks_run",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "immutable_recovery_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "sha256_mismatch"
+        },
+        {
+          "kind": "run_id",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "immutable_duplicate_binding_blocks_run",
+      "best_effort": false,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "immutable_recovery_manifest",
+          "valid": false,
+          "binding_count": 2,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "duplicate_binding"
+        },
+        {
+          "kind": "run_id",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "run_selector_disagreement_blocks_native",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "selector_conflict"
+        },
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "run_cwd_mismatch_blocks_native",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "cwd_mismatch"
+        },
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "run_stale_generation_blocks_native",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "stale_generation"
+        },
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "run_duplicate_binding_blocks_native",
+      "best_effort": false,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": false,
+          "binding_count": 2,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "duplicate_binding"
+        },
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "native_zero_binding_blocks_current",
+      "best_effort": false,
+      "expected_error": "E_RESUME_NOT_FOUND",
+      "candidates": [
+        {
+          "kind": "native_session",
+          "valid": false,
+          "binding_count": 0,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "not_bound"
+        },
+        {
+          "kind": "current_run_manifest",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "native_duplicate_binding_blocks_current",
+      "best_effort": false,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "native_session",
+          "valid": false,
+          "binding_count": 2,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "duplicate_binding"
+        },
+        {
+          "kind": "current_run_manifest",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "current_cwd_mismatch_blocks_token",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "current_run_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "cwd_mismatch"
+        },
+        {
+          "kind": "signed_portable_handoff",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "current_stale_generation_blocks_token",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "current_run_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "stale_generation"
+        },
+        {
+          "kind": "signed_portable_handoff",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "current_stale_lease_blocks_token",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "current_run_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "stale_lease",
+          "diagnostics_only": true
+        },
+        {
+          "kind": "signed_portable_handoff",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "current_duplicate_binding_blocks_token",
+      "best_effort": false,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "current_run_manifest",
+          "valid": false,
+          "binding_count": 2,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "duplicate_binding",
+          "diagnostics_only": true
+        },
+        {
+          "kind": "signed_portable_handoff",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "signed_token_expiry_blocks_search",
+      "best_effort": true,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "signed_portable_handoff",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "expired"
+        },
+        {
+          "kind": "best_effort_repository_search",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "signed_token_lineage_mismatch_blocks_search",
+      "best_effort": true,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "signed_portable_handoff",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "lineage_mismatch"
+        },
+        {
+          "kind": "best_effort_repository_search",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "best_effort_search_requires_flag",
+      "best_effort": false,
+      "expected_error": "E_RESUME_NOT_FOUND",
+      "candidates": [
+        {
+          "kind": "best_effort_repository_search",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "best_effort_equal_top_candidates_are_ambiguous",
+      "best_effort": true,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "best_effort_repository_search",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        },
+        {
+          "kind": "best_effort_repository_search",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-peer"
+        }
+      ]
+    },
+    {
+      "name": "best_effort_forked_lineage_is_ambiguous",
+      "best_effort": true,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "best_effort_repository_search",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "forked_lineage"
+        }
+      ]
+    },
+    {
+      "name": "best_effort_broken_parent_is_ambiguous",
+      "best_effort": true,
+      "expected_error": "E_RESUME_AMBIGUOUS",
+      "candidates": [
+        {
+          "kind": "best_effort_repository_search",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "broken_parent"
+        }
+      ]
+    },
+    {
+      "name": "missing_selector_is_not_found",
+      "best_effort": false,
+      "expected_error": "E_RESUME_NOT_FOUND",
+      "candidates": []
+    },
+    {
+      "name": "invalid_high_selector_without_reason_defaults_to_conflict",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "immutable_recovery_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        },
+        {
+          "kind": "run_id",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "valid_selector_cannot_carry_invalid_reason",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "cwd_mismatch"
+        },
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    },
+    {
+      "name": "invalid_binding_count_blocks_lower_selector",
+      "best_effort": false,
+      "expected_error": "E_RESUME_SELECTOR_CONFLICT",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": true,
+          "binding_count": -1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        },
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current"
+        }
+      ]
+    }
+  ],
+  "selection_vectors": [
+    {
+      "name": "valid_immutable_suppresses_lower_invalid_run",
+      "best_effort": false,
+      "expected_kind": "immutable_recovery_manifest",
+      "candidates": [
+        {
+          "kind": "immutable_recovery_manifest",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 11,
+          "lineage_hash": "immutable-lineage"
+        },
+        {
+          "kind": "run_id",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "cwd_mismatch"
+        }
+      ]
+    },
+    {
+      "name": "valid_run_suppresses_lower_stale_current",
+      "best_effort": false,
+      "expected_kind": "run_id",
+      "candidates": [
+        {
+          "kind": "run_id",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 10,
+          "lineage_hash": "run-lineage"
+        },
+        {
+          "kind": "current_run_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "stale_generation",
+          "diagnostics_only": true
+        }
+      ]
+    },
+    {
+      "name": "valid_native_suppresses_lower_invalid_current",
+      "best_effort": false,
+      "expected_kind": "native_session",
+      "candidates": [
+        {
+          "kind": "native_session",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 9,
+          "lineage_hash": "native-lineage"
+        },
+        {
+          "kind": "current_run_manifest",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "cwd_mismatch"
+        }
+      ]
+    },
+    {
+      "name": "active_current_manifest_suppresses_stale_repo_pointer",
+      "best_effort": true,
+      "expected_kind": "current_run_manifest",
+      "candidates": [
+        {
+          "kind": "current_run_manifest",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 8,
+          "lineage_hash": "active-lineage"
+        },
+        {
+          "kind": "best_effort_repository_search",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 99,
+          "lineage_hash": "stale-pointer-lineage",
+          "invalid_reason": "broken_parent",
+          "diagnostics_only": true
+        }
+      ]
+    },
+    {
+      "name": "valid_signed_token_suppresses_invalid_search",
+      "best_effort": true,
+      "expected_kind": "signed_portable_handoff",
+      "candidates": [
+        {
+          "kind": "signed_portable_handoff",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 6,
+          "lineage_hash": "token-lineage"
+        },
+        {
+          "kind": "best_effort_repository_search",
+          "valid": false,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 7,
+          "lineage_hash": "lineage-current",
+          "invalid_reason": "forked_lineage"
+        }
+      ]
+    },
+    {
+      "name": "best_effort_selection_is_diagnostics_only",
+      "best_effort": true,
+      "expected_kind": "best_effort_repository_search",
+      "candidates": [
+        {
+          "kind": "best_effort_repository_search",
+          "valid": true,
+          "binding_count": 1,
+          "repository_id": "OMA",
+          "cwd_hash": "cwd-current",
+          "generation": 5,
+          "lineage_hash": "search-lineage"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "store_kind": "capability_record",
+  "schema_version": 1,
+  "canonical_name": "oma-example",
+  "aliases": ["example"],
+  "origin": "workspace",
+  "resolution_priority": 10,
+  "version": "1.0.0",
+  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "probe_timestamp": "2026-07-22T00:00:00.000Z",
+  "bounded_result": "configured only",
+  "redacted_diagnostic": "authorization=<redacted>; account=<redacted>",
+  "configured": true,
+  "installed": false,
+  "enabled": false,
+  "loadable": false,
+  "observed": false,
+  "healthy": false,
+  "verified": false,
+  "shadowed_by": null
+}

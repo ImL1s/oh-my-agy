@@ -34,6 +34,21 @@ npx jest e2e/tier1.spec.ts --runInBand
 npm run test:package
 ```
 
+### 6. Smoke 與 production gate
+```bash
+npm run smoke
+npm run test:production
+```
+`test:production` 不是一般 deterministic 測試；它需要七個 fresh、exact-Git-OID-bound live evidence。未提供時以 `E_PRODUCTION_EVIDENCE` exit 1 是正確的 fail-closed 行為。
+
+### 7. 新增 public composition surfaces
+
+* `src/workflows/*`：DAG / permission / replay / independent review；CLI adapter 必須保持薄層，不重做 state machine。
+* `src/mcp/*`：固定六個 read/proposal operations，禁止 generic command runner。
+* `src/native/*`：只報 public evidence；不得從 UI 或 private files 推論 native team/workflow/LSP。
+* `src/continuation/recovery.ts`：partial recovery 必須保留 `W_BROKEN_CHAIN` / unknown-record warnings。
+* `src/setup/update.ts` / `uninstall.ts`：immutable, receipt-owned lifecycle。
+
 ## 程式碼風格與開發規範
 
 ### 命名規範
@@ -49,3 +64,5 @@ npm run test:package
 * 禁止使用 `exec` 執行外部命令；必須使用 `spawn` / `spawnSync` 與引數陣列。
 * Circuit breaker **禁止** `git reset --hard` / `git clean -fd`。
 * 不得修改 `AGENTS.md`。
+* `.github/workflows/release.yml` 是 read-only verification；不得在沒有完整 live gate 與 external readback transaction 時加 publisher。
+* Registry publication 目前為空；不得宣稱 npmjs.org 或 GitHub Packages 已發布。

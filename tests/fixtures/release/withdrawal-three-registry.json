@@ -1,0 +1,7 @@
+{
+  "fixture_only_registry_ids": ["registry-a", "registry-b", "registry-c"],
+  "does_not_widen_production_allowlist": true,
+  "failure_at_first": ["N/A", "N/A", "N/A"],
+  "failure_at_middle": ["DEPRECATED", "N/A", "N/A"],
+  "failure_at_last": ["DEPRECATED", "DEPRECATED", "N/A"]
+}

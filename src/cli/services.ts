@@ -12,7 +12,7 @@ import { doctorReportToLines, runDoctor } from '../setup/doctor';
 import { teamCommand as runTeamCommand } from '../team/commands';
 import { RuntimeContext } from '../team/types';
 import { ManagedInvocationService, ordinaryEnvironment } from './managed-invocation';
-import { RuntimeManagedTransactionAdapter } from './runtime-adapter';
+import { RuntimeManagedTransactionAdapter, runExtendedCommand } from './runtime-adapter';
 import { CliServices } from './application';
 import { guardDangerousArgv } from './dangerous-launch';
 
@@ -25,6 +25,8 @@ export interface DefaultServicesOptions {
   pluginAdapter?: PluginCommandAdapter;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
+  environment?: NodeJS.ProcessEnv;
+  processRunner?: ProcessRunner;
   /** 測試注入：危險旗標確認 */
   dangerousLaunch?: {
     isTTY?: boolean;
@@ -45,7 +47,8 @@ export function createDefaultServices(
   const version = options.version ?? readPackageVersion(packageRoot);
   const stdout = options.stdout ?? ((value) => process.stdout.write(value));
   const stderr = options.stderr ?? ((value) => process.stderr.write(value));
-  const runner = new ProcessRunner();
+  const environment = options.environment ?? process.env;
+  const runner = options.processRunner ?? new ProcessRunner();
 
   return {
     version,
@@ -301,6 +304,28 @@ export function createDefaultServices(
       stdout(`${JSON.stringify(result.value, null, 2)}\n`);
       return 0;
     },
+    async extendedCommand(command, argv) {
+      return runExtendedCommand(command, argv, {
+        packageRoot,
+        cwd,
+        agyCommand,
+        stateRoot: options.stateRoot,
+        pluginAdapter: options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand),
+        managedService: () => buildManagedService({
+          packageRoot,
+          cwd,
+          agyCommand,
+          stateRoot: options.stateRoot,
+          pluginAdapter: options.pluginAdapter,
+          runner,
+        }),
+        version,
+        stdout,
+        stderr,
+        environment,
+        runner,
+      });
+    },
   };
 }
 
@@ -503,4 +528,3 @@ function readPackageVersion(packageRoot: string): string {
     return '0.0.0';
   }
 }
-

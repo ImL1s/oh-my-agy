@@ -2,7 +2,7 @@ import { RuntimeError } from '../runtime/errors';
 import { ProcessOutcome } from '../runtime/process';
 import { Result } from '../runtime/types';
 import { ManagedMode } from '../modes/directives';
-import { parseCliArguments } from './parser';
+import { ExtendedCliCommand, parseCliArguments } from './parser';
 
 export interface CliServices {
   readonly version?: string;
@@ -13,6 +13,7 @@ export interface CliServices {
   setupCommand(argv: readonly string[]): Promise<number>;
   doctorCommand(argv: readonly string[]): Promise<number>;
   skillCommand(argv: readonly string[]): Promise<number>;
+  extendedCommand(command: ExtendedCliCommand, argv: readonly string[]): Promise<number>;
 }
 
 export interface CliIo {
@@ -29,6 +30,24 @@ Usage:
   oma search -- <read-only query>
   oma skill list
   oma skill show <name>
+  oma workflow install [--source <definition.json>]
+  oma workflow list|native-status
+  oma workflow run <name> --input <input.json> [--version <semver>] [--generation <n>]
+  oma workflow status|replay --run <run-id>
+  oma mcp-server
+  oma wiki index|list|search <query> [--limit <1..50>]
+  oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
+  oma native-status | lsp-status | sidecar-status
+  oma notify status|test [--severity <level>] [--title <text>] [--message <text>]
+  oma resume --session <id> --conversation <id> --expected-revision <n>
+  oma recovery --source <transcript.jsonl> [--recovery-root <dir>] [--include-prompt]
+  oma update [--release] [--bin-dir <dir>]
+  oma uninstall --receipt <receipt.json> [--project-state <.agy>] [--purge]
+  oma parity verify|verify-handoff -- <read-only run-manifest args...>
+  oma parity verify-composition --run-id <id> --aggregate <aggregate-handoff.json>
+  oma production verify [--run-id <id>]
+  oma production probe <plugin-discovery|managed-lifecycle|exact-resume|worker-runtime|mcp-lsp|workflow> [--run-id <id>]
+  oma production capture <review|ultraqa> [--run-id <id>] -- <codex|claude|grok|agy|cursor-agent> <args...>
   oma autopilot start -- <goal>
   oma autopilot status --session <id>
   oma autopilot advance|checkpoint --session <id> --expected-revision <n> --evidence <file>
@@ -91,6 +110,8 @@ export async function runCli(
       return services.doctorCommand(command.args);
     case 'skill':
       return services.skillCommand(command.args);
+    case 'extended':
+      return services.extendedCommand(command.command, command.args);
   }
 }
 

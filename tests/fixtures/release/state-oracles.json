@@ -1,0 +1,15 @@
+{
+  "w6_chain": [
+    "candidate_gates_passed",
+    "branch_push_pending",
+    "branch_pushed",
+    "branch_readback_pending",
+    "branch_readback_passed",
+    "commit_proof_pending",
+    "commit_proof_passed",
+    "release_bundle_frozen",
+    "frozen_pass"
+  ],
+  "github_latest_is_separate_from_registry_final_tags": true,
+  "forbidden_scalar_prefixes": ["package_", "promotion_", "latest_"]
+}

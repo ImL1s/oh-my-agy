@@ -55,4 +55,19 @@ describe('CLI parser', () => {
       task: 'ship',
     });
   });
+
+  test.each([
+    ['workflow', ['list']],
+    ['mcp-server', []],
+    ['wiki', ['search', 'release']],
+    ['native-status', []],
+    ['resume', ['--session', 's1']],
+    ['production', ['verify']],
+  ])('routes public composition command %s without agy pass-through', (command, args) => {
+    expect(parseCliArguments([command, ...args])).toEqual({
+      kind: 'extended',
+      command,
+      args,
+    });
+  });
 });

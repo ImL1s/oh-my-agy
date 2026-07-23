@@ -8,8 +8,11 @@
  * 不可用 process.cwd() 當 workspace；改用 workspacePaths / OMA_WORKSPACE_PATH。
  */
 import * as fs from 'fs';
+import * as path from 'path';
 import { ManagedBindingEnv, PreInvocationEventV1, SessionLocator } from '../continuation/state';
+import { writeSessionProjection } from '../continuation/session-aggregate';
 import { resolveStateRoot } from '../runtime/state-root';
+import { appendHookLifecycleEvent } from './common';
 import { writeHookDebug } from './debug-log';
 import { resolveHookWorkspace } from './workspace';
 
@@ -28,7 +31,7 @@ export interface PreInvocationHookResult {
   /** 診斷用；host 可忽略 */
   decision?: 'allow';
   ok?: boolean;
-  bindingRoute?: 'exact_env';
+  bindingRoute?: 'exact_env' | 'first_preinvocation';
   sessionId?: string;
 }
 
@@ -39,11 +42,9 @@ export async function handlePreInvocation(
   writeHookDebug('preinvocation.start', input);
   const bindingEnv = readBindingEnv(env);
   if (bindingEnv === undefined) {
-    const result = failOpen();
-    writeHookDebug('preinvocation.fail_open_missing_env', result);
-    return result;
+    writeHookDebug('preinvocation.fail_open_unmanaged', { ok: false });
+    return failOpen();
   }
-
   const conversationId = input.conversationId?.trim() ?? '';
   if (conversationId === '') {
     const result = failOpen();
@@ -51,7 +52,7 @@ export async function handlePreInvocation(
     return result;
   }
 
-  const stateRoot = resolveStateRoot({ env: env as NodeJS.ProcessEnv, create: false });
+  const stateRoot = resolveStateRoot({ env: env as NodeJS.ProcessEnv, create: true });
   if (!stateRoot.ok) {
     writeHookDebug('preinvocation.fail_open_state_root', stateRoot.error);
     return failOpen();
@@ -85,9 +86,36 @@ export async function handlePreInvocation(
     injectSteps,
     decision: 'allow',
     ok: true,
-    bindingRoute: 'exact_env',
+    bindingRoute: bound.bindingRoute,
     sessionId: bound.session.sessionId,
   };
+  const aggregate = locator.readBoundAggregate(bound.session.sessionId);
+  if (aggregate.ok) {
+    try {
+      writeSessionProjection(workspace.value.identity.workspacePath, aggregate.value);
+      const journal = path.join(stateRoot.value.path, 'lifecycle', 'hooks.jsonl');
+      appendHookLifecycleEvent(journal, {
+        eventType: 'session_started',
+        runId: bound.session.sessionId,
+        generation: bound.session.invocationGeneration,
+        parentId: null,
+        nativeIdentity: conversationId,
+        payload: { binding_route: bound.bindingRoute },
+      });
+      appendHookLifecycleEvent(journal, {
+        eventType: 'turn_started',
+        runId: bound.session.sessionId,
+        generation: bound.session.invocationGeneration,
+        parentId: null,
+        nativeIdentity: conversationId,
+        payload: { invocation_num: input.invocationNum ?? null },
+      });
+    } catch (error) {
+      writeHookDebug('preinvocation.projection_or_journal_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   writeHookDebug('preinvocation.bound', result);
   return result;
 }

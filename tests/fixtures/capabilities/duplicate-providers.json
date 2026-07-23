@@ -1,0 +1,9 @@
+{
+  "providers": [
+    {"origin":"global","resolution_priority":20},
+    {"origin":"workspace","resolution_priority":10},
+    {"origin":"plugin","resolution_priority":30}
+  ],
+  "winner": "workspace",
+  "shadowed": ["global","plugin"]
+}

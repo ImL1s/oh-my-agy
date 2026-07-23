@@ -19,6 +19,7 @@ export type OmaWorkflowSkill =
   | 'verify'
   | 'setup'
   | 'doctor'
+  | 'workflow'
   | 'oma-runtime';
 
 const MODE_TO_SKILL: Readonly<Record<ManagedMode, OmaWorkflowSkill>> = Object.freeze({

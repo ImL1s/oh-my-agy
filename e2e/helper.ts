@@ -7,7 +7,9 @@ const randomId = Math.random().toString(36).substring(2, 10);
 export const TODO_DIR = path.resolve(__dirname, `../.agy_sandbox_${randomId}`);
 export const TODO_PATH = path.resolve(TODO_DIR, 'todo.json');
 export const OMA_PATH = path.resolve(__dirname, '../bin/oma.ts');
-export const MOCK_AGY_DIR = path.resolve(__dirname, 'mocks');
+export const MOCK_AGY_DIR = fs.existsSync(path.resolve(__dirname, 'mocks', 'agy'))
+  ? path.resolve(__dirname, 'mocks')
+  : path.resolve(__dirname, '../../e2e/mocks');
 
 /**
  * 執行 oma.ts CLI
@@ -163,4 +165,73 @@ export function clearTodo(): void {
  */
 export function todoExists(): boolean {
   return fs.existsSync(TODO_PATH);
+}
+
+export type W5ProbeKind = 'hud' | 'native-status' | 'notifications-disabled';
+
+/**
+ * Execute W5's compiled public module boundary in a fresh process. W6 owns CLI
+ * wiring, so these process E2Es intentionally avoid adding provisional flags.
+ */
+export function runW5Probe(
+  kind: W5ProbeKind,
+  input: Record<string, unknown> = {},
+  env: Record<string, string> = {},
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve) => {
+    const packageRoot = fs.existsSync(path.resolve(__dirname, '../package.json'))
+      ? path.resolve(__dirname, '..')
+      : path.resolve(__dirname, '../..');
+    const sourceRoot = process.env.TEST_DIST === 'true'
+      ? path.join(packageRoot, 'dist', 'src')
+      : path.join(packageRoot, 'src');
+    const preload = process.env.TEST_DIST === 'true' ? [] : ['-r', 'ts-node/register'];
+    const script = `
+const fs = require('fs');
+const root = process.env.OMA_W5_SOURCE_ROOT;
+const kind = process.env.OMA_W5_PROBE_KIND;
+const input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+(async () => {
+  if (kind === 'hud') {
+    const hud = require(root + '/hud');
+    const snapshot = hud.collectHudSnapshot(input);
+    if (!snapshot.ok) throw new Error(snapshot.error.code + ':' + snapshot.error.message);
+    process.stdout.write(hud.renderHud(snapshot.value, 'json'));
+    return;
+  }
+  if (kind === 'native-status') {
+    const native = require(root + '/native/antigravity-status');
+    process.stdout.write(JSON.stringify(native.inspectAntigravityPublicStatus()));
+    return;
+  }
+  if (kind === 'notifications-disabled') {
+    const notify = require(root + '/notify');
+    const event = notify.createNotificationEvent(input.event);
+    const results = await notify.dispatchNotifications(event, input.targets);
+    process.stdout.write(JSON.stringify(results));
+    return;
+  }
+  throw new Error('unknown W5 probe kind');
+})().catch((error) => {
+  process.stderr.write(String(error && error.stack || error));
+  process.exitCode = 1;
+});`;
+    const child = spawn('node', [...preload, '-e', script], {
+      env: {
+        ...process.env,
+        PATH: `${MOCK_AGY_DIR}:${process.env.PATH || '/usr/bin:/bin:/usr/sbin:/sbin'}`,
+        OMA_W5_SOURCE_ROOT: sourceRoot,
+        OMA_W5_PROBE_KIND: kind,
+        ...env,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.once('error', (error) => resolve({ code: 1, stdout, stderr: `${stderr}${error.message}` }));
+    child.once('close', (code) => resolve({ code: code ?? 1, stdout, stderr }));
+    child.stdin?.end(JSON.stringify(input));
+  });
 }

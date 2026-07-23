@@ -4,6 +4,48 @@ All notable changes to **oh-my-agy (OMA)** are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions follow semver.
 
+## [0.3.0] — 2026-07-23
+
+### Added
+
+- Immutable GitHub/offline installer paths with checksum verification,
+  ownership receipts, update preflight, and receipt-aware uninstall.
+- Versioned repository workflows with bounded parallel DAG execution,
+  permission envelopes, durable journal replay, skeptic/verifier independence,
+  and fail-closed `ship` / `no_ship` decisions.
+- MCP server with six bounded read/proposal operations; deterministic wiki
+  index/search; redacted HUD; owner-fenced notification adapters.
+- Public capability commands: `native-status`, `lsp-status`,
+  `sidecar-status`, and `workflow native-status`, with explicit T0/T1 claims.
+- Exact conversation `resume`, bounded immutable transcript `recovery`,
+  read-only parity/composition verification, and `production verify`.
+- Managed team/runtime hardening for Antigravity 1.1.5, worker envelopes,
+  mailbox/control-plane fencing, lifecycle hooks, compaction, and redaction.
+
+### Changed
+
+- Public manifests and package surface are synchronized at `0.3.0` and include
+  `.mcp.json`, the workflow skill/saved prompt, installer, and workflow fixture.
+- Release CI is verification-only with read permissions. Publishing and exact
+  external readback remain a separate privileged transaction.
+- Registry claims were removed: no npmjs.org or GitHub Packages channel is
+  currently advertised.
+
+### Security
+
+- Production verification requires fresh evidence bound to the exact Git OID
+  across seven live seams and fails closed with `E_PRODUCTION_EVIDENCE`.
+- Workflow writes are proposal-only; private memory/sidecar surfaces are not
+  probed or inferred; partial recovery preserves broken-chain and unknown-record
+  warnings.
+- Diagnostic redaction also matches JSON-string secret shapes
+  (`"password":"…"` and the rest of the sensitive-name list), so secrets in
+  stringified JSON no longer pass through `redactDiagnostic`/`assertRedacted`.
+- Known boundary: the experimental team worker loop validates envelopes by
+  schema and mailbox generation/digest fencing; forged-completion rejection is
+  owned by the CLI host claim CAS. The loop is not wired into production
+  orchestration paths in this release.
+
 ## [0.2.3] — 2026-07-21
 
 ### Fixed
@@ -60,6 +102,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ---
 
+[0.3.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.3.0
 [0.2.3]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.3
 [0.2.2]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.1

@@ -5,13 +5,80 @@ import { atomicWriteJson, canonicalJson, FaultInjector, NO_FAULTS, sha256 } from
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { acquireOwnerLock, ProcessLiveness, releaseOwnerLock } from '../runtime/lock';
 import { readProcessIdentity } from '../runtime/process';
+import { externalStatePathKey, platformWorkspaceSessionsRoot } from '../runtime/state-root';
 import { ProcessIdentity, Result, err, ok } from '../runtime/types';
 import {
   SessionAggregateStore,
   SessionAggregateV1,
   createInitialSessionAggregate,
+  sessionAggregateHash,
   sessionAggregatePath,
 } from './session-aggregate';
+import {
+  AntigravityNativeReceiptV1,
+  ParsedImportedCarrierV1,
+  validateAntigravityNativeReceipt,
+} from '../contracts/carrier';
+
+export type LaunchAuthorityEvidenceV1 =
+  | { kind: 'antigravity_native_receipt'; receipt: AntigravityNativeReceiptV1 }
+  | { kind: 'imported_carrier'; carrier: ParsedImportedCarrierV1 };
+
+export interface NativeConversationExpectationV1 {
+  runId: string;
+  taskId: string;
+  generation: number;
+  parentConversationId?: string;
+  provider?: AntigravityNativeReceiptV1['provider'];
+}
+
+/**
+ * Reconcile zero/one/many native bindings. Imported Codex/OMX carriers are
+ * comparison evidence only and can never satisfy this authority cardinality.
+ */
+export function reconcileNativeConversationReceipt(
+  evidence: readonly LaunchAuthorityEvidenceV1[],
+  expected: Readonly<NativeConversationExpectationV1>,
+): Result<AntigravityNativeReceiptV1, RuntimeError> {
+  const native: AntigravityNativeReceiptV1[] = [];
+  try {
+    for (const item of evidence) {
+      if (item.kind === 'imported_carrier') {
+        if (item.carrier.native_authority !== false || item.carrier.imported_only !== true) {
+          return err(runtimeError('E_BINDING_CONFLICT', 'Imported carrier authority marker is invalid'));
+        }
+        continue;
+      }
+      validateAntigravityNativeReceipt(item.receipt);
+      if (item.receipt.run_id === expected.runId
+        && item.receipt.task_id === expected.taskId
+        && (expected.parentConversationId === undefined
+          || item.receipt.parent_conversation_id === expected.parentConversationId)
+        && (expected.provider === undefined || item.receipt.provider === expected.provider)) {
+        native.push(item.receipt);
+      }
+    }
+  } catch (error) {
+    return err(runtimeError('E_BINDING_CONFLICT', 'Native conversation receipt is invalid', {
+      cause: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  if (native.length === 0) {
+    return err(runtimeError('E_CONVERSATION_UNBOUND', 'No exact native conversation receipt exists'));
+  }
+  const exactGeneration = native.filter((receipt) => receipt.generation === expected.generation);
+  if (exactGeneration.length === 0) {
+    return err(runtimeError(
+      'E_INVOCATION_GENERATION_MISMATCH',
+      'Native conversation receipt generation is stale or future',
+    ));
+  }
+  const unique = new Map(exactGeneration.map((receipt) => [receipt.receipt_hash, receipt]));
+  if (unique.size !== 1) {
+    return err(runtimeError('E_BINDING_CONFLICT', 'Multiple native conversation receipts match'));
+  }
+  return ok(structuredClone([...unique.values()][0]));
+}
 
 export interface ManagedBindingEnv {
   OMA_SESSION_ID: string;
@@ -43,13 +110,13 @@ export interface PendingSessionV1 {
   expiresAtMs: number;
   state: 'launch_pending' | 'resume_pending' | 'bound' | 'idle';
   conversationId: string | null;
-  bindingRoute: 'exact_env' | null;
+  bindingRoute: 'exact_env' | 'first_preinvocation' | null;
 }
 
 export interface BoundSessionV1 extends PendingSessionV1 {
   state: 'bound';
   conversationId: string;
-  bindingRoute: 'exact_env';
+  bindingRoute: 'exact_env' | 'first_preinvocation';
 }
 
 export interface PreInvocationEventV1 {
@@ -95,12 +162,18 @@ export interface SessionLocatorOptions {
 }
 
 interface ConversationIndexV1 {
+  store_kind: 'conversation_index';
+  schema_version: 1;
   schemaVersion: 1;
   conversationId: string;
   sessionId: string;
   repoKey: string | null;
   workspaceKey: string;
   workspacePath: string;
+  aggregateId: string;
+  aggregateRevision: number;
+  aggregateSha256: string;
+  invocationGeneration: number;
 }
 
 interface LaunchAuditV1 {
@@ -523,6 +596,18 @@ export class SessionLocator {
     };
   }
 
+  readBoundAggregate(sessionId: string): Result<SessionAggregateV1, RuntimeError> {
+    return this.aggregateStore(sessionId).read();
+  }
+
+  refreshConversationProjection(
+    conversationId: string,
+    aggregate: Readonly<SessionAggregateV1>,
+  ): Result<void, RuntimeError> {
+    const refreshed = this.ensureConversationIndex(conversationId, aggregate);
+    return refreshed.ok ? ok(undefined) : refreshed;
+  }
+
   resolveStop(event: Readonly<StopLocatorEventV1>): StopLocatorResult {
     const selected = exactWorkspace(event.workspaceKeys, this.workspaceKey);
     if (!selected.ok) return allow(selected.error);
@@ -535,7 +620,7 @@ export class SessionLocator {
     const value = session.value;
     if (
       value.binding.state !== 'bound'
-      || value.binding.bindingRoute !== 'exact_env'
+      || !['exact_env', 'first_preinvocation'].includes(value.binding.bindingRoute ?? '')
       || value.binding.conversationId !== event.conversationId
       || value.workspaceKey !== this.workspaceKey
     ) {
@@ -558,7 +643,7 @@ export class SessionLocator {
   }
 
   private findLivePending(): Result<SessionAggregateV1 | null, RuntimeError> {
-    const sessionsRoot = path.join(this.stateRoot, 'workspaces', this.workspaceKey, 'sessions');
+    const sessionsRoot = platformWorkspaceSessionsRoot(this.stateRoot, this.workspaceKey);
     if (!fs.existsSync(sessionsRoot)) return ok(null);
     try {
       for (const entry of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
@@ -620,19 +705,34 @@ export class SessionLocator {
     aggregate: Readonly<SessionAggregateV1>,
   ): Result<ConversationIndexV1, RuntimeError> {
     const index: ConversationIndexV1 = {
+      store_kind: 'conversation_index',
+      schema_version: 1,
       schemaVersion: 1,
       conversationId,
       sessionId: aggregate.sessionId,
       repoKey: aggregate.repoKey,
       workspaceKey: aggregate.workspaceKey,
       workspacePath: aggregate.binding.workspacePath,
+      aggregateId: aggregate.aggregate_id,
+      aggregateRevision: aggregate.revision,
+      aggregateSha256: sessionAggregateHash(aggregate),
+      invocationGeneration: aggregate.binding.activeInvocationGeneration,
     };
     const target = this.conversationPath(conversationId);
     const existing = readJsonFile<ConversationIndexV1>(target);
     if (existing.ok) {
-      return canonicalJson(existing.value) === canonicalJson(index)
-        ? existing
-        : err(runtimeError('E_BINDING_CONFLICT', 'Conversation index conflicts with the bound aggregate'));
+      const identityMatches = existing.value.conversationId === index.conversationId
+        && existing.value.sessionId === index.sessionId
+        && existing.value.workspaceKey === index.workspaceKey
+        && existing.value.aggregateId === index.aggregateId;
+      if (!identityMatches) {
+        return err(runtimeError('E_BINDING_CONFLICT', 'Conversation index conflicts with the bound aggregate'));
+      }
+      // Revision/hash are a projection and are refreshed only from authority.
+      if (canonicalJson(existing.value) !== canonicalJson(index)) {
+        atomicWriteJson(target, index, { transactionId: `refresh-${aggregate.revision}` });
+      }
+      return ok(index);
     }
     try {
       atomicWriteJson(target, index, { transactionId: sha256(conversationId) });
@@ -651,14 +751,35 @@ export class SessionLocator {
     if (!result.ok) return result;
     const value = result.value;
     if (
-      value.schemaVersion !== 1
+      value.store_kind !== 'conversation_index'
+      || value.schema_version !== 1
+      || value.schemaVersion !== 1
       || value.conversationId !== conversationId
       || typeof value.sessionId !== 'string'
       || value.workspaceKey !== this.workspaceKey
+      || !/^[0-9a-f]{64}$/.test(value.aggregateId)
+      || !/^[0-9a-f]{64}$/.test(value.aggregateSha256)
+      || !Number.isSafeInteger(value.aggregateRevision)
+      || !Number.isSafeInteger(value.invocationGeneration)
     ) {
       return err(runtimeError('E_WORKSPACE_MISMATCH', 'Conversation index is not authoritative here'));
     }
     return ok(value);
+  }
+
+  private resolveConversationAggregate(
+    conversationId: string,
+  ): Result<SessionAggregateV1, RuntimeError> {
+    const index = this.readConversationIndex(conversationId);
+    if (!index.ok) return index;
+    const aggregate = this.aggregateStore(index.value.sessionId).read();
+    if (!aggregate.ok) return aggregate;
+    if (aggregate.value.aggregate_id !== index.value.aggregateId
+      || aggregate.value.binding.conversationId !== conversationId
+      || aggregate.value.workspaceKey !== this.workspaceKey) {
+      return err(runtimeError('E_BINDING_CONFLICT', 'Conversation index does not resolve its aggregate'));
+    }
+    return aggregate;
   }
 
   private writeLaunchAudit(
@@ -680,7 +801,8 @@ export class SessionLocator {
     };
     const target = path.join(
       this.stateRoot,
-      'workspaces', this.workspaceKey, 'launches', sha256(pending.sessionId),
+      'workspaces', externalStatePathKey(this.workspaceKey),
+      'launches', externalStatePathKey(pending.sessionId),
       `${pending.invocationGeneration}.json`,
     );
     if (!fs.existsSync(target)) atomicWriteJson(target, audit, {
@@ -689,13 +811,15 @@ export class SessionLocator {
   }
 
   private workspaceLaunchLockPath(): string {
-    return path.join(this.stateRoot, 'workspaces', this.workspaceKey, 'launch.lock');
+    return path.join(
+      this.stateRoot, 'workspaces', externalStatePathKey(this.workspaceKey), 'launch.lock',
+    );
   }
 
   private conversationPath(conversationId: string): string {
     return path.join(
-      this.stateRoot, 'workspaces', this.workspaceKey,
-      'conversations', `${sha256(conversationId)}.json`,
+      this.stateRoot, 'workspaces', externalStatePathKey(this.workspaceKey),
+      'conversations', `${externalStatePathKey(conversationId)}.json`,
     );
   }
 }
@@ -707,8 +831,8 @@ export function childSpawnAuditPath(
   invocationGeneration: number,
 ): string {
   return path.join(
-    path.resolve(stateRoot), 'workspaces', workspaceKey,
-    'invocations', sha256(sessionId), String(invocationGeneration), 'child-spawned.json',
+    path.resolve(stateRoot), 'workspaces', externalStatePathKey(workspaceKey),
+    'invocations', externalStatePathKey(sessionId), String(invocationGeneration), 'child-spawned.json',
   );
 }
 
@@ -757,7 +881,8 @@ function asBoundSession(
     expiresAtMs: aggregate.binding.expiresAtMs ?? Number.MAX_SAFE_INTEGER,
     state: 'bound',
     conversationId: aggregate.binding.conversationId as string,
-    bindingRoute: 'exact_env',
+    bindingRoute: aggregate.binding.bindingRoute === 'first_preinvocation'
+      ? 'first_preinvocation' : 'exact_env',
   };
 }
 

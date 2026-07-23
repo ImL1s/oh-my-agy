@@ -1,4 +1,5 @@
 import { Clock } from '../runtime/types';
+import { WorkerProvider } from '../contracts/worker-envelope';
 
 export const TEAM_MANIFEST_SCHEMA = 'oma.team-manifest/v1' as const;
 
@@ -81,6 +82,95 @@ export interface ClaimLeaseV1 {
   leasedUntilMs: number;
 }
 
+export type WorkerExecutionStateV1 =
+  | 'claimed'
+  | 'launched'
+  | 'running'
+  | 'verifying'
+  | 'delivery_ready'
+  | 'integration_requested'
+  | 'terminal';
+
+export interface NativeConversationReceiptV1 {
+  schemaVersion: 1;
+  provider: 'antigravity_native';
+  conversationId: string;
+  receiptId: string;
+  generation: number;
+  observedAtMs: number;
+  capabilityDigest: string;
+}
+
+export interface WorkerPaneReceiptV1 {
+  schemaVersion: 1;
+  sessionName: string;
+  paneId: string;
+  ownerNonce: string;
+  workerNonce: string;
+}
+
+/**
+ * CLI-owned provider/identity binding.  Workers may present this receipt, but
+ * only TeamStateStore can advance its fenced state/sequence.
+ */
+export interface WorkerAuthorityBindingV1 {
+  schemaVersion: 1;
+  taskId: string;
+  claimTokenDigest: string;
+  generation: number;
+  provider: WorkerProvider;
+  providerReceiptHash: string;
+  conversation?: NativeConversationReceiptV1;
+  process?: ProcessMarkerV1;
+  pane?: WorkerPaneReceiptV1;
+  state: WorkerExecutionStateV1;
+  transitionSequence: number;
+  boundAtMs: number;
+}
+
+export interface WorkerHeartbeatReceiptV1 {
+  schemaVersion: 1;
+  taskId: string;
+  claimTokenDigest: string;
+  generation: number;
+  provider: WorkerProvider;
+  providerReceiptHash: string;
+  process?: ProcessMarkerV1;
+  pane?: WorkerPaneReceiptV1;
+  recordedAtMs: number;
+}
+
+export interface MailboxCursorV1 {
+  schemaVersion: 1;
+  taskId: string;
+  generation: number;
+  cursor: number;
+  acknowledgedAtMs: number;
+}
+
+export interface WorkerTerminalReceiptV1 {
+  schemaVersion: 1;
+  taskId: string;
+  generation: number;
+  provider: WorkerProvider;
+  providerReceiptHash: string;
+  transitionSequence: number;
+  outcome: 'completed' | 'failed' | 'cancelled';
+  deliveryDigest?: string;
+  capabilityPlaintextRemoved: true;
+  recordedAtMs: number;
+}
+
+export interface TeamSupervisorAuthorityV1 {
+  schemaVersion: 1;
+  ownerTokenDigest: string;
+  generation: number;
+  process: ProcessMarkerV1;
+  acquiredAtMs: number;
+  lastProgressAtMs: number;
+  leasedUntilMs: number;
+}
+
 export interface SupervisorHeartbeatV1 {
   schemaVersion: 1;
   workerId: string;
@@ -89,6 +179,8 @@ export interface SupervisorHeartbeatV1 {
   process: ProcessMarkerV1;
   paneId: string;
   recordedAtMs: number;
+  generation?: number;
+  providerReceiptHash?: string;
 }
 
 export interface AgentProgressV1 {
@@ -101,6 +193,7 @@ export interface AgentProgressV1 {
   artifactDigest: string;
   child: ProcessMarkerV1;
   recordedAtMs: number;
+  providerReceiptHash?: string;
 }
 
 export interface CommandEvidenceV1 {
@@ -117,6 +210,7 @@ export interface CommandEvidenceV1 {
   exitCode: number;
   artifactDigest: string;
   outputDigest: string;
+  providerReceiptHash?: string;
 }
 
 export interface DeliveryEvidenceV1 {
@@ -144,6 +238,9 @@ export interface MailboxMessageV1 {
   bodyDigest: string;
   createdAtMs: number;
   deliveredAtMs?: number;
+  sequence?: number;
+  generation?: number;
+  acknowledgedAtMs?: number;
 }
 
 export interface TeamTaskRuntimeV1 {
@@ -155,6 +252,9 @@ export interface TeamTaskRuntimeV1 {
   commandEvidence: Readonly<Record<string, CommandEvidenceV1>>;
   delivery?: DeliveryEvidenceV1;
   recoveryForkId?: string;
+  lastClaimGeneration?: number;
+  resultHash?: string;
+  artifactRoots?: readonly string[];
 }
 
 export interface TeamAggregateV1 {
@@ -167,6 +267,11 @@ export interface TeamAggregateV1 {
   tasks: Readonly<Record<string, TeamTaskRuntimeV1>>;
   heartbeats: Readonly<Record<string, SupervisorHeartbeatV1>>;
   mailbox: Readonly<Record<string, MailboxMessageV1>>;
+  /** Optional while reading pre-W3 snapshots; create() always initializes. */
+  workerBindings?: Readonly<Record<string, WorkerAuthorityBindingV1>>;
+  mailboxCursors?: Readonly<Record<string, MailboxCursorV1>>;
+  terminalReceipts?: Readonly<Record<string, WorkerTerminalReceiptV1>>;
+  supervisor?: TeamSupervisorAuthorityV1;
 }
 
 export interface LeaderWorktreeIdentityV1 {
@@ -209,4 +314,3 @@ export interface TeamDescriptorV1 {
   worktreePath?: string;
   taskIds: readonly string[];
 }
-

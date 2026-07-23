@@ -2,11 +2,15 @@
  * 結構化 CLI e2e（Q1）：assert exit code + JSON kinds / help 文字，
  * 禁止 mock-theatre 字串當唯一功能證明。
  */
-import { runOma } from './helper';
+import { runOma, runW5Probe } from './helper';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createInitialSessionAggregate, SessionAggregateStore, sessionAggregateRelativePath } from '../src/continuation/session-aggregate';
+import { sha256 } from '../src/runtime/atomic';
+import { TeamStateStore } from '../src/team/state';
+import { CanonicalTeamManifestV1 } from '../src/team/types';
 
 const hasTmux = spawnSync('tmux', ['-V'], { encoding: 'utf8' }).status === 0;
 const maybeTmux = hasTmux ? test : test.skip;
@@ -121,6 +125,75 @@ describe('Structured CLI e2e baseline', () => {
     } finally {
       fs.rmSync(stateRoot, { recursive: true, force: true });
     }
+  }, 30000);
+
+  test('TC-S-W5-01: fresh process HUD reads session/team aggregates without mutation', async () => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-e2e-hud-'));
+    const sessionPath = path.join(stateRoot, sessionAggregateRelativePath('workspace', 'hud-session-secret'));
+    const session = new SessionAggregateStore(sessionPath);
+    const manifest: CanonicalTeamManifestV1 = {
+      schema: 'oma.team-manifest/v1', teamId: 'hud-team', revision: 1, repoRoot: '/tmp',
+      tasks: [{
+        id: 'adapter-check', dependencies: [], write_scope: 'none', mode: 'headless',
+        verification: { version: 1, commands: [], requiredArtifacts: [] },
+      }],
+    };
+    try {
+      await session.initialize(createInitialSessionAggregate({
+        sessionId: 'hud-session-secret', repoKey: 'repo', workspaceKey: 'workspace',
+        launchNonceDigest: sha256('launch-secret'),
+      }));
+      const team = new TeamStateStore(stateRoot, 'repo', 'workspace', manifest.teamId);
+      const created = await team.create(manifest, 'owner-secret');
+      expect(created.ok).toBe(true);
+      const beforeSession = fs.readFileSync(sessionPath);
+      const result = await runW5Probe('hud', {
+        state_root: stateRoot,
+        session: { workspace_key: 'workspace', session_id: 'hud-session-secret' },
+        team: { repo_key: 'repo', workspace_key: 'workspace', team_id: 'hud-team' },
+        adapters: [{
+          adapter: 'private_sidecar', enabled: false, observed: false,
+          status: 'forbidden_unprobed', detail_code: 'PRIVATE_SIDECAR_FORBIDDEN',
+        }],
+        collected_at: '2026-07-22T00:00:00.000Z',
+      });
+      expect(result.code).toBe(0);
+      const snapshot = JSON.parse(result.stdout);
+      expect(snapshot.core_available).toBe(true);
+      expect(snapshot.session.status).toBe('available');
+      expect(snapshot.team.tasks[0]).toEqual(expect.objectContaining({ task_id: 'adapter-check', status: 'pending' }));
+      expect(result.stdout).not.toContain('hud-session-secret');
+      expect(result.stdout).not.toContain('owner-secret');
+      expect(fs.readFileSync(sessionPath)).toEqual(beforeSession);
+    } finally { fs.rmSync(stateRoot, { recursive: true, force: true }); }
+  }, 30000);
+
+  test('TC-S-W5-02: public native probe reports mock CLI while native capabilities remain T0', async () => {
+    const result = await runW5Probe('native-status', {}, { MOCK_AGY_PUBLIC_STATUS: 'true' });
+    expect(result.code).toBe(0);
+    const status = JSON.parse(result.stdout);
+    expect(status).toEqual(expect.objectContaining({
+      status: 'public_cli_observed', version: '9.9.9', detail_code: 'PUBLIC_CLI_ONLY',
+    }));
+    expect(status.capabilities.find((entry: { capability: string }) => entry.capability === 'native_status'))
+      .toEqual({ capability: 'native_status', status: 'unobserved', evidence_tier: 'T0' });
+  }, 30000);
+
+  test('TC-S-W5-03: disabled notification adapters are isolated in a fresh process', async () => {
+    const owner = { owner_id: 'e2e-owner', generation: 1, owner_nonce: 'e2e-owner-nonce-1234' };
+    const result = await runW5Probe('notifications-disabled', {
+      event: {
+        ...owner, severity: 'info', title: 'E2E', message: 'Core remains available',
+        created_at: '2026-07-22T00:00:00.000Z',
+      },
+      targets: [
+        { adapter: 'terminal', enabled: false, ...owner, terminal: { pid: process.pid, start_marker: 'x', tty: 'x' } },
+        { adapter: 'https', enabled: false, ...owner, url: 'https://hooks.acme.example.net/oma', allowed_hosts: ['hooks.acme.example.net'] },
+      ],
+    });
+    expect(result.code).toBe(0);
+    expect(JSON.parse(result.stdout).map((entry: { status: string }) => entry.status)).toEqual(['skipped', 'skipped']);
+    expect(result.stdout).not.toContain(owner.owner_nonce);
   }, 30000);
 
   maybeTmux('TC-S-04: team start status stop vertical slice', async () => {

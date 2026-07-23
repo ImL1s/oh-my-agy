@@ -48,4 +48,24 @@ describe('planning sandbox (ADR-0001)', () => {
       expect(result.ok).toBe(false);
     }
   });
+
+  test('an unverified or foreign capability receipt cannot authorize a sandbox', () => {
+    const available = sandboxAvailable();
+    const capability = {
+      store_kind: 'capability_record' as const,
+      schema_version: 1 as const,
+      canonical_name: available ?? 'bwrap', aliases: [], origin: 'foreign-provider',
+      resolution_priority: 0, version: '1', digest: 'a'.repeat(64),
+      probe_timestamp: '2026-07-22T00:00:00.000Z', bounded_result: 'bounded probe',
+      redacted_diagnostic: '', configured: true, installed: true, enabled: true,
+      loadable: true, observed: true, healthy: true, verified: false, shadowed_by: null,
+    };
+    const result = wrapWithReadOnlySandbox({
+      command: 'agy', argv: ['-p', 'q'], cwd: process.cwd(), writablePaths: [],
+      capability, requiredCapabilityTier: 'verified', expectedCapabilityOrigin: 'oma-owned',
+    });
+    expect(result).toEqual(expect.objectContaining({
+      ok: false, error: expect.objectContaining({ code: 'E_CAPABILITY_UNPROVEN' }),
+    }));
+  });
 });

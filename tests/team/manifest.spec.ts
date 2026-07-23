@@ -35,6 +35,14 @@ describe('Team manifest contract', () => {
     expect(validateTeamManifest(manifest([task('a', [], [{ kind: 'dir', path: 'linked' }])]), fixture.repo).ok).toBe(false);
   });
 
+  test('rejects empty task sets and non-canonical team/task identifiers', () => {
+    expect(validateTeamManifest(manifest([]), fixture.repo).ok).toBe(false);
+    expect(validateTeamManifest({ ...manifest([task('a', [], 'none')]), teamId: 'bad/id' }, fixture.repo).ok).toBe(false);
+    expect(validateTeamManifest(manifest([task('../bad', [], 'none')]), fixture.repo).ok).toBe(false);
+    expect(validateTeamManifest(manifest([task(' has-space', [], 'none')]), fixture.repo).ok).toBe(false);
+    expect(validateTeamManifest(manifest([task('valid.task-1', [], 'none')]), fixture.repo).ok).toBe(true);
+  });
+
   test('TEAM-13B permits ordered overlap and rejects unordered overlap', () => {
     const unordered = validateTeamManifest(manifest([
       task('a', [], [{ kind: 'dir', path: 'src' }]),
@@ -50,4 +58,3 @@ describe('Team manifest contract', () => {
     expect(ordered.ok).toBe(true);
   });
 });
-

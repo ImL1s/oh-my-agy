@@ -25,7 +25,7 @@ import {
   TeamTaskRuntimeV1,
 } from './types';
 import { AuthorityLeaseStore, pathKeysFromWriteScope } from './authority-lease';
-import { GitWorktreeManager, resolveGitWorktreeIdentity } from './worktree';
+import { GitWorktreeManager, ManagedWorktreeV1, resolveGitWorktreeIdentity } from './worktree';
 
 export interface TeamOrchestratorOptions {
   stateRoot: string;
@@ -206,9 +206,26 @@ export class TeamOrchestrator {
         ownerNonce,
         workerMode,
         expectedRevision: revision,
+        // The first worker owns the create+launch transaction and may remove
+        // the just-created aggregate on failure. Once any worker is live, a
+        // later launch must instead roll back only that task; deleting the
+        // aggregate would orphan the already-running worker.
+        launchTransaction: workers.length === 0,
       });
       if (!started.ok) {
-        if (workers.length === 0) return started;
+        if (workers.length === 0) {
+          const current = store.read();
+          if (!current.ok) return current;
+          const rolledBack = await store.rollbackLaunch(current.value.revision, ownerNonce);
+          return rolledBack.ok ? started : rolledBack;
+        }
+        // startOneTask only returns the original launch error after its
+        // per-task state/lease/worktree cleanup has completed. Refresh the
+        // aggregate revision so a partial-success response never advertises a
+        // stale revision from before that rollback.
+        const current = store.read();
+        if (!current.ok) return current;
+        revision = current.value.revision;
         break;
       }
       workers.push(started.value.worker);
@@ -296,18 +313,17 @@ export class TeamOrchestrator {
         const updated = await store.setTaskStatus(task.id, revision, 'awaiting_interaction');
         if (!updated.ok) return updated;
         revision = updated.value.revision;
-      } else if (assessment.status === 'orphan_identity_unproven' || assessment.status === 'reclaimable') {
-        // orphan/reclaimable：清 claim，避免 ready queue 誤選
+      } else if (assessment.status === 'reclaimable') {
+        // 只有 DeadProof 可清 claim；Unknown 必須保留 worker identity/capability。
         const released = await store.releaseClaimAfterDeadProof(task.id, revision);
-        if (!released.ok) {
-          // 若非 in_progress 狀態，改 set orphan
-          const updated = await store.setTaskStatus(task.id, revision, 'orphan_identity_unproven');
-          if (!updated.ok) return updated;
-          revision = updated.value.revision;
-        } else {
-          revision = released.value.revision;
-          await this.releaseLeasesForTask(teamId, task.id);
-        }
+        if (!released.ok) return released;
+        revision = released.value.revision;
+        await this.releaseLeasesForTask(teamId, task.id);
+      } else if (assessment.status === 'orphan_identity_unproven') {
+        // Unknown 是隔離狀態，不可視為死亡證明或重新排入 ready queue。
+        const updated = await store.setTaskStatus(task.id, revision, 'orphan_identity_unproven');
+        if (!updated.ok) return updated;
+        revision = updated.value.revision;
       }
     }
     return ok({ teamId, revision, assessments });
@@ -502,6 +518,7 @@ export class TeamOrchestrator {
         ownerNonce: aggregate.ownerNonce,
         workerMode,
         expectedRevision: revision,
+        launchTransaction: false,
       });
       if (!one.ok) {
         if (started.length === 0) return one;
@@ -517,11 +534,15 @@ export class TeamOrchestrator {
     this.maxParallelWorkers = Math.max(1, value);
   }
 
-  private async releaseLeasesForTask(teamId: string, taskId: string): Promise<void> {
+  private async releaseLeasesForTask(
+    teamId: string,
+    taskId: string,
+  ): Promise<Result<void, RuntimeError>> {
     const leases = new AuthorityLeaseStore(this.stateRoot, teamId);
     const ensured = await leases.ensure();
-    if (!ensured.ok) return;
-    await leases.releaseAllForTask(taskId, ensured.value.revision);
+    if (!ensured.ok) return ensured;
+    const released = await leases.releaseAllForTask(taskId, ensured.value.revision);
+    return released.ok ? ok(undefined) : released;
   }
 
   private async startOneTask(input: {
@@ -531,6 +552,7 @@ export class TeamOrchestrator {
     ownerNonce: string;
     workerMode: 'interactive' | 'headless';
     expectedRevision: number;
+    launchTransaction: boolean;
   }): Promise<Result<{ worker: StartedWorkerView; revision: number }, RuntimeError>> {
     const baseSha = gitHead(this.workspaceRoot);
     if (!baseSha.ok) return baseSha;
@@ -554,7 +576,16 @@ export class TeamOrchestrator {
           this.leaseMs,
           leaseRev,
         );
-        if (!acquired.ok) return acquired;
+        if (!acquired.ok) {
+          if (input.launchTransaction) {
+            const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+            if (!rolledBack.ok) return rolledBack;
+          } else {
+            const released = await this.releaseLeasesForTask(input.teamId, input.task.id);
+            if (!released.ok) return released;
+          }
+          return acquired;
+        }
         leaseRev = acquired.value.revision;
       }
     }
@@ -569,7 +600,13 @@ export class TeamOrchestrator {
       claimToken,
     );
     if (!claimed.ok) {
-      await this.releaseLeasesForTask(input.teamId, input.task.id);
+      if (input.launchTransaction) {
+        const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+        if (!rolledBack.ok) return rolledBack;
+      } else {
+        const released = await this.releaseLeasesForTask(input.teamId, input.task.id);
+        if (!released.ok) return released;
+      }
       return claimed;
     }
     const generation = claimed.value.value.tasks[input.task.id]!.claim!.generation;
@@ -584,7 +621,21 @@ export class TeamOrchestrator {
       ownerNonce: input.ownerNonce,
     });
     if (!worktree.ok) {
-      await this.releaseLeasesForTask(input.teamId, input.task.id);
+      if (input.launchTransaction) {
+        const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+        if (!rolledBack.ok) return rolledBack;
+      } else {
+        const rolledBack = await this.rollbackFailedTaskLaunch({
+          store: input.store,
+          teamId: input.teamId,
+          taskId: input.task.id,
+          ownerNonce: input.ownerNonce,
+          claimToken,
+          generation,
+          expectedRevision: claimed.value.revision,
+        });
+        if (!rolledBack.ok) return rolledBack;
+      }
       return worktree;
     }
 
@@ -609,6 +660,9 @@ export class TeamOrchestrator {
       invocationGeneration: 1,
       taskPrompt: `Execute team task ${input.task.id}`,
       agyCommand: 'agy',
+      provider: input.workerMode === 'headless' ? 'agy_headless' : 'tmux_agy',
+      capabilityMode: input.task.write_scope === 'none' ? 'read-only' : 'read-write',
+      boundedDuration: '5m0s',
     };
     fs.writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, 'utf8');
     const omaDir = path.join(worktree.value.path, '.oma');
@@ -629,8 +683,25 @@ export class TeamOrchestrator {
     if (!pane.ok) {
       try { fs.rmSync(descriptorPath, { force: true }); } catch (_) { /* best-effort */ }
       try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
-      this.worktrees.removeIfSafe(worktree.value, { ownerNonce: input.ownerNonce, integrated: true });
-      await this.releaseLeasesForTask(input.teamId, input.task.id);
+      const worktreeRollback = this.worktrees.rollbackLaunch(worktree.value, input.ownerNonce);
+      if (input.launchTransaction) {
+        const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+        if (!rolledBack.ok) return rolledBack;
+        if (!worktreeRollback.ok) return worktreeRollback;
+      } else {
+        const rolledBack = await this.rollbackFailedTaskLaunch({
+          store: input.store,
+          teamId: input.teamId,
+          taskId: input.task.id,
+          ownerNonce: input.ownerNonce,
+          claimToken,
+          generation,
+          expectedRevision: claimed.value.revision,
+          worktree: worktree.value,
+          worktreeAlreadyRolledBack: worktreeRollback.ok,
+        });
+        if (!rolledBack.ok) return rolledBack;
+      }
       return pane;
     }
 
@@ -649,7 +720,30 @@ export class TeamOrchestrator {
     };
     const hb = await input.store.recordHeartbeat(claimed.value.revision, heartbeat);
     if (!hb.ok) {
-      this.tmux.killOwnedSession(sessionName, input.ownerNonce);
+      const tmuxRollback = this.tmux.killOwnedSession(sessionName, input.ownerNonce);
+      try { fs.rmSync(descriptorPath, { force: true }); } catch (_) { /* best-effort */ }
+      try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
+      const worktreeRollback = this.worktrees.rollbackLaunch(worktree.value, input.ownerNonce);
+      if (input.launchTransaction) {
+        const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+        if (!rolledBack.ok) return rolledBack;
+        if (!worktreeRollback.ok) return worktreeRollback;
+        if (!tmuxRollback.ok) return tmuxRollback;
+      } else {
+        const rolledBack = await this.rollbackFailedTaskLaunch({
+          store: input.store,
+          teamId: input.teamId,
+          taskId: input.task.id,
+          ownerNonce: input.ownerNonce,
+          claimToken,
+          generation,
+          expectedRevision: claimed.value.revision,
+          worktree: worktree.value,
+          worktreeAlreadyRolledBack: worktreeRollback.ok,
+          initialCleanupError: tmuxRollback.ok ? undefined : tmuxRollback.error,
+        });
+        if (!rolledBack.ok) return rolledBack;
+      }
       return hb;
     }
 
@@ -667,6 +761,48 @@ export class TeamOrchestrator {
       },
     });
   }
+
+  private async rollbackLaunchLeases(
+    teamId: string,
+    taskId: string,
+  ): Promise<Result<void, RuntimeError>> {
+    const leases = new AuthorityLeaseStore(this.stateRoot, teamId);
+    const snapshot = await leases.ensure();
+    if (!snapshot.ok) return snapshot;
+    const released = await leases.releaseAllForTask(taskId, snapshot.value.revision);
+    if (!released.ok) return released;
+    return leases.rollbackEmpty(released.value.revision);
+  }
+
+  private async rollbackFailedTaskLaunch(input: {
+    store: TeamStateStore;
+    teamId: string;
+    taskId: string;
+    ownerNonce: string;
+    claimToken: string;
+    generation: number;
+    expectedRevision: number;
+    worktree?: ManagedWorktreeV1;
+    worktreeAlreadyRolledBack?: boolean;
+    initialCleanupError?: RuntimeError;
+  }): Promise<Result<void, RuntimeError>> {
+    let cleanupError = input.initialCleanupError;
+    if (input.worktree !== undefined && input.worktreeAlreadyRolledBack !== true) {
+      const removed = this.worktrees.rollbackLaunch(input.worktree, input.ownerNonce);
+      if (!removed.ok) cleanupError = removed.error;
+    }
+    const state = await input.store.rollbackTaskLaunch({
+      expectedRevision: input.expectedRevision,
+      taskId: input.taskId,
+      claimToken: input.claimToken,
+      generation: input.generation,
+      ownerNonce: input.ownerNonce,
+    });
+    if (!state.ok && cleanupError === undefined) cleanupError = state.error;
+    const leases = await this.releaseLeasesForTask(input.teamId, input.taskId);
+    if (!leases.ok && cleanupError === undefined) cleanupError = leases.error;
+    return cleanupError === undefined ? ok(undefined) : err(cleanupError);
+  }
 }
 
 /** deps 皆 completed 且 task claimable 的規格列 */
@@ -677,7 +813,8 @@ export function listReadyTaskSpecs(
   return manifest.tasks.filter((task) => {
     const runtime = aggregate.tasks[task.id];
     if (runtime === undefined) return false;
-    if (!['pending', 'awaiting_interaction', 'orphan_identity_unproven'].includes(runtime.status)) {
+    if (runtime.claim !== undefined
+      || !['pending', 'awaiting_interaction', 'orphan_identity_unproven'].includes(runtime.status)) {
       return false;
     }
     return task.dependencies.every((dep) => aggregate.tasks[dep]?.status === 'completed');

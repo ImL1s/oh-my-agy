@@ -2,7 +2,10 @@
  * 設計概念映射：Looks vs Works AuthorityLease（CAS acquire/renew/release）。
  * overlapping write_scope 並行前必須取得 exclusive lease。
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import { RuntimeError, runtimeError } from '../runtime/errors';
+import { acquireOwnerLock, releaseOwnerLock } from '../runtime/lock';
 import { StateStore } from '../runtime/state-store';
 import { Result, Snapshot, err, ok } from '../runtime/types';
 
@@ -24,12 +27,41 @@ export interface LeaseAggregateV1 {
 export class AuthorityLeaseStore {
   readonly key: string;
   private readonly teamId: string;
+  private readonly stateRoot: string;
   private readonly store: StateStore<LeaseAggregateV1>;
 
   constructor(stateRoot: string, teamId: string) {
+    this.stateRoot = path.resolve(stateRoot);
     this.teamId = teamId;
     this.key = `teams/${teamId}/authority-leases`;
     this.store = new StateStore<LeaseAggregateV1>(stateRoot);
+  }
+
+  /** Delete a launch-only empty aggregate under an exact revision fence. */
+  async rollbackEmpty(expectedRevision: number): Promise<Result<void, RuntimeError>> {
+    const target = path.resolve(this.stateRoot, `${this.key}.json`);
+    if (target !== this.stateRoot && !target.startsWith(`${this.stateRoot}${path.sep}`)) {
+      return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'Lease rollback target escapes state root'));
+    }
+    const lock = await acquireOwnerLock(`${target}.lock`);
+    if (!lock.ok) return lock;
+    try {
+      const snapshot = this.store.read(this.key);
+      if (!snapshot.ok) return snapshot;
+      if (snapshot.value.revision !== expectedRevision
+        || snapshot.value.value.teamId !== this.teamId
+        || Object.keys(snapshot.value.value.leases).length !== 0) {
+        return err(runtimeError('E_REVISION_CONFLICT', 'Lease launch rollback fence changed'));
+      }
+      fs.unlinkSync(target);
+      return ok(undefined);
+    } catch (error) {
+      return err(runtimeError('E_CORRUPT_STATE', 'Lease launch rollback failed', {
+        cause: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      releaseOwnerLock(lock.value);
+    }
   }
 
   async ensure(): Promise<Result<Snapshot<LeaseAggregateV1>, RuntimeError>> {

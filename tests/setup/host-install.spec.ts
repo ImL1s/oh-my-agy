@@ -4,6 +4,7 @@ import * as path from 'path';
 import {
   HostCliAdapter,
   HostCliResult,
+  evaluateHostInstallAuthority,
   installSlashHosts,
   linkProjectSkills,
   parseSetupHosts,
@@ -139,7 +140,33 @@ describe('slash host install helpers', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.steps.every((s) => s.status === 'ok')).toBe(true);
+    expect(result.value.steps.every((s) => (s.commandReceipts?.length ?? 0) > 0)).toBe(true);
+    expect(result.value.steps.flatMap((s) => s.ownedPaths ?? [])).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'host_skill_symlink' }),
+      ]),
+    );
     expect(slashReportHasHardFailure(result.value)).toBe(false);
+  });
+
+  test('primary Antigravity failure cannot be masked by auxiliary host success', () => {
+    const report = {
+      schemaVersion: 1 as const,
+      packageRoot: '/tmp/oma-stage',
+      steps: [
+        { host: 'claude' as const, status: 'ok' as const, message: 'installed' },
+        { host: 'grok' as const, status: 'ok' as const, message: 'installed' },
+      ],
+    };
+    expect(evaluateHostInstallAuthority({ status: 'failed' }, report)).toEqual(
+      expect.objectContaining({ status: 'failed', exitCode: 1 }),
+    );
+    expect(evaluateHostInstallAuthority({ status: 'warning' }, report)).toEqual(
+      expect.objectContaining({ status: 'completed_with_warning', exitCode: 2 }),
+    );
+    expect(evaluateHostInstallAuthority({ status: 'ok' }, report)).toEqual(
+      expect.objectContaining({ status: 'installed', exitCode: 0 }),
+    );
   });
 
   test('installSlashHosts with mock adapter — already installed → ok', () => {

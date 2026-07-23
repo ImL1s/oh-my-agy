@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import { ProcessRunner, currentProcessIdentity } from '../../src/runtime/process';
 
 describe('ProcessRunner contract', () => {
@@ -14,6 +15,50 @@ describe('ProcessRunner contract', () => {
     expect(result).toEqual(expect.objectContaining({
       ok: true,
       value: expect.objectContaining({ code: 7, stdout: 'out', stderr: 'err', timedOut: false }),
+    }));
+  });
+
+  test('version-pinned launch binds native generation and stores no command body', async () => {
+    const binary = crypto.createHash('sha256').update(fs.readFileSync(process.execPath)).digest('hex');
+    const nativeReceipt = {
+      store_kind: 'antigravity_native_receipt' as const,
+      schema_version: 1 as const,
+      provider: 'agy_headless' as const,
+      run_id: 'run-1', parent_conversation_id: 'parent', child_conversation_id: 'child',
+      task_id: 'task-1', generation: 3, receipt_hash: 'a'.repeat(64),
+    };
+    const runner = new ProcessRunner();
+    const result = await runner.boundedHeadless(process.execPath, ['--version'], {
+      deadlineMs: 5_000,
+      pinnedLaunch: {
+        expectedBinarySha256: binary,
+        expectedArgv: ['--version'],
+        nativeReceipt,
+        observedAt: '2026-07-22T00:00:00.000Z',
+      },
+    }, { operationId: 'pinned', ownerNonce: 'owner' });
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      value: expect.objectContaining({
+        launchReceipt: expect.objectContaining({ generation: 3, binary_sha256: binary }),
+      }),
+    }));
+    if (result.ok) {
+      expect(JSON.stringify(result.value.launchReceipt)).not.toContain(process.execPath);
+      expect(result.value.launchReceipt?.argv_evidence).toEqual(['node', '--version']);
+    }
+
+    const rejected = await runner.boundedHeadless(process.execPath, ['--version'], {
+      deadlineMs: 5_000,
+      pinnedLaunch: {
+        expectedBinarySha256: binary,
+        expectedArgv: ['--help'],
+        nativeReceipt,
+        observedAt: '2026-07-22T00:00:00.000Z',
+      },
+    }, { operationId: 'mismatch', ownerNonce: 'owner' });
+    expect(rejected).toEqual(expect.objectContaining({
+      ok: false, error: expect.objectContaining({ code: 'E_VALIDATOR_REJECTED' }),
     }));
   });
 

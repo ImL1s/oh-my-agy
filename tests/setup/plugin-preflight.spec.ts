@@ -16,19 +16,23 @@ class FakePluginAdapter implements PluginCommandAdapter {
 }
 
 function createPackageSurface(root: string): void {
+  fs.mkdirSync(path.join(root, 'dist', 'bin'), { recursive: true });
   fs.mkdirSync(path.join(root, 'dist', 'src', 'hooks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'skills', 'oma-runtime'), { recursive: true });
   fs.mkdirSync(path.join(root, 'rules'), { recursive: true });
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({
-    name: 'oh-my-agy', version: '1.0.0',
+    name: '@iml1s/oh-my-agy', version: '1.0.0',
+    bin: { oma: 'dist/bin/oma.js', omy: 'dist/bin/oma.js' },
+    files: ['dist/bin', 'dist/src', 'plugin.json', 'hooks.json', 'skills', 'rules', 'package.json'],
   }));
-  fs.writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ name: 'oh-my-agy' }));
+  fs.writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ name: 'oh-my-agy', version: '1.0.0' }));
   fs.writeFileSync(path.join(root, 'hooks.json'), JSON.stringify({
     'oh-my-agy-runtime': {
       PreInvocation: [{ type: 'command', command: 'node "${extensionPath}/dist/src/hooks/pre-invocation.js"' }],
       Stop: [{ type: 'command', command: 'node "${extensionPath}/dist/src/hooks/stop.js"' }],
     },
   }));
+  fs.writeFileSync(path.join(root, 'dist', 'bin', 'oma.js'), '#!/usr/bin/env node\n');
   fs.writeFileSync(path.join(root, 'dist', 'src', 'hooks', 'pre-invocation.js'), 'module.exports = {};\n');
   fs.writeFileSync(path.join(root, 'dist', 'src', 'hooks', 'stop.js'), 'module.exports = {};\n');
   fs.writeFileSync(path.join(root, 'skills', 'oma-runtime', 'SKILL.md'), '# Runtime\n');
@@ -42,10 +46,11 @@ describe('managed launch plugin preflight', () => {
     try {
       const result = await verifyPluginActive({
         packageRoot: fixture.root,
+        antigravityConfigRoot: fixture.path('empty-config'),
         adapter: new FakePluginAdapter({
           argv: ['plugin', 'list'],
           code: 0,
-          stdout: 'oh-my-agy 1.0.0 enabled /fixture/oh-my-agy\n',
+          stdout: `oh-my-agy 1.0.0 enabled ${fixture.root}\n`,
           stderr: '',
         }),
       });
@@ -73,6 +78,7 @@ describe('managed launch plugin preflight', () => {
     try {
       const result = await verifyPluginActive({
         packageRoot: fixture.root,
+        antigravityConfigRoot: fixture.path('empty-config'),
         adapter: new FakePluginAdapter({
           argv: ['plugin', 'list'], code: 0, stdout: 'No imported plugins.\n', stderr: '',
         }),
@@ -86,12 +92,13 @@ describe('managed launch plugin preflight', () => {
     }
   });
 
-  test('accepts real agy JSON imports list as active registry readback', async () => {
+  test('sparse real agy JSON is presence only and cannot synthesize installed identity', async () => {
     const fixture = createStateFixture('oma-plugin-json-list-');
     createPackageSurface(fixture.root);
     try {
       const result = await verifyPluginActive({
         packageRoot: fixture.root,
+        antigravityConfigRoot: fixture.path('empty-config'),
         adapter: new FakePluginAdapter({
           argv: ['plugin', 'list'],
           code: 0,
@@ -107,12 +114,47 @@ describe('managed launch plugin preflight', () => {
         }),
       });
       expect(result).toEqual(expect.objectContaining({
+        ok: false,
+        error: expect.objectContaining({
+          code: 'E_PLUGIN_NOT_ACTIVE',
+          message: expect.stringMatching(/unresolved/i),
+        }),
+      }));
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('sparse real agy JSON resolves exact bytes from the standard config root', async () => {
+    const fixture = createStateFixture('oma-plugin-json-installed-');
+    const source = fixture.path('source');
+    const configRoot = fixture.path('gemini-config');
+    const installed = path.join(configRoot, 'plugins', 'oh-my-agy');
+    fs.mkdirSync(source, { recursive: true });
+    fs.mkdirSync(installed, { recursive: true });
+    createPackageSurface(source);
+    createPackageSurface(installed);
+    try {
+      const result = await verifyPluginActive({
+        packageRoot: source,
+        antigravityConfigRoot: configRoot,
+        adapter: new FakePluginAdapter({
+          argv: ['plugin', 'list'],
+          code: 0,
+          stdout: JSON.stringify({
+            imports: [{ name: 'oh-my-agy', source: 'antigravity', components: ['skills', 'hooks'] }],
+          }),
+          stderr: '',
+        }),
+      });
+      expect(result).toEqual(expect.objectContaining({
         ok: true,
         value: expect.objectContaining({
           pluginName: 'oh-my-agy',
-          installed: true,
-          enabled: true,
-          version: 'installed',
+          version: '1.0.0',
+          installPath: fs.realpathSync(installed),
+          installedDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+          listStdoutSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
         }),
       }));
     } finally {
@@ -120,4 +162,3 @@ describe('managed launch plugin preflight', () => {
     }
   });
 });
-

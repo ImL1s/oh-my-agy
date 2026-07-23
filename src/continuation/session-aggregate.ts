@@ -4,12 +4,17 @@ import {
   AtomicFaultContext,
   FaultInjector,
   NO_FAULTS,
-  atomicWriteJson,
+  atomicWriteContractBytes,
   canonicalJson,
   sha256,
 } from '../runtime/atomic';
+import { canonicalBytesV1 } from '../contracts/state-schemas';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { acquireOwnerLock, releaseOwnerLock } from '../runtime/lock';
+import {
+  platformSessionAggregateRelativePath,
+  workspaceSessionProjectionPath,
+} from '../runtime/state-root';
 import { Result, err, ok } from '../runtime/types';
 import { ProcessIdentity } from '../runtime/types';
 import { StopEventIdentity, stopEventKey, validateStopEventIdentity } from './event-identity';
@@ -80,7 +85,7 @@ export interface SessionBindingV1 {
   activeInvocationGeneration: number;
   launchNonceDigest: string;
   state: 'launch_pending' | 'resume_pending' | 'bound' | 'idle';
-  bindingRoute: 'exact_env' | null;
+  bindingRoute: 'exact_env' | 'first_preinvocation' | null;
   workspacePath: string;
   owner: ProcessIdentity | null;
   expiresAtMs: number | null;
@@ -159,7 +164,10 @@ export interface ProcessedStopRecordV1 {
 }
 
 export interface SessionAggregateV1 {
+  store_kind: 'session_aggregate';
+  schema_version: 1;
   schemaVersion: 1;
+  aggregate_id: string;
   revision: number;
   sessionId: string;
   repoKey: string | null;
@@ -220,8 +228,23 @@ export interface SessionAggregateStoreOptions {
   faultInjector?: FaultInjector;
 }
 
+export interface SessionProjectionV1 {
+  store_kind: 'session_projection';
+  schema_version: 1;
+  repository_id: 'OMA';
+  aggregate_id: string;
+  aggregate_revision: number;
+  aggregate_sha256: string;
+  session_id_hash: string;
+  workspace_key: string;
+  generation: number;
+  authoritative: false;
+  updated_at: string;
+  projection_sha256: string;
+}
+
 export function sessionAggregateRelativePath(workspaceKey: string, sessionId: string): string {
-  return path.join('workspaces', workspaceKey, 'sessions', sha256(sessionId), 'aggregate.json');
+  return platformSessionAggregateRelativePath(workspaceKey, sessionId);
 }
 
 export function sessionAggregatePath(
@@ -232,11 +255,91 @@ export function sessionAggregatePath(
   return path.resolve(stateRoot, sessionAggregateRelativePath(workspaceKey, sessionId));
 }
 
+export function sessionAggregateHash(aggregate: Readonly<SessionAggregateV1>): string {
+  return sha256(aggregateContractBytes(aggregate));
+}
+
+/**
+ * `.agy/**` is a read projection only.  The platform aggregate bytes and
+ * revision are bound explicitly so mtime can never select authority.
+ */
+export function writeSessionProjection(
+  workspacePath: string,
+  aggregate: Readonly<SessionAggregateV1>,
+  now: string = new Date().toISOString(),
+): string {
+  const workspace = fs.realpathSync(path.resolve(workspacePath));
+  const agyRoot = path.join(workspace, '.agy');
+  if (fs.existsSync(agyRoot) && fs.lstatSync(agyRoot).isSymbolicLink()) {
+    throw new Error('E_PATH_OUTSIDE_ROOT: .agy projection root cannot be a symlink');
+  }
+  const projectionPath = workspaceSessionProjectionPath(workspace, aggregate.aggregate_id);
+  const material: Omit<SessionProjectionV1, 'projection_sha256'> = {
+    store_kind: 'session_projection',
+    schema_version: 1,
+    repository_id: 'OMA',
+    aggregate_id: aggregate.aggregate_id,
+    aggregate_revision: aggregate.revision,
+    aggregate_sha256: sessionAggregateHash(aggregate),
+    session_id_hash: sha256(aggregate.sessionId),
+    workspace_key: aggregate.workspaceKey,
+    generation: aggregate.binding.activeInvocationGeneration,
+    authoritative: false,
+    updated_at: now,
+  };
+  const projection: SessionProjectionV1 = {
+    ...material,
+    projection_sha256: sha256(canonicalBytesV1(material)),
+  };
+  atomicWriteContractBytes(projectionPath, canonicalBytesV1(projection));
+  return projectionPath;
+}
+
+export function readSessionProjection(
+  projectionPath: string,
+  aggregate: Readonly<SessionAggregateV1>,
+): Result<SessionProjectionV1, RuntimeError> {
+  try {
+    if (!fs.existsSync(projectionPath) || fs.lstatSync(projectionPath).isSymbolicLink()) {
+      return err(runtimeError('E_NOT_FOUND', 'Session projection does not exist or is unsafe'));
+    }
+    const projection = JSON.parse(fs.readFileSync(projectionPath, 'utf8')) as SessionProjectionV1;
+    const { projection_sha256: ignored, ...material } = projection;
+    void ignored;
+    if (projection.store_kind !== 'session_projection' || projection.schema_version !== 1
+      || projection.repository_id !== 'OMA' || projection.authoritative !== false
+      || projection.aggregate_id !== aggregate.aggregate_id
+      || projection.aggregate_revision !== aggregate.revision
+      || projection.aggregate_sha256 !== sessionAggregateHash(aggregate)
+      || projection.session_id_hash !== sha256(aggregate.sessionId)
+      || projection.workspace_key !== aggregate.workspaceKey
+      || projection.generation !== aggregate.binding.activeInvocationGeneration) {
+      return err(runtimeError('E_PROJECTION_STALE', 'Session projection does not bind the current aggregate'));
+    }
+    if (sha256(canonicalBytesV1(material)) !== projection.projection_sha256) {
+      return err(runtimeError('E_PROJECTION_HASH_MISMATCH', 'Session projection hash does not match'));
+    }
+    return ok(projection);
+  } catch (error) {
+    return err(runtimeError('E_CORRUPT_STATE', 'Session projection is corrupt', {
+      cause: error instanceof Error ? error.message : String(error),
+    }));
+  }
+}
+
 export function createInitialSessionAggregate(
   input: Readonly<InitialSessionAggregateInput>,
 ): SessionAggregateV1 {
   return {
+    store_kind: 'session_aggregate',
+    schema_version: 1,
     schemaVersion: 1,
+    aggregate_id: sha256(canonicalJson({
+      repository_id: 'OMA',
+      repo_key: input.repoKey,
+      workspace_key: input.workspaceKey,
+      session_id: input.sessionId,
+    })),
     revision: 0,
     sessionId: input.sessionId,
     repoKey: input.repoKey,
@@ -338,7 +441,7 @@ export class SessionAggregateStore {
       }
       const validated = validateAggregate(aggregate);
       if (!validated.ok) return validated;
-      atomicWriteJson(this.aggregatePath, aggregate, {
+      atomicWriteContractBytes(this.aggregatePath, aggregateContractBytes(aggregate), {
         nextRevision: aggregate.revision,
         faultInjector: this.faultInjector,
       });
@@ -391,7 +494,10 @@ export class SessionAggregateStore {
       const validated = validateAggregate(next);
       if (!validated.ok) return validated;
       if (
-        next.revision !== expectedRevision + 1
+        next.store_kind !== current.value.store_kind
+        || next.schema_version !== current.value.schema_version
+        || next.aggregate_id !== current.value.aggregate_id
+        || next.revision !== expectedRevision + 1
         || next.sessionId !== current.value.sessionId
         || next.workspaceKey !== current.value.workspaceKey
         || next.repoKey !== current.value.repoKey
@@ -402,7 +508,7 @@ export class SessionAggregateStore {
           'Aggregate CAS must advance one revision, preserve identity, and leave processed Stops authoritative',
         ));
       }
-      atomicWriteJson(this.aggregatePath, next, {
+      atomicWriteContractBytes(this.aggregatePath, aggregateContractBytes(next), {
         expectedRevision,
         nextRevision: next.revision,
         faultInjector: this.faultInjector,
@@ -479,7 +585,7 @@ export class SessionAggregateStore {
         },
       };
 
-      atomicWriteJson(this.aggregatePath, next, {
+      atomicWriteContractBytes(this.aggregatePath, aggregateContractBytes(next), {
         transactionId: key,
         expectedRevision: current.value.revision,
         nextRevision: next.revision,
@@ -490,6 +596,12 @@ export class SessionAggregateStore {
       releaseOwnerLock(lock.value);
     }
   }
+}
+
+function aggregateContractBytes(aggregate: Readonly<SessionAggregateV1>): Buffer {
+  // Legacy tests may inject ProcessIdentity instances. Normalize them to a
+  // plain JSON tree, then apply the W0 canonical serializer for exact bytes.
+  return canonicalBytesV1(JSON.parse(canonicalJson(aggregate)));
 }
 
 function validateAggregate(value: unknown): Result<SessionAggregateV1, RuntimeError> {
@@ -519,6 +631,19 @@ function validateAggregate(value: unknown): Result<SessionAggregateV1, RuntimeEr
     return err(runtimeError('E_CORRUPT_STATE', 'Session aggregate shape is invalid'));
   }
   const migrated = structuredClone(candidate as SessionAggregateV1);
+  // Pre-W2 aggregates are accepted only as an in-place migration input; every
+  // subsequent write persists the explicit W0 store identity.
+  migrated.store_kind = 'session_aggregate';
+  migrated.schema_version = 1;
+  migrated.aggregate_id = typeof migrated.aggregate_id === 'string'
+    && /^[0-9a-f]{64}$/.test(migrated.aggregate_id)
+    ? migrated.aggregate_id
+    : sha256(canonicalJson({
+      repository_id: 'OMA',
+      repo_key: migrated.repoKey,
+      workspace_key: migrated.workspaceKey,
+      session_id: migrated.sessionId,
+    }));
   migrated.autopilot = migrateAutopilotAggregate(migrated.autopilot);
   return ok(migrated);
 }
@@ -564,7 +689,10 @@ function validateCandidate(
   candidate: Readonly<AggregateCandidate>,
 ): RuntimeError | undefined {
   if (
-    candidate.aggregate.schemaVersion !== 1
+    candidate.aggregate.store_kind !== current.store_kind
+    || candidate.aggregate.schema_version !== current.schema_version
+    || candidate.aggregate.aggregate_id !== current.aggregate_id
+    || candidate.aggregate.schemaVersion !== 1
     || candidate.aggregate.sessionId !== current.sessionId
     || candidate.aggregate.workspaceKey !== current.workspaceKey
     || candidate.aggregate.revision !== current.revision + 1

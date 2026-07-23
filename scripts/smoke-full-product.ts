@@ -42,10 +42,39 @@ function main(): void {
   fs.mkdirSync(repo);
   fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
   fs.chmodSync(stateRoot, 0o700);
+  const identityModule = require(path.join(ROOT, 'dist/src/setup/installed-identity.js')) as {
+    stageImmutablePackage(input: { packageRoot: string; stagesRoot: string }): {
+      ok: boolean;
+      value?: { stagePath: string; identity: { digest: string } };
+      error?: unknown;
+    };
+    computePackageIdentity(packageRoot: string): {
+      ok: boolean;
+      value?: { digest: string };
+      error?: unknown;
+    };
+  };
+  const stagedInstall = identityModule.stageImmutablePackage({
+    packageRoot: ROOT,
+    stagesRoot: path.join(stateRoot, 'install', 'stages'),
+  });
+  assert(stagedInstall.ok && stagedInstall.value !== undefined, 'immutable package stage failed');
+  const installedRoot = path.join(scratch, 'home', '.gemini', 'config', 'plugins', 'oh-my-agy');
+  fs.mkdirSync(path.dirname(installedRoot), { recursive: true });
+  fs.cpSync(stagedInstall.value.stagePath, installedRoot, { recursive: true, dereference: true });
+  const installedIdentity = identityModule.computePackageIdentity(installedRoot);
+  assert(installedIdentity.ok && installedIdentity.value !== undefined, 'installed identity unreadable');
+  assert(
+    installedIdentity.value.digest === stagedInstall.value.identity.digest,
+    'installed identity differs from immutable stage',
+  );
+  console.log('INSTALL_IDENTITY_SMOKE_OK', installedIdentity.value.digest);
   const baseEnv: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${path.dirname(MOCK_AGY)}:${process.env.PATH ?? ''}`,
     OMA_STATE_ROOT: stateRoot,
+    HOME: path.join(scratch, 'home'),
+    OMA_ANTIGRAVITY_CONFIG_ROOT: path.join(scratch, 'home', '.gemini', 'config'),
     OMA_MANAGED_HEADLESS: '1',
     MOCK_AGY_EXIT_CODE: '0',
     MOCK_AGY_STDOUT: 'mock-agy-ok\n',

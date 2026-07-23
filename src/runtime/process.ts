@@ -1,5 +1,14 @@
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import { spawn, spawnSync } from 'child_process';
+import {
+  AntigravityNativeReceiptV1,
+  validateAntigravityNativeReceipt,
+} from '../contracts/carrier';
+import { assertSafeArgvVector, canonicalBytesV1 } from '../contracts/state-schemas';
 import { RuntimeError, runtimeError } from './errors';
+import { redactDiagnostic } from './redaction';
 import { OperationIdentity, ProcessIdentity, Result, err, ok } from './types';
 
 export interface ProcessOutcome {
@@ -13,6 +22,29 @@ export interface ProcessOutcome {
   stdout: string;
   stderr: string;
   processIdentity: ProcessIdentity | null;
+  launchReceipt?: PinnedProcessLaunchReceiptV1;
+}
+
+export interface PinnedProcessLaunchPolicyV1 {
+  expectedBinarySha256: string;
+  expectedArgv: readonly string[];
+  nativeReceipt: AntigravityNativeReceiptV1;
+  observedAt: string;
+}
+
+export interface PinnedProcessLaunchReceiptV1 {
+  store_kind: 'pinned_process_launch_receipt';
+  schema_version: 1;
+  repository_id: 'OMA';
+  provider: AntigravityNativeReceiptV1['provider'];
+  run_id: string;
+  task_id: string;
+  generation: number;
+  native_receipt_hash: string;
+  binary_sha256: string;
+  argv_sha256: string;
+  argv_evidence: string[];
+  observed_at: string;
 }
 
 export type SpawnLifecycleCallback = (
@@ -29,6 +61,7 @@ export interface HeadlessPolicy {
   env?: NodeJS.ProcessEnv;
   onSpawn?: SpawnLifecycleCallback;
   onExit?: (outcome: Readonly<ProcessOutcome>) => void;
+  pinnedLaunch?: PinnedProcessLaunchPolicyV1;
 }
 
 export interface InteractivePolicy {
@@ -36,6 +69,7 @@ export interface InteractivePolicy {
   env?: NodeJS.ProcessEnv;
   onSpawn?: SpawnLifecycleCallback;
   onExit?: (outcome: Readonly<ProcessOutcome>) => void;
+  pinnedLaunch?: PinnedProcessLaunchPolicyV1;
 }
 
 export interface ProcessRunnerOptions {
@@ -61,6 +95,10 @@ export class ProcessRunner {
     identity: Readonly<OperationIdentity>,
     policy: InteractivePolicy = {},
   ): Promise<Result<ProcessOutcome, RuntimeError>> {
+    const launchReceipt = policy.pinnedLaunch === undefined
+      ? ok<PinnedProcessLaunchReceiptV1 | undefined>(undefined)
+      : createPinnedProcessLaunchReceipt(command, argv, policy.pinnedLaunch, policy.env);
+    if (!launchReceipt.ok) return Promise.resolve(launchReceipt);
     return new Promise((resolve) => {
       const child = spawn(command, [...argv], {
         cwd: policy.cwd,
@@ -89,6 +127,7 @@ export class ProcessRunner {
           stdout: '',
           stderr: '',
           processIdentity: observed,
+          launchReceipt: launchReceipt.value,
         };
         try {
           policy.onExit?.(outcome);
@@ -110,6 +149,10 @@ export class ProcessRunner {
     policy: Readonly<HeadlessPolicy>,
     identity: Readonly<OperationIdentity>,
   ): Promise<Result<ProcessOutcome, RuntimeError>> {
+    const launchReceipt = policy.pinnedLaunch === undefined
+      ? ok<PinnedProcessLaunchReceiptV1 | undefined>(undefined)
+      : createPinnedProcessLaunchReceipt(command, argv, policy.pinnedLaunch, policy.env);
+    if (!launchReceipt.ok) return Promise.resolve(launchReceipt);
     return new Promise((resolve) => {
       const detached = process.platform !== 'win32';
       const child = spawn(command, [...argv], {
@@ -188,6 +231,7 @@ export class ProcessRunner {
           stdout: stdout.toString('utf8'),
           stderr: stderr.toString('utf8'),
           processIdentity: observed,
+          launchReceipt: launchReceipt.value,
         };
         try {
           policy.onExit?.(outcome);
@@ -230,6 +274,79 @@ export class ProcessRunner {
   }
 }
 
+/** Validate exact direct argv and binary bytes before any child is spawned. */
+export function createPinnedProcessLaunchReceipt(
+  command: string,
+  argv: readonly string[],
+  policy: Readonly<PinnedProcessLaunchPolicyV1>,
+  env: Readonly<NodeJS.ProcessEnv> = process.env,
+): Result<PinnedProcessLaunchReceiptV1, RuntimeError> {
+  try {
+    validateAntigravityNativeReceipt(policy.nativeReceipt);
+    assertSafeArgvVector([command, ...argv], 'pinned process argv');
+    if (!/^[0-9a-f]{64}$/.test(policy.expectedBinarySha256)
+      || argv.length !== policy.expectedArgv.length
+      || argv.some((value, index) => value !== policy.expectedArgv[index])) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Pinned process argv or binary digest is not exact'));
+    }
+    const observed = new Date(policy.observedAt);
+    if (!Number.isFinite(observed.getTime()) || observed.toISOString() !== policy.observedAt) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Pinned process receipt time is not canonical UTC'));
+    }
+    const executable = resolveExecutable(command, env);
+    if (executable === null) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Pinned process executable is unavailable'));
+    }
+    const binarySha256 = crypto.createHash('sha256').update(fs.readFileSync(executable)).digest('hex');
+    if (binarySha256 !== policy.expectedBinarySha256) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Pinned process executable digest changed', {
+        expectedBinarySha256: policy.expectedBinarySha256,
+        actualBinarySha256: binarySha256,
+      }));
+    }
+    return ok({
+      store_kind: 'pinned_process_launch_receipt',
+      schema_version: 1,
+      repository_id: 'OMA',
+      provider: policy.nativeReceipt.provider,
+      run_id: policy.nativeReceipt.run_id,
+      task_id: policy.nativeReceipt.task_id,
+      generation: policy.nativeReceipt.generation,
+      native_receipt_hash: policy.nativeReceipt.receipt_hash,
+      binary_sha256: binarySha256,
+      argv_sha256: crypto.createHash('sha256').update(canonicalBytesV1([command, ...argv])).digest('hex'),
+      argv_evidence: [path.basename(command), ...argv.map(redactedArgvEvidence)],
+      observed_at: policy.observedAt,
+    });
+  } catch (error) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'Pinned process launch receipt is invalid', {
+      cause: redactDiagnostic(error instanceof Error ? error.message : String(error)),
+    }));
+  }
+}
+
+function resolveExecutable(command: string, env: Readonly<NodeJS.ProcessEnv>): string | null {
+  const candidates = command.includes(path.sep)
+    ? [path.resolve(command)]
+    : (env.PATH ?? '').split(path.delimiter).filter(Boolean).map((entry) => path.join(entry, command));
+  for (const candidate of candidates) {
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      const real = fs.realpathSync(candidate);
+      if (fs.statSync(real).isFile()) return real;
+    } catch { /* inspect the next PATH entry */ }
+  }
+  return null;
+}
+
+function redactedArgvEvidence(value: string): string {
+  if (/^--?[A-Za-z0-9][A-Za-z0-9_-]*(?:=[A-Za-z0-9_.-]+)?$/.test(value)) {
+    return value.includes('=') ? `${value.slice(0, value.indexOf('=') + 1)}<redacted>` : value;
+  }
+  const digest = crypto.createHash('sha256').update(Buffer.from(value, 'utf8')).digest('hex').slice(0, 12);
+  return `<arg:${digest}>`;
+}
+
 /** 計算 pid 及其子孫數量；darwin/linux 用 pgrep -P 遞迴。失敗回 null。 */
 function countProcessGroup(rootPid: number): number | null {
   try {
@@ -267,7 +384,7 @@ function invokeSpawnCallback(
 
 function lifecycleCallbackError(phase: 'onSpawn' | 'onExit', error: unknown): RuntimeError {
   return runtimeError('E_RETRYABLE_BLOCKER', `Process lifecycle ${phase} callback failed`, {
-    cause: error instanceof Error ? error.message : String(error),
+    cause: redactDiagnostic(error instanceof Error ? error.message : String(error)),
   });
 }
 

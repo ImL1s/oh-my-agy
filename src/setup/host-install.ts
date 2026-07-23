@@ -9,6 +9,11 @@ import * as os from 'os';
 import * as path from 'path';
 import { Result, err, ok } from '../runtime/types';
 import { RuntimeError, runtimeError } from '../runtime/errors';
+import {
+  InstallCommandReceiptV1,
+  OwnedInstallPathV1,
+  commandReceipt,
+} from './receipt';
 
 export type SetupHost = 'agy' | 'claude' | 'grok' | 'all';
 
@@ -17,6 +22,8 @@ export interface HostInstallStepV1 {
   status: 'ok' | 'skipped' | 'needs_manual' | 'failed';
   message: string;
   commands?: string[];
+  commandReceipts?: InstallCommandReceiptV1[];
+  ownedPaths?: OwnedInstallPathV1[];
   detail?: unknown;
 }
 
@@ -32,6 +39,17 @@ export interface HostCliResult {
   stderr: string;
   timedOut: boolean;
   error?: string;
+}
+
+export interface PrimaryInstallAuthorityV1 {
+  status: 'ok' | 'warning' | 'failed';
+}
+
+export interface HostInstallAuthorityV1 {
+  status: 'installed' | 'completed_with_warning' | 'failed';
+  exitCode: 0 | 1 | 2;
+  primary: PrimaryInstallAuthorityV1['status'];
+  auxiliary: 'ok' | 'warning' | 'failed';
 }
 
 /** 可注入 adapter：unit test 禁止碰真 claude/grok CLI。 */
@@ -60,6 +78,31 @@ export function parseSetupHosts(argv: readonly string[]): SetupHost[] {
 /** slash steps 是否有硬失敗（timeout 等）— setup exit 1。needs_manual 不算 hard fail。 */
 export function slashReportHasHardFailure(report: HostInstallReportV1): boolean {
   return report.steps.some((s) => s.status === 'failed');
+}
+
+/**
+ * Antigravity is the authoritative install. Auxiliary Claude/Grok success can
+ * never turn a primary failure into success; manual auxiliary work is a warn.
+ */
+export function evaluateHostInstallAuthority(
+  primary: Readonly<PrimaryInstallAuthorityV1>,
+  report: Readonly<HostInstallReportV1>,
+): HostInstallAuthorityV1 {
+  const auxiliary = report.steps.some((step) => step.status === 'failed')
+    ? 'failed'
+    : report.steps.some((step) => step.status === 'needs_manual') ? 'warning' : 'ok';
+  if (primary.status === 'failed' || auxiliary === 'failed') {
+    return { status: 'failed', exitCode: 1, primary: primary.status, auxiliary };
+  }
+  if (primary.status === 'warning' || auxiliary === 'warning') {
+    return {
+      status: 'completed_with_warning',
+      exitCode: 2,
+      primary: primary.status,
+      auxiliary,
+    };
+  }
+  return { status: 'installed', exitCode: 0, primary: primary.status, auxiliary };
 }
 
 /**
@@ -125,12 +168,17 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
         `claude CLI not on PATH; linked skills under packageRoot (.claude/skills)=${link.ok}. `
         + 'Install Claude Code plugin manually (see commands).',
       commands,
+      ownedPaths: link.ownedPaths,
       detail: { packageRootSkillsLink: link },
     };
   }
 
   const marketplace = adapter.run(claude, ['plugin', 'marketplace', 'add', packageRoot]);
   const install = adapter.run(claude, ['plugin', 'install', 'oh-my-agy@oh-my-agy']);
+  const commandReceipts = [
+    hostCommandReceipt(claude, ['plugin', 'marketplace', 'add', packageRoot], marketplace),
+    hostCommandReceipt(claude, ['plugin', 'install', 'oh-my-agy@oh-my-agy'], install),
+  ];
 
   if (install.timedOut || marketplace.timedOut) {
     return {
@@ -138,7 +186,13 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
       status: 'failed',
       message: 'claude plugin install timed out; run commands below manually',
       commands,
-      detail: { marketplace, install, packageRootSkillsLink: link },
+      commandReceipts,
+      ownedPaths: link.ownedPaths,
+      detail: {
+        marketplaceCode: marketplace.status,
+        installCode: install.status,
+        packageRootSkillsLink: link,
+      },
     };
   }
 
@@ -151,9 +205,10 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
           ? 'Claude plugin install exit 0; restart session for /oh-my-agy:autopilot (enable if not listed)'
           : 'Claude plugin already installed; restart session for /oh-my-agy:autopilot',
       commands,
+      commandReceipts,
+      ownedPaths: link.ownedPaths,
       detail: {
         marketplaceCode: marketplace.status,
-        installStdout: (install.stdout || '').slice(0, 500),
         packageRootSkillsLink: link,
       },
     };
@@ -172,11 +227,11 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
       'Automatic claude plugin install failed; run commands below. '
       + 'packageRoot .claude/skills is only for OMA-repo local discovery.',
     commands,
+    commandReceipts,
+    ownedPaths: [...link.ownedPaths, ...userLink.ownedPaths],
     detail: {
       marketplaceCode: marketplace.status,
-      marketplaceErr: (marketplace.stderr || marketplace.stdout || '').slice(0, 400),
       installCode: install.status,
-      installErr: (install.stderr || install.stdout || '').slice(0, 400),
       packageRootSkillsLink: link,
       userPluginSkillsLink: userLink,
     },
@@ -199,18 +254,24 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
         `grok CLI not on PATH; linked skills under packageRoot (.grok/skills)=${packageLink.ok}. `
         + 'Run plugin install manually (see commands).',
       commands,
+      ownedPaths: packageLink.ownedPaths,
       detail: { packageRootSkillsLink: packageLink },
     };
   }
 
   const result = adapter.run(grok, ['plugin', 'install', packageRoot, '--trust']);
+  const commandReceipts = [
+    hostCommandReceipt(grok, ['plugin', 'install', packageRoot, '--trust'], result),
+  ];
   if (result.timedOut) {
     return {
       host: 'grok',
       status: 'failed',
       message: 'grok plugin install timed out; run commands below manually',
       commands,
-      detail: { result, packageRootSkillsLink: packageLink },
+      commandReceipts,
+      ownedPaths: packageLink.ownedPaths,
+      detail: { code: result.status, packageRootSkillsLink: packageLink },
     };
   }
   if (result.status === 0) {
@@ -219,8 +280,9 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
       status: 'ok',
       message: 'Grok plugin install succeeded; restart session for /oh-my-agy:autopilot',
       commands,
+      commandReceipts,
+      ownedPaths: packageLink.ownedPaths,
       detail: {
-        stdout: (result.stdout || '').slice(0, 500),
         packageRootSkillsLink: packageLink,
       },
     };
@@ -233,9 +295,10 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
       status: 'ok',
       message: 'Grok plugin already installed; restart session for /oh-my-agy:autopilot',
       commands,
+      commandReceipts,
+      ownedPaths: packageLink.ownedPaths,
       detail: {
         code: result.status,
-        stdout: `${result.stderr || ''}\n${result.stdout || ''}`.slice(0, 500),
         packageRootSkillsLink: packageLink,
       },
     };
@@ -247,9 +310,10 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
     message:
       'grok plugin install failed; packageRoot .grok/skills is only for OMA-repo local discovery',
     commands,
+    commandReceipts,
+    ownedPaths: packageLink.ownedPaths,
     detail: {
       code: result.status,
-      err: `${result.stderr || ''}\n${result.stdout || ''}`.slice(0, 500),
       packageRootSkillsLink: packageLink,
     },
   };
@@ -267,15 +331,22 @@ function isAlreadyInstalled(result: HostCliResult): boolean {
 export function linkProjectSkills(
   packageRoot: string,
   destRoot: string,
-): { ok: boolean; linked: string[]; errors: string[]; skipped: string[] } {
+): {
+  ok: boolean;
+  linked: string[];
+  errors: string[];
+  skipped: string[];
+  ownedPaths: OwnedInstallPathV1[];
+} {
   const root = path.resolve(packageRoot);
   const destBase = path.resolve(destRoot);
   const srcRoot = path.join(root, 'skills');
   const linked: string[] = [];
   const errors: string[] = [];
   const skipped: string[] = [];
+  const ownedPaths: OwnedInstallPathV1[] = [];
   if (!fs.existsSync(srcRoot)) {
-    return { ok: false, linked, errors: ['skills/ missing'], skipped };
+    return { ok: false, linked, errors: ['skills/ missing'], skipped, ownedPaths };
   }
   fs.mkdirSync(destBase, { recursive: true });
   for (const entry of fs.readdirSync(srcRoot, { withFileTypes: true })) {
@@ -298,11 +369,29 @@ export function linkProjectSkills(
     try {
       fs.symlinkSync(src, dest, 'dir');
       linked.push(entry.name);
+      ownedPaths.push({ path: dest, kind: 'host_skill_symlink', identity: src });
     } catch (error) {
       errors.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return { ok: errors.length === 0 && linked.length > 0, linked, errors, skipped };
+  ownedPaths.sort((left, right) => Buffer.compare(
+    Buffer.from(left.path, 'utf8'),
+    Buffer.from(right.path, 'utf8'),
+  ));
+  return { ok: errors.length === 0 && linked.length > 0, linked, errors, skipped, ownedPaths };
+}
+
+function hostCommandReceipt(
+  command: string,
+  argv: readonly string[],
+  result: Readonly<HostCliResult>,
+): InstallCommandReceiptV1 {
+  return commandReceipt(
+    [command, ...argv],
+    result.status ?? (result.timedOut ? 124 : 1),
+    result.stdout,
+    result.stderr || result.error || '',
+  );
 }
 
 /**

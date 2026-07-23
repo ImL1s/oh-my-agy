@@ -1,0 +1,5 @@
+{
+  "mutation": "cycle",
+  "edges": [["alpha","beta"],["beta","alpha"]],
+  "expected_error": "E_WORKFLOW_CYCLE"
+}

@@ -1,0 +1,21 @@
+{
+  "carrier": {
+    "agent_role": "architect",
+    "agent_type": "architect",
+    "task_name": "omx_role_intent_0123456789abcdef0123456789abcdef",
+    "agent_path": "/root/omx_role_intent_0123456789abcdef0123456789abcdef"
+  },
+  "receipt": {
+    "store_kind": "imported_provenance_receipt",
+    "schema_version": 1,
+    "token": "0123456789abcdef0123456789abcdef",
+    "role": "architect",
+    "parent_id": "parent-1",
+    "cwd_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "run_id": "run-1",
+    "session_id": "session-1",
+    "child_id": "child-1",
+    "expires_at_ms": 2000,
+    "consumed": false
+  }
+}

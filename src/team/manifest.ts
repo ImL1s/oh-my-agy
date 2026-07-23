@@ -25,10 +25,12 @@ export function validateTeamManifest(
   if (!isRecord(input) || input.schema !== TEAM_MANIFEST_SCHEMA) {
     return invalid('Manifest schema must be oma.team-manifest/v1');
   }
-  if (!isIdentifier(input.teamId) || !Number.isInteger(input.revision) || Number(input.revision) < 0) {
+  if (!isCanonicalTeamIdentifier(input.teamId) || !Number.isInteger(input.revision) || Number(input.revision) < 0) {
     return invalid('Manifest teamId or revision is invalid');
   }
-  if (!Array.isArray(input.tasks)) return invalid('Manifest tasks must be an array');
+  if (!Array.isArray(input.tasks) || input.tasks.length === 0) {
+    return invalid('Manifest tasks must be a non-empty array');
+  }
 
   const tasks: CanonicalTeamTaskV1[] = [];
   const ids = new Set<string>();
@@ -74,10 +76,10 @@ export function validateTeamManifest(
 }
 
 function parseTask(input: unknown, repoRoot: string): Result<CanonicalTeamTaskV1> {
-  if (!isRecord(input) || !isIdentifier(input.id) || !Array.isArray(input.dependencies)) {
+  if (!isRecord(input) || !isCanonicalTeamIdentifier(input.id) || !Array.isArray(input.dependencies)) {
     return invalid('Task identity or dependencies are invalid');
   }
-  if (!input.dependencies.every(isIdentifier)) return invalid('Task dependency IDs are invalid', { taskId: input.id });
+  if (!input.dependencies.every(isCanonicalTeamIdentifier)) return invalid('Task dependency IDs are invalid', { taskId: input.id });
   if (!isTaskMode(input.mode)) return invalid('Task mode is invalid', { taskId: input.id });
   const scope = parseScope(input.write_scope, repoRoot);
   if (!scope.ok) return scope;
@@ -125,7 +127,7 @@ function parseVerification(input: unknown, repoRoot: string): Result<TeamTaskSpe
   for (const raw of input.commands) {
     if (
       !isRecord(raw)
-      || !isIdentifier(raw.command)
+      || !isCommandName(raw.command)
       || !Array.isArray(raw.argv)
       || !raw.argv.every((value) => typeof value === 'string' && !value.includes('\0'))
       || typeof raw.deadlineMs !== 'number'
@@ -257,11 +259,17 @@ function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function isIdentifier(value: unknown): value is string {
+export function isCanonicalTeamIdentifier(value: unknown): value is string {
+  return typeof value === 'string'
+    && value !== '.'
+    && value !== '..'
+    && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value);
+}
+
+function isCommandName(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '' && !value.includes('\0');
 }
 
 function invalid<T>(message: string, details?: Readonly<Record<string, unknown>>): Result<T> {
   return err(runtimeError('E_MANIFEST_INVALID', message, details));
 }
-

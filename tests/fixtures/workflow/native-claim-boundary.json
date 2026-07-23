@@ -1,0 +1,6 @@
+{
+  "antigravity_saved_prompt": {"maximum_tier":"T1","fresh_discovery_and_invocation_required":true},
+  "antigravity_native_team": {"classification":"optional_unclaimed","maximum_tier":"T0"},
+  "grok_rhai": {"classification":"optional_unclaimed","bundle_authoring_strings_are_not_runtime_proof":true},
+  "omc_omx_claude": {"comparison_only":true,"runtime_dependency":false}
+}

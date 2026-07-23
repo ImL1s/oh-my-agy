@@ -1,4 +1,7 @@
-import { SessionLocator } from '../../src/continuation/state';
+import {
+  SessionLocator,
+  reconcileNativeConversationReceipt,
+} from '../../src/continuation/state';
 import { SessionAggregateStore, sessionAggregatePath } from '../../src/continuation/session-aggregate';
 import { createStateFixture } from '../helpers/state-fixture';
 
@@ -191,5 +194,48 @@ describe('generation-aware SessionLocator contract', () => {
     } finally {
       fixture.cleanup();
     }
+  });
+});
+
+describe('native receipt cardinality and imported-carrier boundary', () => {
+  const receipt = (hash: string, generation = 2) => ({
+    store_kind: 'antigravity_native_receipt' as const,
+    schema_version: 1 as const,
+    provider: 'antigravity_native' as const,
+    run_id: 'run', parent_conversation_id: 'parent', child_conversation_id: `child-${hash[0]}`,
+    task_id: 'task', generation, receipt_hash: hash.repeat(64),
+  });
+  const imported = {
+    kind: 'imported_carrier' as const,
+    carrier: {
+      source: 'typed' as const, role: 'executor', token: 'a'.repeat(32),
+      native_authority: false as const, imported_only: true as const,
+    },
+  };
+  const expected = { runId: 'run', taskId: 'task', generation: 2, parentConversationId: 'parent' };
+
+  test('zero native receipts remains unbound even with imported provenance', () => {
+    expect(reconcileNativeConversationReceipt([imported], expected)).toEqual(expect.objectContaining({
+      ok: false, error: expect.objectContaining({ code: 'E_CONVERSATION_UNBOUND' }),
+    }));
+  });
+
+  test('one exact receipt binds; stale and many receipts fail closed', () => {
+    expect(reconcileNativeConversationReceipt([
+      imported, { kind: 'antigravity_native_receipt', receipt: receipt('a') },
+    ], expected)).toEqual(expect.objectContaining({
+      ok: true, value: expect.objectContaining({ receipt_hash: 'a'.repeat(64) }),
+    }));
+    expect(reconcileNativeConversationReceipt([
+      { kind: 'antigravity_native_receipt', receipt: receipt('a', 1) },
+    ], expected)).toEqual(expect.objectContaining({
+      ok: false, error: expect.objectContaining({ code: 'E_INVOCATION_GENERATION_MISMATCH' }),
+    }));
+    expect(reconcileNativeConversationReceipt([
+      { kind: 'antigravity_native_receipt', receipt: receipt('a') },
+      { kind: 'antigravity_native_receipt', receipt: receipt('b') },
+    ], expected)).toEqual(expect.objectContaining({
+      ok: false, error: expect.objectContaining({ code: 'E_BINDING_CONFLICT' }),
+    }));
   });
 });

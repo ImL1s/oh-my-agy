@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { DISCOVERY_PROOF_TOKEN_V1 } from '../../src/native/antigravity-status';
+import { computePackageIdentity } from '../../src/setup/installed-identity';
 
 describe('Antigravity package surface', () => {
   const root = path.resolve(__dirname, '../..');
@@ -49,8 +51,34 @@ describe('Antigravity package surface', () => {
     expect(Array.isArray(claude.skills)).toBe(true);
     expect(claude.skills!.length).toBeGreaterThanOrEqual(5);
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/autopilot/']));
+    expect(claude.skills).toEqual(expect.arrayContaining(['./skills/discovery-proof/']));
+    expect(claude.skills).toEqual(expect.arrayContaining(['./skills/workflow/']));
+    const discoveryProof = fs.readFileSync(
+      path.join(root, 'skills', 'discovery-proof', 'SKILL.md'),
+      'utf8',
+    );
+    expect(discoveryProof.split(DISCOVERY_PROOF_TOKEN_V1)).toHaveLength(2);
     expect(marketplace).toBeTruthy();
   });
+
+  test('shipping identity is deterministic and includes install/update/uninstall runtime', () => {
+    const first = computePackageIdentity(root);
+    const second = computePackageIdentity(root);
+    expect(first.ok && second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+    expect(second.value.digest).toBe(first.value.digest);
+    expect(first.value.inventory.map((entry) => entry.path)).toEqual(
+      [...first.value.inventory.map((entry) => entry.path)].sort((left, right) =>
+        Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))),
+    );
+    for (const relative of [
+      'dist/src/setup/installed-identity.js',
+      'dist/src/setup/receipt.js',
+      'dist/src/setup/transaction.js',
+      'dist/src/setup/update.js',
+      'dist/src/setup/uninstall.js',
+    ]) {
+      expect(first.value.inventory.map((entry) => entry.path)).toContain(relative);
+    }
+  });
 });
-
-

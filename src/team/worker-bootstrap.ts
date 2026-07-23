@@ -6,6 +6,7 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { buildAgy115Argv } from './agy-argv';
 
 interface WorkerDescriptorV1 {
   schemaVersion: 1;
@@ -23,6 +24,10 @@ interface WorkerDescriptorV1 {
   agyCommand?: string;
   taskPrompt?: string;
   packageRoot?: string;
+  provider?: 'antigravity_native' | 'agy_headless' | 'tmux_agy';
+  capabilityMode?: 'read-only' | 'read-write';
+  boundedDuration?: string;
+  conversationId?: string;
 }
 
 function main(): void {
@@ -85,10 +90,30 @@ function main(): void {
   const prompt = desc.taskPrompt && desc.taskPrompt.trim() !== ''
     ? desc.taskPrompt
     : `Execute team task ${desc.taskId}`;
-  const child = spawn(agy, [prompt], {
+  const provider = desc.provider ?? (desc.workerMode === 'headless' ? 'agy_headless' : 'tmux_agy');
+  if (provider === 'antigravity_native') {
+    process.stderr.write('worker-bootstrap: native invoke_subagent must be launched by the documented host adapter\n');
+    try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
+    process.exit(1);
+  }
+  const launchMode = provider === 'agy_headless' ? 'headless' : 'interactive';
+  const argv = buildAgy115Argv({
+    launchMode,
+    capabilityMode: desc.capabilityMode ?? 'read-write',
+    prompt,
+    ...(desc.boundedDuration === undefined ? {} : { boundedDuration: desc.boundedDuration }),
+    ...(desc.conversationId === undefined ? {} : { conversationId: desc.conversationId }),
+  });
+  if (!argv.ok) {
+    process.stderr.write(`worker-bootstrap: invalid Antigravity argv: ${argv.error.message}\n`);
+    try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
+    process.exit(1);
+  }
+  const child = spawn(agy, [...argv.value], {
     cwd: desc.worktreePath,
     env,
     stdio: 'inherit',
+    shell: false,
   });
 
   child.on('error', (error) => {

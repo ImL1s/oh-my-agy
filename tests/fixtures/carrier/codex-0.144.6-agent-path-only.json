@@ -1,0 +1,20 @@
+{
+  "carrier": {
+    "agent_role": null,
+    "task_name": null,
+    "agent_path": "/root/omx_role_intent_abcdef0123456789abcdef0123456789"
+  },
+  "receipt": {
+    "store_kind": "imported_provenance_receipt",
+    "schema_version": 1,
+    "token": "abcdef0123456789abcdef0123456789",
+    "role": "critic",
+    "parent_id": "parent-2",
+    "cwd_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "run_id": "run-2",
+    "session_id": "session-2",
+    "child_id": "child-2",
+    "expires_at_ms": 3000,
+    "consumed": false
+  }
+}

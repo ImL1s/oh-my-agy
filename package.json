@@ -1,8 +1,12 @@
 {
   "name": "@iml1s/oh-my-agy",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "OMA — session slash skills (agy /autopilot; Claude/Grok /oh-my-agy:autopilot) + optional oma CLI ledger",
   "main": "dist/bin/oma.js",
+  "exports": {
+    ".": "./dist/bin/oma.js",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "oma": "dist/bin/oma.js",
     "omy": "dist/bin/oma.js"
@@ -10,14 +14,25 @@
   "files": [
     "dist/bin",
     "dist/src",
+    "dist/scripts/check-writer-ownership.js",
     "plugin.json",
     "hooks.json",
+    ".mcp.json",
+    ".agents/hooks.json",
+    ".agents/workflows",
     ".claude-plugin",
     "skills",
     "rules",
+    "scripts/install.sh",
+    "tests/fixtures/workflow",
     "assets",
     "README.md",
     "CHANGELOG.md",
+    "docs/RELEASE.md",
+    "docs/capabilities.md",
+    "docs/security.md",
+    "docs/workflows.md",
+    "docs/npm-publishing.md",
     "LICENSE",
     "package.json"
   ],
@@ -27,6 +42,7 @@
     "test:unit": "jest --config jest.unit.config.js --runInBand",
     "test:e2e": "jest --config jest.config.js --runInBand",
     "test:package": "jest --config jest.unit.config.js --runInBand tests/package",
+    "test:production": "node dist/bin/oma.js production verify",
     "smoke": "bash scripts/smoke.sh",
     "install:local": "bash scripts/install.sh"
   },

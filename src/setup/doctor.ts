@@ -27,6 +27,7 @@ export interface DoctorReportV1 {
   exitCode: 0 | 1 | 2;
   packageRoot: string;
   packageVersion: string;
+  mode: 'development' | 'strict' | 'release';
   checks: DoctorCheckV1[];
 }
 
@@ -37,6 +38,10 @@ export interface RunDoctorInput {
   adapter?: PluginCommandAdapter;
   /** true：plugin 未 active 視為 fail（預設）；false：warn */
   strictPlugin?: boolean;
+  mode?: 'development' | 'strict' | 'release';
+  antigravityConfigRoot?: string;
+  homeDir?: string;
+  stateRoot?: string;
 }
 
 /**
@@ -49,6 +54,11 @@ export async function runDoctor(
   const packageRoot = path.resolve(input.packageRoot);
   const packageVersion = input.packageVersion ?? readPackageJsonVersion(packageRoot);
   const agyCommand = input.agyCommand ?? 'agy';
+  const mode = input.mode ?? (input.strictPlugin === false ? 'development' : 'strict');
+  const homeDir = path.resolve(input.homeDir ?? os.homedir());
+  const configRoot = input.antigravityConfigRoot === undefined
+    ? input.homeDir === undefined ? undefined : path.join(homeDir, '.gemini', 'config')
+    : path.resolve(input.antigravityConfigRoot);
   const checks: DoctorCheckV1[] = [];
 
   checks.push(checkNodeVersion());
@@ -57,12 +67,22 @@ export async function runDoctor(
   checks.push(checkClaudePluginManifest(packageRoot));
   checks.push(checkSlashSkillSurface(packageRoot));
   checks.push(checkHooks(packageRoot));
-  checks.push(checkAgyOnPath(agyCommand));
-  checks.push(checkStateRoot());
-  checks.push(checkOmcAutopilotCollision());
+  checks.push(checkAgyOnPath(agyCommand, homeDir, configRoot));
+  checks.push(checkStateRoot(input.stateRoot, homeDir, input.homeDir !== undefined));
+  checks.push(checkOmcAutopilotCollision(homeDir));
 
-  const adapter = input.adapter ?? defaultAgyListAdapter(agyCommand);
-  const pluginCheck = await checkPluginRegistry(packageRoot, adapter, input.strictPlugin !== false);
+  const adapter = input.adapter ?? defaultAgyListAdapter(agyCommand, {
+    ...process.env,
+    HOME: homeDir,
+    ...(configRoot === undefined ? {} : {
+      ANTIGRAVITY_CONFIG_ROOT: configRoot,
+      OMA_ANTIGRAVITY_CONFIG_ROOT: configRoot,
+    }),
+  });
+  const pluginCheck = await checkPluginRegistry(packageRoot, adapter, mode, {
+    antigravityConfigRoot: configRoot,
+    homeDir,
+  });
   checks.push(pluginCheck);
 
   const hasFail = checks.some((c) => c.status === 'fail');
@@ -75,6 +95,7 @@ export async function runDoctor(
     exitCode,
     packageRoot,
     packageVersion,
+    mode,
     checks,
   });
 }
@@ -243,10 +264,10 @@ function checkSlashSkillSurface(packageRoot: string): DoctorCheckV1 {
   };
 }
 
-function checkOmcAutopilotCollision(): DoctorCheckV1 {
+function checkOmcAutopilotCollision(homeDir: string): DoctorCheckV1 {
   const omcPaths = [
-    path.join(os.homedir(), '.claude', 'skills', 'autopilot', 'SKILL.md'),
-    path.join(os.homedir(), '.claude', 'plugins', 'cache', 'omc'),
+    path.join(homeDir, '.claude', 'skills', 'autopilot', 'SKILL.md'),
+    path.join(homeDir, '.claude', 'plugins', 'cache', 'omc'),
   ];
   const found = omcPaths.filter((p) => fs.existsSync(p));
   if (found.length === 0) {
@@ -265,10 +286,20 @@ function checkOmcAutopilotCollision(): DoctorCheckV1 {
   };
 }
 
-function checkAgyOnPath(agyCommand: string): DoctorCheckV1 {
+function checkAgyOnPath(
+  agyCommand: string,
+  homeDir: string,
+  configRoot?: string,
+): DoctorCheckV1 {
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: homeDir };
+  if (configRoot !== undefined) {
+    env.ANTIGRAVITY_CONFIG_ROOT = configRoot;
+    env.OMA_ANTIGRAVITY_CONFIG_ROOT = configRoot;
+  }
   const probe = spawnSync(agyCommand, ['plugin', 'help'], {
     encoding: 'utf8',
     timeout: 15_000,
+    env,
   });
   if (probe.error) {
     // slash-first：Claude/Grok 主路徑不強制 agy；缺席改 warn（hooks/managed 才真正需要）
@@ -289,8 +320,15 @@ function checkAgyOnPath(agyCommand: string): DoctorCheckV1 {
   };
 }
 
-function checkStateRoot(): DoctorCheckV1 {
-  const state = resolveStateRoot({ create: true });
+function checkStateRoot(
+  stateRoot: string | undefined,
+  homeDir: string,
+  isolateHome: boolean,
+): DoctorCheckV1 {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (stateRoot !== undefined) env.OMA_STATE_ROOT = path.resolve(stateRoot);
+  else if (isolateHome) delete env.OMA_STATE_ROOT;
+  const state = resolveStateRoot({ create: true, env, homeDirectory: homeDir });
   if (!state.ok) {
     return {
       id: 'state_root',
@@ -310,27 +348,45 @@ function checkStateRoot(): DoctorCheckV1 {
 async function checkPluginRegistry(
   packageRoot: string,
   adapter: PluginCommandAdapter,
-  strict: boolean,
+  mode: 'development' | 'strict' | 'release',
+  identityRoots: { antigravityConfigRoot?: string; homeDir?: string },
 ): Promise<DoctorCheckV1> {
   const name = readPackagePluginName(packageRoot);
   if (!name.ok) {
     return { id: 'plugin_registry', status: 'fail', message: name.error.message };
   }
-  const active = await verifyPluginActive({ packageRoot, adapter, pluginName: name.value });
+  const active = await verifyPluginActive({
+    packageRoot,
+    adapter,
+    pluginName: name.value,
+    antigravityConfigRoot: identityRoots.antigravityConfigRoot,
+    homeDir: identityRoots.homeDir,
+  });
   if (active.ok) {
     return {
       id: 'plugin_registry',
       status: 'pass',
-      message: `plugin ${name.value} installed+enabled`,
+      message: `plugin ${name.value} exact installed identity verified`,
       detail: {
         version: active.value.version,
         installPath: active.value.installPath,
+        installedDigest: active.value.installedDigest,
+        sourceDigest: active.value.sourceDigest,
+        components: active.value.components,
       },
     };
   }
+  const hardMismatch = active.error.details !== undefined
+    && (
+      typeof active.error.details.expectedVersion === 'string'
+        && typeof active.error.details.actualVersion === 'string'
+      || typeof active.error.details.registryVersion === 'string'
+        && typeof active.error.details.installedVersion === 'string'
+    );
+  const hard = hardMismatch || mode !== 'development';
   return {
     id: 'plugin_registry',
-    status: strict ? 'fail' : 'warn',
+    status: hard ? 'fail' : 'warn',
     message: active.error.message,
     detail: active.error,
   };
@@ -347,12 +403,16 @@ function readPackageJsonVersion(packageRoot: string): string {
   }
 }
 
-function defaultAgyListAdapter(agyCommand: string): PluginCommandAdapter {
+function defaultAgyListAdapter(
+  agyCommand: string,
+  env: NodeJS.ProcessEnv = process.env,
+): PluginCommandAdapter {
   return {
     async run(argv) {
       const result = spawnSync(agyCommand, [...argv], {
         encoding: 'utf8',
         timeout: 30_000,
+        env: { ...env },
       });
       return {
         argv: [...argv],
@@ -367,6 +427,7 @@ function defaultAgyListAdapter(agyCommand: string): PluginCommandAdapter {
 export function doctorReportToLines(report: DoctorReportV1): string[] {
   const lines = [
     `oma doctor v${report.packageVersion}`,
+    `mode: ${report.mode}`,
     `packageRoot: ${report.packageRoot}`,
     `result: ${report.ok ? 'OK' : 'ISSUES'} (exit ${report.exitCode})`,
     '',

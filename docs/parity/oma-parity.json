@@ -1,0 +1,123 @@
+{
+  "store_kind": "oma_parity_inventory",
+  "schema_version": 1,
+  "repository_id": "OMA",
+  "ownership_manifest": "dual-parity-writers-v1",
+  "frozen_repository_commit": "f8eeaae6f42ebbfc1c22be504277377332c0d8fe",
+  "classifications": [
+    "faithful",
+    "native_substitute",
+    "host_owned",
+    "host_impossible",
+    "optional_unclaimed"
+  ],
+  "capability_tiers": [
+    "configured",
+    "installed",
+    "enabled",
+    "loadable",
+    "observed",
+    "healthy",
+    "verified"
+  ],
+  "mcp_operations": [
+    "run_status.read",
+    "recovery_manifest.read",
+    "wiki.search",
+    "team_status.read",
+    "mailbox.list",
+    "proposal.create"
+  ],
+  "semantic_lsp_operation_count": 0,
+  "operations": [
+    {
+      "canonical_name": "antigravity-plugin-preinvocation-stop",
+      "classification": "faithful",
+      "claim_status": "planned",
+      "maximum_tier": "verified",
+      "native_evidence_required": true
+    },
+    {
+      "canonical_name": "antigravity-native-subagent",
+      "classification": "optional_unclaimed",
+      "claim_status": "optional_unclaimed",
+      "maximum_tier": "observed",
+      "native_evidence_required": true
+    },
+    {
+      "canonical_name": "agy-headless-worker",
+      "classification": "native_substitute",
+      "claim_status": "planned",
+      "maximum_tier": "verified",
+      "native_evidence_required": true
+    },
+    {
+      "canonical_name": "tmux-agy-worker",
+      "classification": "native_substitute",
+      "claim_status": "planned",
+      "maximum_tier": "verified",
+      "native_evidence_required": true
+    },
+    {
+      "canonical_name": "antigravity-saved-workflow",
+      "classification": "faithful",
+      "claim_status": "optional_unclaimed",
+      "maximum_tier": "observed",
+      "workflow_capability_ceiling": "T1",
+      "native_evidence_required": true
+    },
+    {
+      "canonical_name": "oma-repository-workflow",
+      "classification": "native_substitute",
+      "claim_status": "contract_implemented",
+      "maximum_tier": "verified",
+      "workflow_capability_ceiling": "T4",
+      "native_evidence_required": false
+    },
+    {
+      "canonical_name": "antigravity-semantic-lsp",
+      "classification": "host_owned",
+      "claim_status": "planned_status_only",
+      "maximum_tier": "observed",
+      "native_evidence_required": true
+    },
+    {
+      "canonical_name": "private-antigravity-sidecar-memory",
+      "classification": "host_impossible",
+      "claim_status": "not_implemented",
+      "maximum_tier": "configured",
+      "native_evidence_required": false
+    },
+    {
+      "canonical_name": "inbound-reply-injection",
+      "classification": "host_impossible",
+      "claim_status": "not_implemented",
+      "maximum_tier": "configured",
+      "native_evidence_required": false
+    }
+  ],
+  "workflow_contract": {
+    "contract": "repository-workflow/v1",
+    "terminals": [
+      "ship",
+      "no_ship",
+      "blocked",
+      "cancelled",
+      "failed",
+      "interrupted",
+      "effect_unknown"
+    ],
+    "tiers": {
+      "T0": "unavailable",
+      "T1": "saved_prompt",
+      "T2": "validated_runner",
+      "T3": "durable_journal",
+      "T4": "enforced_gate",
+      "T5": "recoverable_effects"
+    },
+    "antigravity_saved_prompt_ceiling": "T1",
+    "antigravity_native_team": "optional_unclaimed",
+    "oma_runner_ceiling": "T4",
+    "ship_authority": "product_authenticated_not_host_signed"
+  }
+}

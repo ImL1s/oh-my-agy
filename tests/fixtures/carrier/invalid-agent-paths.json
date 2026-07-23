@@ -1,0 +1,8 @@
+{
+  "values": [
+    "/root/omx_role_intent_ABCDEF0123456789abcdef0123456789",
+    "/root/omx_role_intent_0123456789abcdef0123456789abcdef-suffix",
+    "/root/../root/omx_role_intent_0123456789abcdef0123456789abcdef",
+    "/foreign/omx_role_intent_0123456789abcdef0123456789abcdef"
+  ]
+}

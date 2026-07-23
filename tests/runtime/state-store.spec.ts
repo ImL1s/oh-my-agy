@@ -1,5 +1,5 @@
 import * as fs from 'fs';
-import { StateStore } from '../../src/runtime/state-store';
+import { ContractStateStore, StateStore } from '../../src/runtime/state-store';
 import { createStateFixture } from '../helpers/state-fixture';
 
 describe('StateStore<T> contract', () => {
@@ -61,5 +61,36 @@ describe('StateStore<T> contract', () => {
       fixture.cleanup();
     }
   });
-});
 
+  test('W0-native store requires store_kind, validator and exact canonical bytes', async () => {
+    const fixture = createStateFixture('oma-contract-store-');
+    const store = new ContractStateStore<{ count: number }>(fixture.root, {
+      storeKind: 'counter_store',
+      validateValue(value: unknown): asserts value is { count: number } {
+        if (typeof value !== 'object' || value === null
+          || !Number.isSafeInteger((value as { count?: unknown }).count)) throw new Error('invalid counter');
+      },
+    });
+    try {
+      const created = await store.create('counters/main', { count: 0 });
+      expect(created).toEqual(expect.objectContaining({
+        ok: true,
+        value: expect.objectContaining({ store_kind: 'counter_store', schema_version: 1, revision: 0 }),
+      }));
+      const target = fixture.path('counters/main.json');
+      expect(fs.readFileSync(target, 'utf8')).toBe(
+        '{"revision":0,"schema_version":1,"store_kind":"counter_store","value":{"count":0}}',
+      );
+      expect((await store.compareAndSwap('counters/main', 0, (value) => ({ count: value.count + 1 }))).ok)
+        .toBe(true);
+      fs.writeFileSync(target, JSON.stringify({
+        store_kind: 'foreign_store', schema_version: 1, revision: 1, value: { count: 1 },
+      }));
+      expect(store.read('counters/main')).toEqual(expect.objectContaining({
+        ok: false, error: expect.objectContaining({ code: 'E_CORRUPT_STATE' }),
+      }));
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});

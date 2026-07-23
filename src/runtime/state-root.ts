@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { sha256 } from './atomic';
+import { SAFE_KEY_PATTERN, safePathKey } from '../contracts/path-key';
 import { RuntimeError, runtimeError } from './errors';
 import { Result, err, ok } from './types';
 
@@ -26,6 +27,43 @@ export interface WorkspaceIdentityV1 {
   workspacePath: string;
   gitCommonDir: string | null;
   isGit: boolean;
+}
+
+/** Preserve already-safe W0 keys; hash every raw external identifier once. */
+export function externalStatePathKey(identifier: string): string {
+  return SAFE_KEY_PATTERN.test(identifier) ? identifier : safePathKey(identifier);
+}
+
+export function platformSessionAggregateRelativePath(
+  workspaceIdentifier: string,
+  sessionIdentifier: string,
+): string {
+  return path.join(
+    'workspaces', externalStatePathKey(workspaceIdentifier),
+    'sessions', externalStatePathKey(sessionIdentifier), 'aggregate.json',
+  );
+}
+
+export function platformWorkspaceSessionsRoot(
+  stateRoot: string,
+  workspaceIdentifier: string,
+): string {
+  const relative = path.join('workspaces', externalStatePathKey(workspaceIdentifier), 'sessions');
+  const resolved = ensureContainedPath(stateRoot, relative);
+  if (!resolved.ok) throw new Error(`${resolved.error.code}: ${resolved.error.message}`);
+  return resolved.value;
+}
+
+export function workspaceSessionProjectionPath(
+  workspacePath: string,
+  aggregateIdentifier: string,
+): string {
+  const relative = path.join(
+    '.agy', 'projections', 'sessions', `${externalStatePathKey(aggregateIdentifier)}.json`,
+  );
+  const resolved = ensureContainedPath(workspacePath, relative);
+  if (!resolved.ok) throw new Error(`${resolved.error.code}: ${resolved.error.message}`);
+  return resolved.value;
 }
 
 export function resolveStateRoot(

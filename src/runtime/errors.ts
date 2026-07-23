@@ -41,6 +41,22 @@ export const RUNTIME_ERROR_CODES = [
   'E_VALIDATOR_REJECTED',
   'E_CAUSAL_TRACE_INVALID',
   'E_TERMINAL_STATE',
+  'E_TRACKER_GENERATION_FENCED',
+  'E_TRACKER_CURSOR_CONFLICT',
+  'E_TRACKER_MISSING_CHILD',
+  'E_TRACKER_LEASE_STALLED',
+  'E_RESUME_SELECTOR_CONFLICT',
+  'E_RESUME_AMBIGUOUS',
+  'E_RESUME_NOT_FOUND',
+  'E_RESUME_SOURCE_NOT_REGULAR',
+  'E_RESUME_SOURCE_CHANGED_DURING_COPY',
+  'E_RESUME_NO_COMPLETE_TURNS',
+  'E_RESUME_CONTEXT_OVER_CAP',
+  'E_CAPABILITY_UNPROVEN',
+  'E_REDACTION_UNSAFE',
+  'E_COMPACTION_INVALID',
+  'E_PROJECTION_STALE',
+  'E_PROJECTION_HASH_MISMATCH',
 ] as const;
 
 export type RuntimeErrorCode = typeof RUNTIME_ERROR_CODES[number];
@@ -56,7 +72,15 @@ export function runtimeError(
   message: string,
   details?: Readonly<Record<string, unknown>>,
 ): RuntimeError {
-  return details === undefined ? { code, message } : { code, message, details };
+  if (details === undefined) return { code, message };
+  const redacted = redactValue(details);
+  return {
+    code,
+    message,
+    details: typeof redacted === 'object' && redacted !== null && !Array.isArray(redacted)
+      ? redacted as Readonly<Record<string, unknown>>
+      : { diagnostic: redacted },
+  };
 }
 
 export class RuntimeContractError extends Error {
@@ -70,3 +94,4 @@ export class RuntimeContractError extends Error {
     this.details = error.details;
   }
 }
+import { redactValue } from './redaction';

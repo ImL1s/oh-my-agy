@@ -27,6 +27,7 @@ describe('OMA session skill surface', () => {
       'cancel',
       'verify',
       'setup',
+      'workflow',
     ];
     const present = listWorkflowSkillNames(packageRoot);
     for (const name of required) {

@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import { AtomicFaultPoint, FaultInjector, sha256 } from '../../src/runtime/atomic';
 import {
   SessionAggregateStore,
@@ -48,6 +49,7 @@ describe('SessionAggregateV1 atomic Stop contract', () => {
         workspaceKey: 'workspace-A',
         launchNonceDigest: sha256('nonce'),
       }));
+      expect(fs.readFileSync(fixture.path('aggregate.json')).at(-1)).not.toBe(0x0a);
       const inputDigest = sha256('stop-input');
       const applied = await store.commitStop(
         identity,

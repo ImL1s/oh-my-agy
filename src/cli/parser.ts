@@ -10,10 +10,47 @@ export type ParsedCliCommand =
   | { readonly kind: 'setup'; readonly args: readonly string[] }
   | { readonly kind: 'doctor'; readonly args: readonly string[] }
   | { readonly kind: 'skill'; readonly args: readonly string[] }
+  | {
+    readonly kind: 'extended';
+    readonly command: ExtendedCliCommand;
+    readonly args: readonly string[];
+  }
   | { readonly kind: 'passthrough'; readonly args: readonly string[] }
   | { readonly kind: 'invalid'; readonly code: RuntimeErrorCode; readonly message: string };
 
+export type ExtendedCliCommand =
+  | 'workflow'
+  | 'mcp-server'
+  | 'wiki'
+  | 'hud'
+  | 'native-status'
+  | 'lsp-status'
+  | 'sidecar-status'
+  | 'notify'
+  | 'resume'
+  | 'recovery'
+  | 'update'
+  | 'uninstall'
+  | 'parity'
+  | 'production';
+
 const MANAGED_MODES = new Set<ManagedMode>(['ralph', 'ultrawork', 'search']);
+const EXTENDED_COMMANDS = new Set<ExtendedCliCommand>([
+  'workflow',
+  'mcp-server',
+  'wiki',
+  'hud',
+  'native-status',
+  'lsp-status',
+  'sidecar-status',
+  'notify',
+  'resume',
+  'recovery',
+  'update',
+  'uninstall',
+  'parity',
+  'production',
+]);
 
 export function parseCliArguments(argv: readonly string[]): ParsedCliCommand {
   if (argv.length === 1 && ['--help', '-h', 'help'].includes(argv[0])) return { kind: 'help' };
@@ -58,9 +95,16 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliCommand {
   if (first === 'setup') return { kind: 'setup', args: argv.slice(1) };
   if (first === 'doctor') return { kind: 'doctor', args: argv.slice(1) };
   if (first === 'skill') return { kind: 'skill', args: argv.slice(1) };
+  if (isExtendedCommand(first)) {
+    return { kind: 'extended', command: first, args: argv.slice(1) };
+  }
   return { kind: 'passthrough', args: [...argv] };
 }
 
 function isManagedMode(value: string | undefined): value is ManagedMode {
   return value !== undefined && MANAGED_MODES.has(value as ManagedMode);
+}
+
+function isExtendedCommand(value: string | undefined): value is ExtendedCliCommand {
+  return value !== undefined && EXTENDED_COMMANDS.has(value as ExtendedCliCommand);
 }

@@ -3,6 +3,17 @@ const fs = require('fs');
 const path = require('path');
 
 async function run() {
+  const args = process.argv.slice(2);
+  if (process.env.MOCK_AGY_PUBLIC_STATUS === 'true') {
+    if (args.length === 1 && args[0] === '--version') {
+      process.stdout.write('agy 9.9.9\n');
+      return;
+    }
+    if (args.length === 1 && args[0] === '--help') {
+      process.stdout.write('Commands:\n  agent      Run agent\n  plugins    Manage plugins\n');
+      return;
+    }
+  }
   // 讀取環境變數來控制 Mock 行為
   const exitCode = parseInt(process.env.MOCK_AGY_EXIT_CODE || '0', 10);
   const stdout = process.env.MOCK_AGY_STDOUT || '';
@@ -53,7 +64,6 @@ async function run() {
     process.stdout.write(stdout + '\n');
   } else if (process.env.MOCK_AGY_LARGE_DATA !== 'true' && process.env.MOCK_AGY_READ_STDIN !== 'true') {
     // 預設輸出回顯
-    const args = process.argv.slice(2);
     process.stdout.write(`實體 agy 執行成功，收到引數: ${args.join(' ')}\n`);
   }
 

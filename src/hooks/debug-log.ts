@@ -1,6 +1,6 @@
-import * as crypto from 'crypto';
-import * as fs from 'fs';
 import * as path from 'path';
+import { appendJsonLineDurable } from '../runtime/atomic';
+import { fingerprintSecret, redactValue } from '../runtime/redaction';
 
 /**
  * 設計概念映射：live hook 是否被 host 呼叫必須有 durable 證據；
@@ -8,21 +8,24 @@ import * as path from 'path';
  * 安全：不寫明文 OMA_LAUNCH_NONCE；payload 只記 allowlist 欄位。
  */
 export function writeHookDebug(event: string, payload: unknown): void {
-  const line = `${JSON.stringify({
+  const record = {
+    store_kind: 'hook_debug_event',
+    schema_version: 1,
     ts: new Date().toISOString(),
     event,
     pid: process.pid,
     cwd: process.cwd(),
     env: {
       OMA_SESSION_ID: process.env.OMA_SESSION_ID ?? null,
-      OMA_LAUNCH_NONCE_FP: fingerprintSecret(process.env.OMA_LAUNCH_NONCE),
+      OMA_LAUNCH_NONCE_FP: process.env.OMA_LAUNCH_NONCE
+        ? fingerprintSecret(process.env.OMA_LAUNCH_NONCE) : null,
       OMA_INVOCATION_GENERATION: process.env.OMA_INVOCATION_GENERATION ?? null,
       OMA_STATE_ROOT: process.env.OMA_STATE_ROOT ?? null,
       OMA_PACKAGE_ROOT: process.env.OMA_PACKAGE_ROOT ?? null,
       OMA_WORKSPACE_PATH: process.env.OMA_WORKSPACE_PATH ?? null,
     },
-    payload: redactPayload(payload),
-  })}\n`;
+    payload: redactValue(redactPayload(payload)),
+  };
   const targets = new Set<string>();
   if (process.env.OMA_STATE_ROOT) {
     targets.add(path.join(process.env.OMA_STATE_ROOT, 'hook-debug.jsonl'));
@@ -39,17 +42,11 @@ export function writeHookDebug(event: string, payload: unknown): void {
   }
   for (const target of targets) {
     try {
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      fs.appendFileSync(target, line, { encoding: 'utf8', mode: 0o600 });
+      appendJsonLineDurable(target, record, { lockTimeoutMs: 250 });
     } catch {
       // 不阻斷 hook
     }
   }
-}
-
-function fingerprintSecret(value: string | undefined): string | null {
-  if (value === undefined || value === '') return null;
-  return `sha256:${crypto.createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
 function redactPayload(payload: unknown): unknown {

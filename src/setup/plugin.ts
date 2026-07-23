@@ -2,6 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
+import {
+  InstalledPluginIdentityV1,
+  comparePackageIdentity,
+  computePackageIdentity,
+  resolveInstalledPluginIdentity,
+} from './installed-identity';
+import { sha256 } from '../runtime/atomic';
 
 export interface PluginCommandResult {
   argv: readonly string[];
@@ -26,14 +33,20 @@ export interface PluginActiveEvidenceV1 {
   enabled: true;
   version: string;
   installPath: string;
+  installedDigest: string;
+  sourceDigest: string;
+  components: string[];
   hookEntrypoints: PluginHookEntrypoints;
-  listStdout: string;
+  listStdoutSha256: string;
+  identity: InstalledPluginIdentityV1;
 }
 
 export interface VerifyPluginActiveInput {
   packageRoot: string;
   adapter: PluginCommandAdapter;
   pluginName?: string;
+  antigravityConfigRoot?: string;
+  homeDir?: string;
 }
 
 const PRE_INVOCATION_COMMAND =
@@ -112,43 +125,75 @@ export async function verifyPluginActive(
   if (listed.code !== 0) {
     return err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'plugin list failed', {
       code: listed.code,
-      stderr: listed.stderr,
+      stderr: redactDiagnostic(listed.stderr),
     }));
   }
 
   const parsed = parsePluginListLine(listed.stdout, pluginName);
   if (parsed === undefined) {
     return err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'plugin is not present in registry readback', {
-      stdout: listed.stdout,
+      stdoutSha256: sha256(listed.stdout),
       pluginName,
     }));
   }
   if (!parsed.enabled) {
     return err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'plugin is installed but not enabled', {
-      stdout: listed.stdout,
+      stdoutSha256: sha256(listed.stdout),
       pluginName,
     }));
   }
+
+  const source = computePackageIdentity(packageRoot);
+  if (!source.ok) return source;
+  const installed = resolveInstalledPluginIdentity({
+    pluginName,
+    antigravityConfigRoot: input.antigravityConfigRoot,
+    homeDir: input.homeDir,
+    registry: {
+      present: true,
+      enabled: parsed.enabled,
+      version: parsed.version,
+      installPath: parsed.installPath,
+      source: parsed.source,
+      components: parsed.components,
+    },
+  });
+  if (!installed.ok) return installed;
+  if (parsed.version !== undefined && parsed.version !== installed.value.version) {
+    return err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'registry version differs from installed bytes', {
+      registryVersion: parsed.version,
+      installedVersion: installed.value.version,
+      installedPath: installed.value.installPath,
+    }));
+  }
+  const compared = comparePackageIdentity(source.value, installed.value);
+  if (!compared.ok) return compared;
 
   return ok({
     schemaVersion: 1,
     pluginName,
     installed: true,
     enabled: true,
-    version: parsed.version,
-    installPath: parsed.installPath,
+    version: installed.value.version,
+    installPath: installed.value.installPath,
+    installedDigest: installed.value.digest,
+    sourceDigest: source.value.digest,
+    components: installed.value.registry.components,
     hookEntrypoints: entrypoints.value,
-    listStdout: listed.stdout,
+    listStdoutSha256: sha256(listed.stdout),
+    identity: installed.value,
   });
 }
 
-interface ParsedPluginListLine {
-  version: string;
+export interface ParsedPluginListLine {
+  version?: string;
   enabled: boolean;
-  installPath: string;
+  installPath?: string;
+  source?: string;
+  components: string[];
 }
 
-function parsePluginListLine(stdout: string, pluginName: string): ParsedPluginListLine | undefined {
+export function parsePluginListLine(stdout: string, pluginName: string): ParsedPluginListLine | undefined {
   // 真實 agy：JSON imports 清單（install 後預設 enabled；disable 才會標 disabled）。
   const jsonHit = parsePluginListJson(stdout, pluginName);
   if (jsonHit !== undefined) return jsonHit;
@@ -165,6 +210,8 @@ function parsePluginListLine(stdout: string, pluginName: string): ParsedPluginLi
       version: match[1]!,
       enabled: match[2] === 'enabled',
       installPath: match[3]!.trim(),
+      source: 'text-registry',
+      components: [],
     };
   }
   return undefined;
@@ -191,13 +238,25 @@ function parsePluginListJson(stdout: string, pluginName: string): ParsedPluginLi
     // list 無 enabled 欄位時：出現在 imports 即視為 installed+enabled（agy: already enabled）。
     const enabled = hit.enabled !== false;
     return {
-      version: typeof hit.version === 'string' && hit.version !== '' ? hit.version : 'installed',
+      version: typeof hit.version === 'string' && hit.version !== '' ? hit.version : undefined,
       enabled,
-      installPath: hit.installPath ?? hit.path ?? hit.source ?? 'antigravity-registry',
+      installPath: hit.installPath ?? hit.path,
+      source: hit.source,
+      components: Array.isArray(hit.components)
+        ? hit.components.filter((entry): entry is string => typeof entry === 'string').sort()
+        : [],
     };
   } catch {
     return undefined;
   }
+}
+
+function redactDiagnostic(value: string): string {
+  return value
+    .replace(/([?&](?:token|key|secret|auth|credential)=)[^&\s]+/gi, '$1[REDACTED]')
+    .replace(/\b(?:Bearer|Basic)\s+\S+/gi, '[REDACTED_AUTH]')
+    .replace(/\b(?:token|secret|password|api[_-]?key)\s*[:=]\s*\S+/gi, '[REDACTED_SECRET]')
+    .slice(0, 500);
 }
 
 function escapeRegExp(value: string): string {

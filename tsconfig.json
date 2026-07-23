@@ -11,5 +11,11 @@
     "rootDir": "./",
     "resolveJsonModule": true
   },
-  "include": ["bin/**/*", "src/**/*", "e2e/**/*", "tests/**/*"]
+  "include": [
+    "bin/**/*",
+    "src/**/*",
+    "scripts/check-writer-ownership.ts",
+    "e2e/**/*",
+    "tests/**/*"
+  ]
 }

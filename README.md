@@ -106,26 +106,31 @@ oma --help
 oma ralph -- "Reply with exactly one word: pong"
 ```
 
-### Install from release (GitHub Packages or Release tarball)
+### Verified release install
 
-> **npmjs.org is not the primary channel yet.**  
-> Unscoped `oh-my-agy` on npmjs is **another project**; this repo ships **`@iml1s/oh-my-agy`** via **GitHub Packages** + **Release tarball**.  
-> Full blockers and “how to enable npmjs later”: **[docs/npm-publishing.md](docs/npm-publishing.md)**.
+The reliable path today is the source checkout above. Registry publication is
+**not configured**: do not install the unrelated unscoped `oh-my-agy` package
+from npmjs.org, and do not assume `@iml1s/oh-my-agy` exists in a registry.
+
+When a GitHub Release contains both the package tarball and `SHA256SUMS`, the
+standalone installer can resolve a release or consume the exact files offline:
 
 ```bash
-# A) GitHub Packages (needs a GitHub PAT with read:packages)
-echo "@iml1s:registry=https://npm.pkg.github.com" >> ~/.npmrc
-# //npm.pkg.github.com/:_authToken=YOUR_GH_TOKEN
-npm i -g @iml1s/oh-my-agy@latest
+# Standalone bootstrap. Pin --tag for reproducible installation.
+curl -fsSLo /tmp/oma-install.sh \
+  https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh
+bash /tmp/oma-install.sh --github --tag vX.Y.Z
 
-# B) Release tarball (no registry auth)
-npm i -g https://github.com/ImL1s/oh-my-agy/releases/download/v0.2.3/iml1s-oh-my-agy-0.2.3.tgz
-
-oma setup
-oma doctor
+# Offline/manual: no network, npm install, or build step.
+bash /tmp/oma-install.sh \
+  --asset ./iml1s-oh-my-agy-X.Y.Z.tgz \
+  --checksums ./SHA256SUMS
 ```
 
-`npm i -g` only puts **`oma` / `omy` on PATH** — you still need `oma setup` (or `agy plugin install`) for hooks.
+Release bytes are checksum-verified before activation. The installer writes an
+immutable receipt used by ownership-aware `oma update` and `oma uninstall`.
+See [Release and installation](docs/RELEASE.md) and
+[registry policy](docs/npm-publishing.md).
 
 ---
 
@@ -153,6 +158,12 @@ Discover skills: host slash menu, or `oma skill list` / `oma skill show autopilo
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
 | Multi-agent first worker (v1) | `oma team start --manifest …` then `status` / `stop` |
 | Team fork resolution | `oma team resolve-fork …` |
+| Versioned repository review | `oma workflow install`, then `oma workflow run …` |
+| MCP read/proposal tools | configure [`.mcp.json`](.mcp.json) or run `oma mcp-server` |
+| State overview | `oma hud --json` (optionally `--watch`) |
+| Docs index | `oma wiki index`, then `oma wiki search <query>` |
+| Honest host capability view | `oma native-status`, `lsp-status`, `sidecar-status` |
+| Exact continuation / bounded recovery | `oma resume …` / `oma recovery …` |
 | Ordinary `agy` | `oma <agy args…>` (pass-through; strips managed binding env) |
 
 **Hook fired ≠ task complete.** First Stop may `continue`; trip after no-progress streak; do not treat fail-open `allow` as success.
@@ -188,6 +199,25 @@ oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --p
 oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
 oma team tick --team <id> [--max-parallel <n>]
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
+
+oma workflow install [--source <repository-workflow-v1.json>]
+oma workflow list|native-status
+oma workflow run <name> --input <input.json> [--version <semver>] [--generation <n>]
+oma workflow status|replay --run <run-id>
+oma mcp-server
+oma wiki index|list|search <query> [--limit <1..50>]
+oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
+oma native-status | lsp-status | sidecar-status
+oma notify status|test …
+oma resume --session <id> --conversation <id> --expected-revision <n>
+oma recovery --source <transcript.jsonl> [--include-prompt]
+oma update [--release] …
+oma uninstall --receipt <receipt.json> [--project-state <.agy>] [--purge]
+oma parity verify-composition --run-id <id> --aggregate <aggregate-handoff.json>
+oma production verify [--run-id <id>]
+oma production probe <seam> [--run-id <id>]
+oma production capture <review|ultraqa> [--run-id <id>] -- <allowlisted-cli> …
+
 oma setup
 oma doctor [--json] [--no-strict-plugin]
 oma <agy args...>   # pass-through (strips managed binding env)
@@ -234,6 +264,16 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 - Circuit breaker never runs `git reset --hard` / `git clean -fd`.
 - Managed binding requires exact env; ordinary pass-through strips binding env.
 - Launch nonce is capability material — debug logs store fingerprint only, not plaintext.
+- Workflow workers receive frozen permission envelopes; repository writes are proposal-only.
+- MCP exposes six bounded read/proposal operations, never a generic command runner.
+- Transcript recovery is explicitly partial and preserves broken-chain / unknown-record warnings.
+- Native workflow/team/LSP/private-sidecar claims remain T0 unless fresh public evidence exists.
+- `oma production verify` reads only canonical product-owned receipts and fails
+  closed without fresh, commit-bound evidence for every live seam.
+- `oma production probe <seam>` derives claims from actual product/host
+  behavior; `capture review|ultraqa` executes only an allowlisted independent
+  CLI and records bounded transcripts. Caller-supplied claim JSON and evidence
+  paths are never trusted.
 - Do not modify `AGENTS.md` without an intentional merge policy.
 - **Dangerous launch gate:** argv tokens `--madmax` / `--yolo` require TTY confirmation (`yes`) before spawning `agy`. Non-TTY fails closed unless you pass `--i-understand-dangerous-launch` (stripped before forward). Managed form `oma ralph --madmax -- task` is **rejected** (no silent drop of tokens before `--`).
 
@@ -245,26 +285,32 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 npm run build
 npm run test:unit
 npm run test:e2e
-./scripts/smoke.sh          # unit + package + npm pack hook surface
+npm run test:package
+npm run smoke
+npm run test:production    # intentionally fails without fresh live evidence
 ```
 
 | Surface | What |
 |---------|------|
 | **CI** | `.github/workflows/ci.yml` — Node 20/22 build + unit + pack smoke; e2e with mock `agy` |
-| **Release** | `.github/workflows/release.yml` — on tag `v*` (must match `package.json` / `plugin.json`): test, `npm pack`, GH Release asset, **GitHub Packages** (`@iml1s/oh-my-agy`); optional npmjs.org if `NPM_TOKEN` set |
+| **Release verification** | `.github/workflows/release.yml` — read-only build/test/package/readback; verifies the live production gate fails closed without evidence; does **not** publish |
 | **Install script** | `./scripts/install.sh` |
-| **Publishing notes** | [docs/npm-publishing.md](docs/npm-publishing.md) — why npmjs is skipped, name collision, how to enable |
+| **Release procedure** | [docs/RELEASE.md](docs/RELEASE.md) — candidate, live evidence, external publication, and readback boundaries |
+| **Registry policy** | [docs/npm-publishing.md](docs/npm-publishing.md) — no configured registry channel |
 
 Tag example:
 
 ```bash
-# after main is green; tag must match package.json / plugin.json / .claude-plugin version
-git tag -a v0.2.3 -m "v0.2.3"
-git push origin v0.2.3
+# Only after deterministic checks, live evidence, independent review, and UltraQA pass.
+# Tag must match package.json / plugin.json / .claude-plugin version.
+git tag -a v0.3.0 -m "v0.3.0"
+git push origin v0.3.0
 ```
 
 Changelog: **[CHANGELOG.md](CHANGELOG.md)**.  
-npmjs.org remains optional until `NPM_TOKEN` + `@iml1s` scope rights exist (see publishing notes).
+Tagging does not publish artifacts in this repository workflow. GitHub Release
+creation/upload and exact readback are separate, privileged operations. No npm
+registry channel is currently claimed.
 
 ---
 

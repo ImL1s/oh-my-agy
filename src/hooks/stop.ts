@@ -9,16 +9,18 @@
  * Stop 亦驗證 sessionId + launchNonceDigest（exact-env），不可只檢查 env 非空。
  */
 import * as fs from 'fs';
+import * as path from 'path';
 import { ProgressOracleV1 } from '../continuation/progress-oracle';
 import {
   SessionAggregateStore,
   sessionAggregatePath,
+  writeSessionProjection,
 } from '../continuation/session-aggregate';
 import { StopEventIdentity } from '../continuation/event-identity';
 import { StopLocatorEventV1, SessionLocator } from '../continuation/state';
 import { sha256, canonicalJson } from '../runtime/atomic';
 import { resolveStateRoot } from '../runtime/state-root';
-import { serializeHookDecision } from './common';
+import { appendHookLifecycleEvent, serializeHookDecision } from './common';
 import { writeHookDebug } from './debug-log';
 import { resolveHookWorkspace } from './workspace';
 
@@ -46,10 +48,10 @@ export async function handleStop(
   const sessionId = env.OMA_SESSION_ID?.trim();
   const launchNonce = env.OMA_LAUNCH_NONCE?.trim();
   const generationRaw = env.OMA_INVOCATION_GENERATION?.trim();
-  if (!sessionId || !launchNonce || !generationRaw) {
-    const out = serializeHookDecision({ decision: 'allow' });
-    writeHookDebug('stop.fail_open_missing_env', { out });
-    return out;
+  const managed = Boolean(sessionId && launchNonce && generationRaw);
+  if (!managed) {
+    writeHookDebug('stop.fail_open_unmanaged', { decision: 'allow' });
+    return serializeHookDecision({ decision: 'allow' });
   }
 
   const stateRoot = resolveStateRoot({ env: env as NodeJS.ProcessEnv, create: false });
@@ -71,7 +73,7 @@ export async function handleStop(
   });
 
   const generation = input.invocationGeneration
-    ?? Number.parseInt(generationRaw, 10);
+    ?? (managed ? Number.parseInt(generationRaw as string, 10) : 1);
   if (!Number.isSafeInteger(generation) || generation < 1) {
     writeHookDebug('stop.fail_open_generation', { generationRaw });
     return serializeHookDecision({ decision: 'allow' });
@@ -99,11 +101,12 @@ export async function handleStop(
   }
 
   // exact-env：sessionId + launchNonce digest 必須吻合 bound session
-  if (
-    located.session.sessionId !== sessionId
-    || located.session.launchNonceDigest !== sha256(launchNonce)
+  if (managed && (
+    located.session.bindingRoute !== 'exact_env'
+    || located.session.sessionId !== sessionId
+    || located.session.launchNonceDigest !== sha256(launchNonce as string)
     || located.session.invocationGeneration !== generation
-  ) {
+  )) {
     writeHookDebug('stop.fail_open_binding_mismatch', {
       sessionId,
       expectedSessionId: located.session.sessionId,
@@ -111,7 +114,6 @@ export async function handleStop(
     });
     return serializeHookDecision({ decision: 'allow' });
   }
-
   const store = new SessionAggregateStore(
     sessionAggregatePath(root, workspace.value.workspaceKey, located.session.sessionId),
   );
@@ -122,7 +124,7 @@ export async function handleStop(
   }
 
   const identity: StopEventIdentity = {
-    conversationId: event.conversationId || located.session.conversationId || sessionId,
+    conversationId: event.conversationId || located.session.conversationId,
     invocationGeneration: generation,
     executionNum: input.executionNum,
   };
@@ -177,6 +179,26 @@ export async function handleStop(
       return serializeHookDecision({ decision: 'allow' });
     }
     const out = serializeHookDecision(committed.value.decision);
+    try {
+      locator.refreshConversationProjection(identity.conversationId, committed.value.snapshot);
+      writeSessionProjection(workspace.value.identity.workspacePath, committed.value.snapshot);
+      appendHookLifecycleEvent(path.join(stateRoot.value.path, 'lifecycle', 'hooks.jsonl'), {
+        eventType: 'turn_completed',
+        runId: located.session.sessionId,
+        generation,
+        parentId: null,
+        nativeIdentity: identity.conversationId,
+        payload: {
+          execution_num: input.executionNum,
+          decision: committed.value.decision.decision,
+          aggregate_revision: committed.value.snapshot.revision,
+        },
+      });
+    } catch (error) {
+      writeHookDebug('stop.projection_or_journal_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
     writeHookDebug('stop.committed', {
       kind: committed.value.kind,
       decision: committed.value.decision,

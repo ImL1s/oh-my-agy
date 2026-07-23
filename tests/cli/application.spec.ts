@@ -45,6 +45,10 @@ describe('CLI application wiring', () => {
         ReturnType<CliServices['skillCommand']>,
         Parameters<CliServices['skillCommand']>
       >(async () => 0),
+      extendedCommand: jest.fn<
+        ReturnType<CliServices['extendedCommand']>,
+        Parameters<CliServices['extendedCommand']>
+      >(async () => 0),
     };
     const io = {
       stdout: (value: string) => { stdout += value; },
@@ -88,5 +92,12 @@ describe('CLI application wiring', () => {
     expect(output().stdout).toContain('autopilot resume --session <id> --conversation <id> --expected-revision <n>');
     expect(output().stdout).toContain('oma doctor');
     expect(output().stdout).toContain('team resolve-fork --team <id> --fork <id> --winner-generation <n>');
+  });
+
+  test('routes public composition commands without passing them to agy', async () => {
+    const { services, io } = fixture();
+    expect(await runCli(['workflow', 'list'], services, io)).toBe(0);
+    expect(services.extendedCommand).toHaveBeenCalledWith('workflow', ['list']);
+    expect(services.passThrough).not.toHaveBeenCalled();
   });
 });

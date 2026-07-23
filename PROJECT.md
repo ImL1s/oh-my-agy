@@ -6,6 +6,11 @@
 * **結構化 CLI (`src/cli/*`)**：argv 解析、managed invocation（exact-env binding）、Autopilot / Team / Setup wiring。
 * **Autopilot FSM (`src/autopilot/*`)**：durable `SessionAggregateV1` 狀態機，支援 start / checkpoint / review / qa / resume / cancel / doctor / reset-breaker。
 * **Team runtime (`src/team/*`)**：manifest DAG、tmux ownership、worktree、reclaim、recovery-fork、delivery、guarded publish。
+* **Repository workflow (`src/workflows/*`)**：versioned DAG、permission envelope、bounded dispatch、journal replay、skeptic/verifier 與 ship/no-ship gate。
+* **MCP / Wiki / HUD (`src/mcp/*`, `src/wiki/*`, `src/hud/*`)**：六個受限 read/proposal tools、deterministic 文件索引與 redacted 狀態投影。
+* **Native / Notify adapters (`src/native/*`, `src/notify/*`)**：只依 public evidence 回報 T0/T1；通知需 owner nonce + generation，預設停用。
+* **Resume / Recovery (`src/continuation/*`)**：exact conversation resume 與 immutable bounded partial recovery。
+* **Install lifecycle (`src/setup/*`)**：verified installer receipt、immutable update、ownership-aware uninstall、release-mode doctor。
 * **薛西弗斯延續器 (`src/enforcer.ts`)**：監聽 `.agy/todo.json`，未完成任務時倒數並注入 continuation prompt。
 * **熔斷器**：連續無進度達上限時進入 `tripped`；**絕不**執行 `git reset --hard` / `git clean -fd`。
 * **Plugin hooks**：僅 PreInvocation + Stop（`plugin.json` / `hooks.json` → `dist/src/hooks/*.js`）。
@@ -17,6 +22,8 @@
 * `src/autopilot/`：commands（argv）+ runtime（FSM）
 * `src/continuation/`：session aggregate、progress oracle、locator
 * `src/team/`：manifest、state、tmux、worktree、delivery、publisher、commands
+* `src/workflows/`：repository workflow registry / planner / runner / replay / permissions
+* `src/mcp/`、`src/wiki/`、`src/hud/`、`src/native/`、`src/notify/`：public composition surfaces
 * `src/setup/`：plugin preflight + setup transaction
 * `src/hooks/`：PreInvocation / Stop
 * `src/runtime/`：lock、atomic、state-store、process、errors
@@ -31,6 +38,10 @@ npm install
 npm run build
 npm run test:unit
 npm run test:e2e
+npm run test:package
+npm run smoke
+# live gate；沒有 fresh candidate-bound evidence 時預期 exit 1
+npm run test:production
 ```
 
 ## 四、 介面契約摘要
@@ -39,3 +50,5 @@ npm run test:e2e
 * Managed binding env：`OMA_SESSION_ID` / `OMA_LAUNCH_NONCE` / `OMA_INVOCATION_GENERATION`
 * Team：`teamCommand(argv, context)`；`resolve-fork` 語意由 `RecoveryForkResolver` 擁有
 * Setup：snapshot → validate → install → enable → list/readback；partial failure 不 uninstall
+* Workflow：`.agy/workflows/` definition；`.agy/state/workflows/<run-id>/` journal；effect unknown fail-closed
+* Production：七個 live seams 全部以 exact Git OID + 24h freshness 驗證，缺任一項即失敗
