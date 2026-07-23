@@ -108,22 +108,29 @@ oma ralph -- "Reply with exactly one word: pong"
 
 ### Verified release install
 
-The reliable path today is the source checkout above. Registry publication is
-**not configured**: do not install the unrelated unscoped `oh-my-agy` package
-from npmjs.org, and do not assume `@iml1s/oh-my-agy` exists in a registry.
+Registry publication is **not configured**: do not install the unrelated
+unscoped `oh-my-agy` package from npmjs.org, and do not assume `@iml1s/oh-my-agy`
+exists in a registry. Install from the GitHub Release, which carries both the
+package tarball and `SHA256SUMS`.
 
-When a GitHub Release contains both the package tarball and `SHA256SUMS`, the
-standalone installer can resolve a release or consume the exact files offline:
+Convenient one-liner (latest verified release is `v0.3.0`):
 
 ```bash
-# Standalone bootstrap. Pin --tag for reproducible installation.
+curl -fsSL https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh \
+  | bash -s -- --github --tag v0.3.0
+```
+
+Manual / reproducible options:
+
+```bash
+# Download the installer first, then resolve the pinned release.
 curl -fsSLo /tmp/oma-install.sh \
   https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh
-bash /tmp/oma-install.sh --github --tag vX.Y.Z
+bash /tmp/oma-install.sh --github --tag v0.3.0
 
-# Offline/manual: no network, npm install, or build step.
+# Fully offline: verify + install the exact files, no network/npm/build step.
 bash /tmp/oma-install.sh \
-  --asset ./iml1s-oh-my-agy-X.Y.Z.tgz \
+  --asset ./iml1s-oh-my-agy-0.3.0.tgz \
   --checksums ./SHA256SUMS
 ```
 
