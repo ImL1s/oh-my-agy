@@ -957,7 +957,7 @@ async function dispatchProductWorkflowTask(
   const prompt = [
     'You are one bounded OMA repository-workflow worker. Do not launch subagents or a supervisor.',
     'Follow the exact permission envelope. Never write repository files or perform external effects.',
-    'Return one JSON object only, with no markdown or commentary.',
+    'Return one JSON object only, as plain text on stdout: no markdown code fences, no commentary, no repeated keys.',
     'Schema: {"artifacts":{path:object},"verdict":{"decision":string,"findings":[{"code":string,"severity":"info"|"warning"|"error","message":string}]}}.',
     'Allowed positive decision is exact by stage kind: author/check=pass, skeptic=approve, verifier=pass, ship_gate=ship.',
     'Negative decisions are reject, no_ship, or failed and must include at least one finding.',
@@ -1176,6 +1176,62 @@ function productFailure(
   };
 }
 
+function stripSingleJsonFence(text: string): string {
+  const match = /^```(?:json)?\r?\n([\s\S]*?)\r?\n```$/u.exec(text);
+  return match === null ? text : match[1].trim();
+}
+
+/** Reject ambiguous JSON: any object with a repeated key anywhere in the text. */
+function jsonTextHasDuplicateKeys(text: string): boolean {
+  const keyStack: Array<Set<string> | null> = [];
+  let index = 0;
+  const length = text.length;
+  const skipString = (): string | null => {
+    const start = index;
+    index += 1;
+    while (index < length) {
+      const character = text[index];
+      if (character === '\\') { index += 2; continue; }
+      if (character === '"') {
+        index += 1;
+        try {
+          return JSON.parse(text.slice(start, index)) as string;
+        } catch {
+          return null;
+        }
+      }
+      index += 1;
+    }
+    return null;
+  };
+  let expectKey = false;
+  while (index < length) {
+    const character = text[index];
+    if (character === '"') {
+      const literal = skipString();
+      if (literal === null) return true;
+      if (expectKey) {
+        const keys = keyStack[keyStack.length - 1];
+        if (keys !== null && keys !== undefined) {
+          if (keys.has(literal)) return true;
+          keys.add(literal);
+        }
+        expectKey = false;
+      }
+      continue;
+    }
+    if (character === '{') { keyStack.push(new Set()); expectKey = true; }
+    else if (character === '}') { keyStack.pop(); expectKey = false; }
+    else if (character === '[') { keyStack.push(null); }
+    else if (character === ']') { keyStack.pop(); }
+    else if (character === ',') {
+      expectKey = keyStack[keyStack.length - 1] instanceof Set;
+    } else if (character === ':') { expectKey = false; }
+    index += 1;
+  }
+  return false;
+}
+
 function parseProductWorkerResult(
   stdout: string,
   expected: readonly string[],
@@ -1185,15 +1241,18 @@ function parseProductWorkerResult(
   verdict: ProductWorkflowVerdictV1;
 } | null {
   if (Buffer.byteLength(stdout, 'utf8') > 1_048_576) return null;
-  const trimmed = stdout.trim();
+  // Live workers cannot guarantee byte-canonical JSON; unambiguity is kept by
+  // rejecting duplicate keys outright, and every accepted object is
+  // re-serialized canonically before hashing or storage.
+  const trimmed = stripSingleJsonFence(stdout.trim());
+  if (jsonTextHasDuplicateKeys(trimmed)) return null;
   let value: unknown;
   try {
     value = JSON.parse(trimmed);
   } catch {
     return null;
   }
-  if (!canonicalBytesV1(value).equals(Buffer.from(trimmed, 'utf8'))
-    || !plainObject(value)
+  if (!plainObject(value)
     || !exactProductKeys(value, ['artifacts', 'verdict'])
     || !plainObject(value.artifacts)
     || !validProductVerdict(value.verdict)) return null;
