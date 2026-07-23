@@ -280,7 +280,11 @@ function defaultPublicRunner(
   const result = spawnSync(command, [...argv], {
     encoding: 'utf8',
     env: environment,
-    timeout: 2_000,
+    // 15s, not 2s: `agy --version`/`--help` are effectively instant, but
+    // fork+exec of a fresh interpreter can stall well past 2s under host memory
+    // pressure (e.g. a multi-GB sibling agy session), which would spuriously
+    // fail the plugin-discovery preconditions before the canary even runs.
+    timeout: 15_000,
     maxBuffer: 64 * 1024,
     shell: false,
     stdio: ['ignore', 'pipe', 'pipe'],

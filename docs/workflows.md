@@ -90,6 +90,33 @@ it accepts no executor callback. The generic importable runner is advisory and
 always performs zero dispatches, so the disk HMAC protects receipt integrity but
 never grants in-process execution privilege.
 
+## Live worker contract (Antigravity 1.1.5)
+
+Each workflow task is one fresh headless `agy` session. The launch grammar is
+frozen and validated (`src/team/agy-argv.ts`); the details below are load-bearing
+and only surface against a real host, not a mocked CLI:
+
+- **Model is pinned** to a current `agy models` id (`gemini-3.6-flash-high`). agy's
+  ambient default can be retired out from under it (an absent default such as
+  `gemini-2.5-pro` makes every worker fail with the generic *"Agent execution
+  terminated due to error"*, which is easily mistaken for quota exhaustion).
+- **The repository is mounted with `--add-dir`.** Headless agy binds its own
+  workspace, not the process cwd, so a worker cannot see the candidate commit
+  unless the repository root is added explicitly (and named in the prompt).
+- **The prompt is the immediate value of `--print`.** A trailing prompt makes agy
+  1.1.5 swallow the following flags into the prompt text.
+- **Worker stdout is the last balanced top-level JSON object.** Live sessions
+  narrate progress before the final answer and never emit byte-canonical JSON, so
+  the parser extracts the last object and rejects duplicate keys, then
+  re-serializes canonically before hashing.
+- **Stages budget 300s** (headless print caps at 5m) and carry a retry budget, so
+  a single transient agy error does not fail the whole DAG. The per-task proposal
+  root is cleaned before every attempt, making each dispatch idempotent against a
+  stale proposal from a crashed or repeated run.
+
+The fresh-session plugin-discovery canary is likewise pinned and tolerates agy
+1.1.5's trailing double newline, canonicalizing the stored evidence bytes.
+
 ## Antigravity saved prompt
 
 `.agents/workflows/production-safety-review.md` is intentionally a thin saved
