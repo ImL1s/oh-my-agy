@@ -943,15 +943,18 @@ async function dispatchProductWorkflowTask(
     .equals(canonicalBytesV1(workflowVerdictOutputSchema(input.stage.kind)))) {
     return productFailure(input, 'blocked', true);
   }
-  if (input.attempt > 1) {
-    try {
-      removeProductOwnedTree(productConfinedPath(
-        context.repository_root,
-        input.permission.envelope.artifact_contract.proposal_root,
-      ));
-    } catch {
-      return productFailure(input, 'blocked', true);
-    }
+  // Clear the proposal root before EVERY attempt, not just retries: the root
+  // is a deterministic path inside the repository, so a stale proposal left by
+  // a crashed or earlier run would make the exclusive-create write below fail
+  // with EEXIST on attempt 1 and spuriously fail the task. Cleaning first makes
+  // each dispatch idempotent.
+  try {
+    removeProductOwnedTree(productConfinedPath(
+      context.repository_root,
+      input.permission.envelope.artifact_contract.proposal_root,
+    ));
+  } catch {
+    return productFailure(input, 'blocked', true);
   }
   const expected = [...input.permission.envelope.artifact_contract.required_files];
   const prompt = [
