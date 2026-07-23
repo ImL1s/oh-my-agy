@@ -147,7 +147,10 @@ function installerHarness(root: string, asset: string, checksums: string): Insta
   }
   for (const command of [
     'bash', 'dirname', 'basename', 'mktemp', 'chmod', 'stat', 'cp', 'tar',
-    'mkdir', 'rm', 'shasum', 'which',
+    // gzip: GNU tar (Linux/CI) shells out to it for .tgz; macOS bsdtar handles
+    // gzip internally and never execs it. Sealing PATH without gzip made the
+    // installer tests pass on macOS but fail on CI with "gzip: Cannot exec".
+    'gzip', 'mkdir', 'rm', 'shasum', 'which',
   ]) fs.symlinkSync(executable(command), path.join(toolbox, command));
   fs.symlinkSync(process.execPath, path.join(toolbox, 'node'));
 
