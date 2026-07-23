@@ -335,6 +335,13 @@ Same family idea: **better workflow around a host agent**, not a replacement age
 
 ---
 
+## Contributing and security
+
+- [Contributing](CONTRIBUTING.md) — dev setup, local gates, ground rules.
+- [Security policy](SECURITY.md) and the [security model](docs/security.md) —
+  isolation boundaries and private vulnerability reporting.
+- [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 [MIT](./LICENSE) — see the `LICENSE` file in the repository root.
