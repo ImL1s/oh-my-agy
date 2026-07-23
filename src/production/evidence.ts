@@ -630,7 +630,9 @@ async function runPluginProbe(context: Readonly<ProductionProbeContext>): Promis
     packageDigest: active.value.sourceDigest,
     installedDigest: active.value.installedDigest,
     installedRealpath: active.value.installPath,
-    installedVersion: active.value.version,
+    // Contract (validator + fixtures): installed_version echoes the observed
+    // public CLI version; plugin bytes are bound by the digest fields.
+    installedVersion: native.version,
     registryListSha256: active.value.listStdoutSha256,
     runner: context.freshPluginDiscoveryRunner,
   });
