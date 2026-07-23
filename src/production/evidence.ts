@@ -462,7 +462,11 @@ export async function prepareWorkflowProductionProbeFromCli(
     input_digest: sha256Hex(inputBytes),
     generation: 1,
   });
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-product-workflow-'));
+  // realpath the scratch dir so the canonical-identity check (which is
+  // relative to fs.realpathSync(os.tmpdir())) holds on macOS /var symlinks.
+  const directory = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'oma-product-workflow-')),
+  );
   const journalPath = path.join(directory, 'journal.jsonl');
   const prepared: PreparedWorkflowProductionProbeV1 = Object.freeze({
     runId,
