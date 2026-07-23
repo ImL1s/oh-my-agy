@@ -173,6 +173,7 @@ export class ProcessRunner {
       let killTimer: NodeJS.Timeout | undefined;
       let deadlineTimer: NodeJS.Timeout | undefined;
       let processCountTimer: NodeJS.Timeout | undefined;
+      let forceSettleTimer: NodeJS.Timeout | undefined;
       let lifecycleError: RuntimeError | undefined;
 
       const killOwned = (signal: NodeJS.Signals) => {
@@ -183,15 +184,53 @@ export class ProcessRunner {
         } catch (_) { /* best-effort */ }
       };
 
+      const forceSettle = () => {
+        if (settled) return;
+        settled = true;
+        if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+        if (killTimer !== undefined) clearTimeout(killTimer);
+        if (forceSettleTimer !== undefined) clearTimeout(forceSettleTimer);
+        if (processCountTimer !== undefined) clearInterval(processCountTimer);
+        // A surviving grandchild (agy spawns its own workers) can hold the
+        // inherited stdout/stderr pipe open, so the child's 'close' never fires
+        // even after SIGKILL. Detach our readers so the bounded outcome is
+        // returned instead of hanging past the deadline; the process group has
+        // already been signalled.
+        try { child.stdout?.destroy(); } catch (_) { /* best-effort */ }
+        try { child.stderr?.destroy(); } catch (_) { /* best-effort */ }
+        const outcome: ProcessOutcome = {
+          code: signalExitCode('SIGKILL'),
+          signal: 'SIGKILL',
+          timedOut,
+          outputOverflow,
+          processCountOverflow,
+          stdout: stdout.toString('utf8'),
+          stderr: stderr.toString('utf8'),
+          processIdentity: observed,
+          launchReceipt: launchReceipt.value,
+        };
+        try {
+          policy.onExit?.(outcome);
+        } catch (error) {
+          lifecycleError ??= lifecycleCallbackError('onExit', error);
+        }
+        resolve(lifecycleError === undefined ? ok(outcome) : err(lifecycleError));
+      };
+
       const triggerKill = (reason: 'output' | 'processCount' | 'deadline') => {
         if (reason === 'output') outputOverflow = true;
         if (reason === 'processCount') processCountOverflow = true;
         if (reason === 'deadline') timedOut = true;
         killOwned('SIGTERM');
         if (killTimer !== undefined) clearTimeout(killTimer);
+        const graceMs = policy.terminationGraceMs ?? 500;
         killTimer = setTimeout(() => {
           killOwned('SIGKILL');
-        }, policy.terminationGraceMs ?? 500);
+        }, graceMs);
+        // Hard backstop: if 'close' has not fired a further grace period after
+        // SIGKILL (a grandchild is holding the pipe open), settle anyway.
+        if (forceSettleTimer !== undefined) clearTimeout(forceSettleTimer);
+        forceSettleTimer = setTimeout(forceSettle, graceMs * 2 + 1_000);
       };
 
       const append = (current: Buffer, chunk: Buffer): Buffer => {
@@ -210,6 +249,8 @@ export class ProcessRunner {
         if (settled) return;
         settled = true;
         if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+        if (killTimer !== undefined) clearTimeout(killTimer);
+        if (forceSettleTimer !== undefined) clearTimeout(forceSettleTimer);
         if (processCountTimer !== undefined) clearInterval(processCountTimer);
         resolve(err(runtimeError('E_RETRYABLE_BLOCKER', 'Headless process failed to spawn', {
           command,
@@ -221,6 +262,7 @@ export class ProcessRunner {
         settled = true;
         if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
         if (killTimer !== undefined) clearTimeout(killTimer);
+        if (forceSettleTimer !== undefined) clearTimeout(forceSettleTimer);
         if (processCountTimer !== undefined) clearInterval(processCountTimer);
         const outcome: ProcessOutcome = {
           code: code ?? signalExitCode(signal),

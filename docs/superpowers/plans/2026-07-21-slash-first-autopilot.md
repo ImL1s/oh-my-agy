@@ -85,7 +85,7 @@
 **Step 3: Validate**
 
 ```bash
-claude plugin validate /Users/iml1s/Documents/mine/oh-my-agy
+claude plugin validate ~/src/oh-my-agy
 ```
 
 Expected: valid (or fix reported issues).
@@ -176,7 +176,7 @@ If automation fails (permissions/TTY): print exact commands; exit 0 with `needsM
 **Step 1:** From repo:
 
 ```bash
-cd /Users/iml1s/Documents/mine/oh-my-agy
+cd ~/src/oh-my-agy
 npm run build
 # Claude
 claude plugin marketplace add .

@@ -152,7 +152,7 @@ Adjust `TeamOrchestrator` options so tests inject `workerExecutablePath` + `work
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cd /Users/iml1s/Documents/mine/oh-my-agy
+cd ~/src/oh-my-agy
 npx jest tests/team/orchestrator.spec.ts --runInBand
 ```
 

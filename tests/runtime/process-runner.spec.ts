@@ -18,6 +18,31 @@ describe('ProcessRunner contract', () => {
     }));
   });
 
+  test('force-settles at the deadline even when a grandchild holds the pipe open', async () => {
+    const runner = new ProcessRunner();
+    // The child spawns a DETACHED grandchild that inherits stdout and outlives
+    // the parent, holding the pipe open; the child then sleeps past the
+    // deadline. Without the force-settle backstop, close never fires and the
+    // call would hang. Bound the whole test well under its default timeout.
+    const script = [
+      'const { spawn } = require("child_process");',
+      'const g = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { detached: true, stdio: ["ignore", "inherit", "inherit"] });',
+      'g.unref();',
+      'setTimeout(() => {}, 60000);',
+    ].join('');
+    const started = Date.now();
+    const result = await runner.boundedHeadless(
+      process.execPath,
+      ['-e', script],
+      { deadlineMs: 1_000, terminationGraceMs: 300 },
+      { operationId: 'hang', ownerNonce: crypto.randomBytes(16).toString('hex') },
+    );
+    const elapsed = Date.now() - started;
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.timedOut).toBe(true);
+    expect(elapsed).toBeLessThan(8_000);
+  }, 15_000);
+
   test('version-pinned launch binds native generation and stores no command body', async () => {
     const binary = crypto.createHash('sha256').update(fs.readFileSync(process.execPath)).digest('hex');
     const nativeReceipt = {
