@@ -1,5 +1,7 @@
 # Release and Installation
 
+English | [简体中文](./RELEASE.zh.md) | [繁體中文](./RELEASE.zh-TW.md)
+
 ## Current channel policy
 
 OMA `0.3.0` treats a GitHub Release tarball plus `SHA256SUMS` as the only

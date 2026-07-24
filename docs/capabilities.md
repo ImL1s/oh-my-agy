@@ -1,5 +1,7 @@
 # Capability Matrix
 
+English | [简体中文](./capabilities.zh.md) | [繁體中文](./capabilities.zh-TW.md)
+
 OMA separates product-owned capabilities from observations about Antigravity.
 `T0` means unavailable or unobserved; `T1` means a public surface or saved
 projection was observed. Neither tier implies a hidden native runtime.

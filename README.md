@@ -13,6 +13,8 @@
   <img src="https://img.shields.io/badge/hooks-PreInvocation%20%2B%20Stop-blue" alt="hooks">
 </p>
 
+English | [简体中文](docs/readme/README.zh.md) | [繁體中文](docs/readme/README.zh-TW.md)
+
 **Orchestration layer for Google Antigravity CLI (`agy`).**  
 Sibling of [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode) (OMC), [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex) (OMX), [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent) (OmO), and [oh-my-grok](https://github.com/ImL1s/oh-my-grok) (OMG) — same *orchestration idea*, **Antigravity-native** runtime.
 
@@ -341,6 +343,16 @@ Same family idea: **better workflow around a host agent**, not a replacement age
 - [Security policy](SECURITY.md) and the [security model](docs/security.md) —
   isolation boundaries and private vulnerability reporting.
 - [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Languages
+
+| Language | README |
+| --- | --- |
+| English | [README.md](./README.md) |
+| 简体中文 | [docs/readme/README.zh.md](docs/readme/README.zh.md) |
+| 繁體中文 | [docs/readme/README.zh-TW.md](docs/readme/README.zh-TW.md) |
+
+Translation index and maintenance rules: [docs/readme/README.md](docs/readme/README.md).
 
 ## License
 

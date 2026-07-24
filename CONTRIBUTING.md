@@ -43,6 +43,15 @@ seams and needs a real, authenticated `agy` (see [`docs/RELEASE.md`](docs/RELEAS
   `.claude-plugin/plugin.json` in sync (CI enforces this).
 - Run the local gates above before opening a PR.
 
+## Locale / translations
+
+- Canonical product docs are English (`README.md`, `docs/*.md`).
+- Localized README copies live under [`docs/readme/`](docs/readme/README.md) (`.zh.md` / `.zh-TW.md` only — never root translations or `.zh-Hant.md`).
+- Translated topic docs use sibling `.zh.md` / `.zh-TW.md` files next to the English source under `docs/`.
+- Keep language switchers and the `## Languages` list in sync when adding a locale.
+- Prefer updating existing translations over alternate naming schemes.
+- Preserve identifiers (`oma`, `omy`, `agy`, `Autopilot`, capability names) and scope honesty in every locale.
+
 ## Reporting security issues
 
 See [`SECURITY.md`](SECURITY.md) — use a **private** advisory, not a public issue.

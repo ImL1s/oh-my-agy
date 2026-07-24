@@ -1,5 +1,7 @@
 # Repository Workflows
 
+English | [简体中文](./workflows.zh.md) | [繁體中文](./workflows.zh-TW.md)
+
 OMA workflows preserve a reviewed multi-agent process as a versioned
 `repository-workflow/v1` definition. The definition fixes the DAG, bounded
 fan-out, role, capability mode, MCP allowlist, write scope, artifact contract,

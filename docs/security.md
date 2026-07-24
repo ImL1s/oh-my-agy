@@ -1,5 +1,7 @@
 # Security Model
 
+English | [简体中文](./security.zh.md) | [繁體中文](./security.zh-TW.md)
+
 ## Authority boundaries
 
 OMA uses an external per-user state root for authoritative aggregates and keeps
