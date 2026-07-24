@@ -6,6 +6,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-07-24
+
+### Fixed
+
+- Host-launch no longer swallows ordinary `oma <agy-args…>` before the
+  enforcer (circuit breaker / Sisyphus continuation). Host-launch is bare
+  interactive plus explicit launcher flags (`--madmax` / `--yolo` / `--direct` /
+  `--tmux`); other argv stays on the passthrough + todo path so e2e/CI green.
+- Restore bare `oma help` / `oma version` passthrough to `agy` (only
+  `--help`/`-h`/`--version`/`-v` use the structured oma help surface).
+
 ## [0.4.0] — 2026-07-24
 
 Host-launch parity release (OMX/Sol).
@@ -13,14 +24,15 @@ Host-launch parity release (OMX/Sol).
 
 ### Changed
 
-- **Host launch (OMX/Sol):** bare `oma` / `oma "<prompt>"` opens interactive
-  `agy` at safe defaults; `oma --madmax` is break-glass consent that injects
+- **Host launch (OMX/Sol):** bare `oma` opens interactive `agy` at safe
+  defaults; `oma --madmax` is break-glass consent that injects
   `--dangerously-skip-permissions` (no TTY `yes`). Bare `--yolo` still requires
   TTY confirmation or `--i-understand-dangerous-launch`. Transport policy:
   `OMA_LAUNCH_POLICY` / `--direct` / `--tmux` (last flag wins; explicit `--tmux`
-  fails closed). Arguments after `--` are opaque. Legacy magic (`ralph` /
-  `ultrawork` / `search`) and structured subcommands stay on their existing paths.
-  Managed forms like `oma ralph --madmax -- …` remain rejected.
+  fails closed). Arguments after `--` are opaque. Ordinary non-launcher argv
+  stays on enforcer passthrough. Legacy magic (`ralph` / `ultrawork` / `search`)
+  and structured subcommands stay on their existing paths. Managed forms like
+  `oma ralph --madmax -- …` remain rejected.
 - Worker host pin refreshed to Antigravity CLI `1.1.6` (required help flags and
   `gemini-3.6-flash-high` model unchanged from the 1.1.5 contract).
 

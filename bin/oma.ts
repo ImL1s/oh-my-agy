@@ -65,7 +65,6 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
   // bare `help`/`version` 仍透傳給 agy（e2e 與 legacy 相容）；只有 --help/-h/--version/-v 走 oma help。
   if ([
     '--help', '-h', '--version', '-v',
-    'help', 'version',
     'autopilot', 'team', 'setup', 'doctor', 'skill',
     'workflow', 'mcp-server', 'wiki', 'hud',
     'native-status', 'lsp-status', 'sidecar-status', 'notify',
@@ -93,14 +92,10 @@ function childEnvWithPath(): NodeJS.ProcessEnv {
 async function main() {
   const args = process.argv.slice(2);
 
-  // Root host launch (OMX/Sol) before todo / structured / magic / continuation.
-  // shouldHostLaunch preserves exact + inline legacy magic and structured commands.
+  // Always validate launcher-only flags vs owned first tokens (even when not launching).
   try {
-    const { shouldHostLaunch, runHostLaunch } = await import('../src/cli/host-launch');
-    if (shouldHostLaunch(args)) {
-      const code = await runHostLaunch(args, {});
-      process.exit(code);
-    }
+    const { rejectLauncherFlagsAfterSubcommand } = await import('../src/cli/host-launch');
+    rejectLauncherFlagsAfterSubcommand(args);
   } catch (error) {
     if (error && typeof error === 'object' && (error as { name?: string }).name === 'HostLaunchUsageError') {
       process.stderr.write(`${(error as Error).message}\n`);
@@ -145,7 +140,24 @@ async function main() {
     process.exit(1);
   }
 
-  // 結構化子命令（autopilot/team/setup/help 與 explicit mode --）走新 CLI wiring。
+  // Root host launch (OMX/Sol) after circuit-breaker, before structured/magic/continuation.
+  // Ordinary argv stays on enforcer passthrough; only bare + launcher flags host-launch.
+  try {
+    const { shouldHostLaunch, runHostLaunch } = await import('../src/cli/host-launch');
+    if (shouldHostLaunch(args)) {
+      const code = await runHostLaunch(args, {});
+      await checkContinuation(todoPath, initialCompletedCount, false);
+      process.exit(code);
+    }
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { name?: string }).name === 'HostLaunchUsageError') {
+      process.stderr.write(`${(error as Error).message}\n`);
+      process.exit((error as { exitCode?: number }).exitCode ?? 2);
+    }
+    throw error;
+  }
+
+  // 結構化子命令（autopilot/team/setup 與 explicit mode --）走新 CLI wiring。
   // 自然語言魔術關鍵字路徑保留給既有 e2e 與 pass-through 行為。
   if (shouldUseStructuredCli(args)) {
     const { createDefaultServices } = await import('../src/cli/services');

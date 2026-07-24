@@ -115,7 +115,13 @@ export function rejectLauncherFlagsAfterSubcommand(argv: readonly string[]): voi
   }
 }
 
-/** True when root host-launch should run (before structured/magic/continuation). */
+/**
+ * True when root host-launch should run (before structured/magic/continuation).
+ *
+ * OMA keeps ordinary non-empty argv on the enforcer passthrough path (todo /
+ * circuit-breaker / Sisyphus continuation). Host-launch is only for bare
+ * interactive + explicit launcher flags (--madmax/--yolo/--direct/--tmux).
+ */
 export function shouldHostLaunch(argv: readonly string[]): boolean {
   rejectLauncherFlagsAfterSubcommand(argv);
   if (argv.length === 0) return true;
@@ -125,8 +131,9 @@ export function shouldHostLaunch(argv: readonly string[]): boolean {
   if (LEGACY_MAGIC_FIRST.has(first.toLowerCase())) return false;
   if (head.includes(MADMAX_FLAG)) return true;
   if (head.includes(YOLO_FLAG)) return true;
+  if (head.includes(DIRECT_FLAG) || head.includes(TMUX_FLAG)) return true;
   if (hasInlineMagicKeyword(argv)) return false;
-  return true;
+  return false;
 }
 
 export function normalizeAgyHostArgv(argv: readonly string[], options: {

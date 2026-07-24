@@ -29,14 +29,19 @@ describe('OMA host-launch contract', () => {
   test('shouldHostLaunch skips structured commands and legacy magic', () => {
     expect(shouldHostLaunch([])).toBe(true);
     expect(shouldHostLaunch(['--madmax'])).toBe(true);
+    expect(shouldHostLaunch(['--yolo'])).toBe(true);
+    expect(shouldHostLaunch(['--direct'])).toBe(true);
+    expect(shouldHostLaunch(['--tmux'])).toBe(true);
     expect(shouldHostLaunch(['doctor'])).toBe(false);
     expect(shouldHostLaunch(['help'])).toBe(false);
     expect(shouldHostLaunch(['ralph'])).toBe(false);
     expect(shouldHostLaunch(['ralph', '--', 'ship'])).toBe(false);
     expect(shouldHostLaunch(['please', 'ultrawork', 'this'])).toBe(false);
-    expect(shouldHostLaunch(['fix', 'the', 'bug'])).toBe(true);
-    // GRAM-04: suffix magic must not change routing
-    expect(shouldHostLaunch(['fix', 'bug', '--', 'ultrawork'])).toBe(true);
+    // Ordinary argv stays on enforcer passthrough (e2e / Sisyphus).
+    expect(shouldHostLaunch(['fix', 'the', 'bug'])).toBe(false);
+    expect(shouldHostLaunch(['run'])).toBe(false);
+    // GRAM-04: suffix magic must not change routing; still not host-launch.
+    expect(shouldHostLaunch(['fix', 'bug', '--', 'ultrawork'])).toBe(false);
     expect(() => shouldHostLaunch(['ralph', '--madmax'])).toThrow(HostLaunchUsageError);
     expect(() => shouldHostLaunch(['doctor', '--direct'])).toThrow(/E_LAUNCH_USAGE/);
   });
