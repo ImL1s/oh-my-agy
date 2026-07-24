@@ -519,7 +519,10 @@ async function cli(argv: readonly string[]): Promise<number> {
     return 1;
   }
   process.stdout.write(`${canonicalJson({ ok: true, ...result.value })}\n`);
-  return result.value.status === 'completed_with_warning' ? 2 : 0;
+  // Successful installs must exit 0 even when post-install doctor only warns.
+  // Status remains `completed_with_warning` in the receipt/JSON; returning 2
+  // here made `curl | bash` / install.sh look failed after a receipt was written.
+  return 0;
 }
 
 if (require.main === module) {

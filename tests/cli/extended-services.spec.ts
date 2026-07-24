@@ -15,7 +15,7 @@ describe('public composition CLI services', () => {
     fs.mkdirSync(fakeBin, { recursive: true, mode: 0o700 });
     fs.writeFileSync(path.join(fakeBin, 'agy'), `#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "1.1.5"
+  echo "1.1.6"
   exit 0
 fi
 echo "--conversation --mode --print --print-timeout --prompt-interactive --sandbox"

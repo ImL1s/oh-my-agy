@@ -181,7 +181,7 @@ esac
 set -e
 printf '%s\\n' "$*" >> "$OMA_TEST_AGY_LOG"
 root="$OMA_ANTIGRAVITY_CONFIG_ROOT/plugins/oh-my-agy"
-if [[ "\${1:-}" == '--version' ]]; then echo 1.1.5; exit 0; fi
+if [[ "\${1:-}" == '--version' ]]; then echo 1.1.6; exit 0; fi
 [[ "\${1:-}" == plugin ]] || exit 2
 case "\${2:-}" in
   help|validate|enable) echo ok ;;

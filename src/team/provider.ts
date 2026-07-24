@@ -201,7 +201,7 @@ function validateAgyProbe(
   if (!common || !canaryValid) {
     return providerBlocked(
       canaryKind === 'headless' ? 'agy_headless' : 'tmux_agy',
-      `Antigravity 1.1.5 ${canaryKind} probe/canary is missing, stale, or unhealthy`,
+      `Antigravity ${AGY_WORKER_VERSION} ${canaryKind} probe/canary is missing, stale, or unhealthy`,
     );
   }
   return ok(undefined);

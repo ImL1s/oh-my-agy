@@ -5,7 +5,7 @@ import {
   validateAgy115Help,
 } from '../../src/team/agy-argv';
 
-describe('Antigravity 1.1.5 frozen worker argv', () => {
+describe('Antigravity 1.1.6 frozen worker argv', () => {
   const prompt = 'Review the owned task safely';
 
   test.each([
@@ -40,12 +40,12 @@ describe('Antigravity 1.1.5 frozen worker argv', () => {
     }).ok).toBe(false);
   });
 
-  test('version/help table requires every documented 1.1.5 flag', () => {
+  test('version/help table requires every documented 1.1.6 flag', () => {
     const help = [
       '--add-dir', '--conversation', '--mode', '--model', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
     ].join('\n');
-    expect(validateAgy115Help('1.1.5\n', help).ok).toBe(true);
+    expect(validateAgy115Help('1.1.6\n', help).ok).toBe(true);
     expect(validateAgy115Help('1.1.4\n', help).ok).toBe(false);
-    expect(validateAgy115Help('1.1.5\n', help.replace('--sandbox', '')).ok).toBe(false);
+    expect(validateAgy115Help('1.1.6\n', help.replace('--sandbox', '')).ok).toBe(false);
   });
 });

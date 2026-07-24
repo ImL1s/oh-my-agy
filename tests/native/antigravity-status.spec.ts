@@ -14,7 +14,7 @@ describe('public Antigravity status adapter', () => {
     const status = inspectAntigravityPublicStatus({
       run: (_command, argv) => {
         calls.push([...argv]);
-        if (argv[0] === '--version') return { status: 0, stdout: 'agy 1.1.5\n', stderr: '' };
+        if (argv[0] === '--version') return { status: 0, stdout: 'agy 1.1.6\n', stderr: '' };
         return {
           status: 0,
           stdout: 'Commands:\n  agent      Run agent\n  plugins    Manage plugins\n',
@@ -24,7 +24,7 @@ describe('public Antigravity status adapter', () => {
     });
     expect(calls).toEqual([['--version'], ['--help']]);
     expect(status).toEqual(expect.objectContaining({
-      status: 'public_cli_observed', version: '1.1.5', public_subcommands: ['agent', 'plugins'],
+      status: 'public_cli_observed', version: '1.1.6', public_subcommands: ['agent', 'plugins'],
     }));
     expect(status.capabilities.find((entry) => entry.capability === 'native_status'))
       .toEqual({ capability: 'native_status', status: 'unobserved', evidence_tier: 'T0' });
@@ -55,7 +55,7 @@ describe('public Antigravity status adapter', () => {
   test('accepts Go flag help emitted on stderr at exit zero', () => {
     const status = inspectAntigravityPublicStatus({
       run: (_command, argv) => argv[0] === '--version'
-        ? { status: 0, stdout: '1.1.5\n', stderr: '' }
+        ? { status: 0, stdout: '1.1.6\n', stderr: '' }
         : { status: 0, stdout: '', stderr: 'Available subcommands:\n  plugin          Manage plugins\n' },
     });
     expect(status.public_subcommands).toEqual(['plugin']);
@@ -105,16 +105,16 @@ describe('public Antigravity status adapter', () => {
     expect(fs.existsSync(request!.cwd)).toBe(false);
   });
 
-  test('observes agy 1.1.5 trailing double-newline and canonicalizes stored output', async () => {
+  test('observes agy 1.1.6 trailing double-newline and canonicalizes stored output', async () => {
     const result = await inspectFreshPluginDiscovery({
       executableRealpath: '/opt/agy',
-      version: '1.1.5',
+      version: '1.1.6',
       environment: {},
       candidateOid: 'a'.repeat(40),
       packageDigest: 'b'.repeat(64),
       installedDigest: 'b'.repeat(64),
       installedRealpath: '/opt/oh-my-agy',
-      installedVersion: '1.1.5',
+      installedVersion: '1.1.6',
       registryListSha256: 'c'.repeat(64),
       runner: async () => ({
         pid: 4243,
@@ -181,13 +181,13 @@ describe('public Antigravity status adapter', () => {
 function freshDiscoveryInput() {
   return {
     executableRealpath: '/usr/local/bin/agy',
-    version: '1.1.5',
+    version: '1.1.6',
     environment: { PATH: process.env.PATH },
     candidateOid: 'a'.repeat(40),
     packageDigest: 'c'.repeat(64),
     installedDigest: 'c'.repeat(64),
     installedRealpath: '/tmp/installed-oh-my-agy',
-    installedVersion: '1.1.5',
+    installedVersion: '1.1.6',
     registryListSha256: 'd'.repeat(64),
   };
 }

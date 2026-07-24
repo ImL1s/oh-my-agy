@@ -19,7 +19,7 @@ function agy(): AgyCliProbeV1 {
     installed: true,
     executableRealpath: '/opt/agy',
     executableSha256: digest('binary'),
-    version: '1.1.5',
+    version: '1.1.6',
     versionOutputHash: digest('version'),
     helpOutputHash: digest('help'),
     requiredFlags: [
@@ -54,7 +54,7 @@ function native(): AntigravityNativeEvidenceV1 {
     documentedPublic: true,
     invokeSubagentObserved: true,
     healthy: true,
-    hostVersion: '1.1.5',
+    hostVersion: '1.1.6',
     documentationHash: digest('docs'),
     observedAtMs: now,
     conversationReceipt: {
@@ -81,13 +81,13 @@ function tmux(): TmuxAgyEvidenceV1 {
 }
 
 describe('fail-closed worker provider order', () => {
-  test('version/help probe accepts the agy 1.1.5 help stream on stderr without inventing canaries', () => {
+  test('version/help probe accepts the agy 1.1.6 help stream on stderr without inventing canaries', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-agy-probe-'));
     try {
       const executable = path.join(root, 'agy');
       fs.writeFileSync(executable, [
         '#!/usr/bin/env node',
-        "if (process.argv[2] === '--version') process.stdout.write('1.1.5\\n');",
+        "if (process.argv[2] === '--version') process.stdout.write('1.1.6\\n');",
         "else if (process.argv[2] === '--help') process.stderr.write('--add-dir --conversation --mode --model --print --print-timeout --prompt-interactive --sandbox\\n');",
         'else process.exit(2);',
         '',
@@ -97,7 +97,7 @@ describe('fail-closed worker provider order', () => {
       expect(probed.ok).toBe(true);
       if (!probed.ok) return;
       expect(probed.value).toMatchObject({
-        version: '1.1.5',
+        version: '1.1.6',
         observedAtMs: now,
       });
       expect(probed.value.headlessCanary).toBeUndefined();

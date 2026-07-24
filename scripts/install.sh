@@ -353,11 +353,14 @@ PRIMARY_JSON="$(node "$PACKAGE_ROOT/dist/src/setup/update.js" "${UPDATE_ARGS[@]}
 PRIMARY_STATUS=$?
 set -e
 [[ -z "$PRIMARY_JSON" ]] || printf '%s\n' "$PRIMARY_JSON"
-case "$PRIMARY_STATUS" in
-  0) ;;
-  2) printf 'warn: primary install completed with development warnings\n' >&2 ;;
-  *) die 'primary install failed; auxiliary success cannot mask it' ;;
-esac
+[[ "$PRIMARY_STATUS" -eq 0 ]] \
+  || die 'primary install failed; auxiliary success cannot mask it'
+PRIMARY_WARNING=0
+if [[ "$PRIMARY_JSON" == *'"status":"completed_with_warning"'* \
+  || "$PRIMARY_JSON" == *'"status": "completed_with_warning"'* ]]; then
+  PRIMARY_WARNING=1
+  printf 'warn: primary install completed with development warnings\n' >&2
+fi
 
 AUX_STATUS=0
 AUX_WARNING=0
@@ -379,9 +382,11 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
   printf "warn: add to PATH: export PATH=\"%s:\$PATH\"\n" "$BIN_DIR" >&2
   AUX_WARNING=1
 fi
-if [[ "$PRIMARY_STATUS" -eq 2 || "$AUX_WARNING" -eq 1 ]]; then
+if [[ "$PRIMARY_WARNING" -eq 1 || "$AUX_WARNING" -eq 1 ]]; then
   printf '==> completed with warnings; receipt preserves the exact primary result\n' >&2
-  exit 2
+  # Soft warnings must not fail a successful install (receipt already written).
+  # `oma doctor` still exits 2 when run on its own.
+  exit 0
 fi
 
 echo '==> installed and exactly verified'

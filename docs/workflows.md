@@ -77,7 +77,7 @@ review again; deletion or tampering fails closed.
 entrypoint. It resolves the literal `agy` executable from the active `PATH`,
 requires its realpath to be the canonical owner-installed
 `~/.local/bin/agy`, hashes the executable bytes through one stable file
-descriptor, validates the supported 1.1.5 public contract and the exact
+descriptor, validates the supported 1.1.6 public contract and the exact
 installed OMA plugin identity, derives the candidate from the current
 repository, and writes only to a repository-external platform state root. It
 rejects `OMA_STATE_ROOT`, plugin-config root overrides, and
@@ -92,7 +92,7 @@ it accepts no executor callback. The generic importable runner is advisory and
 always performs zero dispatches, so the disk HMAC protects receipt integrity but
 never grants in-process execution privilege.
 
-## Live worker contract (Antigravity 1.1.5)
+## Live worker contract (Antigravity 1.1.6)
 
 Each workflow task is one fresh headless `agy` session. The launch grammar is
 frozen and validated (`src/team/agy-argv.ts`); the details below are load-bearing
@@ -106,7 +106,7 @@ and only surface against a real host, not a mocked CLI:
   workspace, not the process cwd, so a worker cannot see the candidate commit
   unless the repository root is added explicitly (and named in the prompt).
 - **The prompt is the immediate value of `--print`.** A trailing prompt makes agy
-  1.1.5 swallow the following flags into the prompt text.
+  1.1.6 swallow the following flags into the prompt text.
 - **Worker stdout is the last balanced top-level JSON object.** Live sessions
   narrate progress before the final answer and never emit byte-canonical JSON, so
   the parser extracts the last object and rejects duplicate keys, then
@@ -117,7 +117,7 @@ and only surface against a real host, not a mocked CLI:
   stale proposal from a crashed or repeated run.
 
 The fresh-session plugin-discovery canary is likewise pinned and tolerates agy
-1.1.5's trailing double newline, canonicalizing the stored evidence bytes.
+1.1.6's trailing double newline, canonicalizing the stored evidence bytes.
 
 ## Antigravity saved prompt
 

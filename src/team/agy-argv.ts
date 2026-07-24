@@ -1,7 +1,7 @@
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 
-export const AGY_WORKER_VERSION = '1.1.5' as const;
+export const AGY_WORKER_VERSION = '1.1.6' as const;
 export const AGY_DEFAULT_HEADLESS_TIMEOUT = '5m0s' as const;
 export const AGY_MAX_HEADLESS_TIMEOUT_MS = 300_000;
 // Pin an explicit model: relying on agy's ambient default is fragile — a stale
@@ -37,9 +37,9 @@ export interface AgyLaunchArgvInputV1 {
 }
 
 /**
- * Antigravity CLI 1.1.5 launch grammar frozen by OMA-W3.  The prompt is
- * returned as exactly one final argv element; callers must use spawn(), never
- * a shell command string.
+ * Antigravity CLI launch grammar frozen by OMA-W3 (pinned host
+ * `AGY_WORKER_VERSION`). The prompt is returned as exactly one final argv
+ * element; callers must use spawn(), never a shell command string.
  */
 export function buildAgy115Argv(
   input: Readonly<AgyLaunchArgvInputV1>,
@@ -76,7 +76,7 @@ export function buildAgy115Argv(
         'Headless print timeout must be a positive Go duration no greater than 5m0s',
       ));
     }
-    // Antigravity 1.1.5 parses --print/--prompt-interactive as taking the
+    // Antigravity parses --print/--prompt-interactive as taking the
     // prompt as their immediate value; trailing prompts swallow later flags
     // into the prompt text (verified against the live CLI).
     const argv = [
@@ -105,7 +105,7 @@ export function buildAgy115Argv(
 
 export function validateAgy115Help(versionOutput: string, helpOutput: string): Result<void, RuntimeError> {
   if (versionOutput.trim() !== AGY_WORKER_VERSION) {
-    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Antigravity CLI version is not the frozen 1.1.5 worker version', {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', `Antigravity CLI version is not the frozen ${AGY_WORKER_VERSION} worker version`, {
       expected: AGY_WORKER_VERSION,
       actual: versionOutput.trim(),
     }));

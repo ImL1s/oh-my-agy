@@ -1956,7 +1956,9 @@ async function runUpdateCommand(
   const result = await updater.run();
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   context.stdout(`${JSON.stringify({ ok: true, ...result.value }, null, 2)}\n`);
-  return result.value.doctorExitCode === 0 ? 0 : 2;
+  // Soft doctor warnings (doctorExitCode 2) are advisory after a written receipt.
+  // Hard doctor failures never reach this path (updater rolls back / returns err).
+  return 0;
 }
 
 async function runUninstallCommand(

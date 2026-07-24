@@ -4,6 +4,19 @@ All notable changes to **oh-my-agy (OMA)** are documented here.
 
 Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions follow semver.
 
+## [Unreleased]
+
+### Changed
+
+- Worker host pin refreshed to Antigravity CLI `1.1.6` (required help flags and
+  `gemini-3.6-flash-high` model unchanged from the 1.1.5 contract).
+
+### Fixed
+
+- Install / bootstrap no longer exit `2` when post-install doctor only soft-warns
+  (for example slash collision with OMC). A written receipt is treated as success;
+  `oma doctor` still exits `2` for warnings when run on its own.
+
 ## [0.3.0] — 2026-07-23
 
 ### Added
