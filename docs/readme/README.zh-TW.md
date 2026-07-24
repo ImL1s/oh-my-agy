@@ -275,7 +275,7 @@ Live host Antigravity 1.1.4 對正常 idle stop 常傳送 `terminationReason: NO
 - `oma production verify` 僅讀取規範 product-owned receipt，且每個 live seam 缺少新鮮、commit-bound 證據時會 fail closed。
 - `oma production probe <seam>` 從實際 product/host 行為衍生 claim；`capture review|ultraqa` 僅執行 allowlisted independent CLI 並記錄有界 transcript。不信任呼叫方提供的 claim JSON 與 evidence path。
 - 不要在沒有 intentional merge policy 的情況下修改 `AGENTS.md`。
-- **危險 launch gate：** argv token `--madmax` / `--yolo` 在 spawn `agy` 前需要 TTY 確認（`yes`）。非 TTY fail closed，除非傳入 `--i-understand-dangerous-launch`（轉發前剝除）。Managed 形式 `oma ralph --madmax -- task` **被拒絕**（`--` 前不靜默丟棄 token）。
+- **危險 launch gate：** 頂層 `--madmax` 視為明確同意（不必 TTY `yes`）；會剝除 wrapper token 並注入 `--dangerously-skip-permissions`。單獨 `--yolo` 仍需 TTY 確認或 `--i-understand-dangerous-launch`。Managed 形式 `oma ralph --madmax -- task` **被拒絕**（`--` 前不靜默丟棄 token）。
 
 ---
 
