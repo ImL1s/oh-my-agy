@@ -15,6 +15,7 @@ import {
   RecoveryTaskAggregateV1,
 } from './recovery-fork';
 import { TeamOrchestrator } from './orchestrator';
+import { isCanonicalTeamIdentifier } from './manifest';
 import { TeamStateStore } from './state';
 import { RuntimeContext, TeamActorIdentityV1 } from './types';
 import { resolveGitWorktreeIdentity } from './worktree';
@@ -602,6 +603,19 @@ async function runTeamApiCommand(
       ok: false,
       operation: isTeamApiOperationP0(parsed.operation) ? parsed.operation : 'unknown',
       error: { code: 'E_TEAM_API_INVALID_INPUT', message: 'team_name (or team_id) is required in --input' },
+    });
+    stdout(`${JSON.stringify(envelope)}\n`);
+    return 2;
+  }
+  if (!isCanonicalTeamIdentifier(teamId)) {
+    const envelope = wrapTeamApiCliEnvelope({
+      ok: false,
+      operation: isTeamApiOperationP0(parsed.operation) ? parsed.operation : 'unknown',
+      error: {
+        code: 'E_TEAM_API_INVALID_INPUT',
+        message: 'team_name must be a canonical team identifier (no path separators or traversal)',
+        details: { team_name: teamId },
+      },
     });
     stdout(`${JSON.stringify(envelope)}\n`);
     return 2;

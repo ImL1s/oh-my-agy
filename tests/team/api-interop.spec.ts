@@ -131,6 +131,7 @@ describe('team api-interop P0', () => {
         body: 'ordered-1',
         message_id: 'ord-1',
         generation: 1,
+        claim_token: 'claim-1',
         expected_revision: bound.value.revision,
       }, { store, nowMs: 1_100 });
       expect(sent.ok).toBe(true);
@@ -198,6 +199,7 @@ describe('team api-interop P0', () => {
         body: 'secret-ordered',
         message_id: 'ord-secret',
         generation: 1,
+        claim_token: 'claim-1',
         expected_revision: bound.value.revision,
       }, { store, nowMs: 1_100 });
       expect(sent.ok).toBe(true);
@@ -442,6 +444,140 @@ describe('team api-interop P0', () => {
         operation: 'get-summary',
       }));
       expect(envelope.data).toBeDefined();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('path-traversal message_id rejected on send-message', async () => {
+    const { fixture, store } = await fixtureStore();
+    try {
+      const sent = await executeTeamApiOperation('send-message', {
+        from_worker: 'leader',
+        to_worker: 'worker-a',
+        body: 'escape attempt',
+        message_id: '../outside',
+        expected_revision: 0,
+      }, { store, nowMs: 3_000 });
+      expect(sent.ok).toBe(false);
+      if (!sent.ok) {
+        expect(sent.error.code).toBe('E_TEAM_API_INVALID_INPUT');
+        expect(sent.error.details).toEqual(expect.objectContaining({ message_id: '../outside' }));
+      }
+      const bodiesDir = path.join(store.teamDirectory(), 'mailbox-bodies');
+      expect(fs.existsSync(path.join(bodiesDir, '..', 'outside.txt'))).toBe(false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('send-message rejects generation without claim_token', async () => {
+    const { fixture, store } = await fixtureStore();
+    try {
+      const claimed = await store.claimTask('first', 'worker-1', 0, 1_000, 5_000, 'claim-1');
+      if (!claimed.ok) throw new Error(claimed.error.message);
+
+      const sent = await executeTeamApiOperation('send-message', {
+        from_worker: 'leader',
+        to_worker: 'first',
+        body: 'no claim',
+        message_id: 'ord-noclaim',
+        generation: 1,
+        expected_revision: claimed.value.revision,
+      }, { store, nowMs: 3_100 });
+      expect(sent.ok).toBe(false);
+      if (!sent.ok) expect(sent.error.code).toBe('E_TEAM_API_INVALID_INPUT');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('second ordered mark-delivered with claim still works after cursor advance', async () => {
+    const { fixture, store } = await fixtureStore();
+    try {
+      const claimed = await store.claimTask('first', 'worker-1', 0, 1_000, 5_000, 'claim-1');
+      if (!claimed.ok) throw new Error(claimed.error.message);
+      const binding: WorkerAuthorityBindingV1 = {
+        schemaVersion: 1,
+        taskId: 'first',
+        claimTokenDigest: sha256('claim-1'),
+        generation: 1,
+        provider: 'agy_headless',
+        providerReceiptHash: sha256('provider-1'),
+        process: { pid: 42, startMarker: 'start-1' },
+        state: 'claimed',
+        transitionSequence: 0,
+        boundAtMs: 1_000,
+      };
+      const bound = await store.bindWorkerAuthority(claimed.value.revision, 'claim-1', binding);
+      if (!bound.ok) throw new Error(bound.error.message);
+
+      let revision = bound.value.revision;
+      for (const [index, messageId] of ['ord-a', 'ord-b'].entries()) {
+        const sent = await executeTeamApiOperation('send-message', {
+          from_worker: 'leader',
+          to_worker: 'first',
+          body: `ordered-${index + 1}`,
+          message_id: messageId,
+          generation: 1,
+          claim_token: 'claim-1',
+          expected_revision: revision,
+        }, { store, nowMs: 1_100 + index * 100 });
+        expect(sent.ok).toBe(true);
+        if (!sent.ok) return;
+        revision = sent.data.revision as number;
+
+        const marked = await executeTeamApiOperation('mailbox-mark-delivered', {
+          worker: 'first',
+          message_id: messageId,
+          claim_token: 'claim-1',
+          generation: 1,
+          expected_revision: revision,
+        }, { store, nowMs: 1_300 + index * 100 });
+        expect(marked.ok).toBe(true);
+        if (!marked.ok) return;
+        revision = marked.data.revision as number;
+      }
+
+      const snap = store.read();
+      expect(snap.ok).toBe(true);
+      if (snap.ok) {
+        expect(snap.value.value.mailboxCursors?.first?.cursor).toBe(2);
+        expect(snap.value.value.mailbox['ord-a']?.deliveredAtMs).toBeDefined();
+        expect(snap.value.value.mailbox['ord-b']?.deliveredAtMs).toBeDefined();
+      }
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('teamCommand rejects malformed team_name with path traversal', async () => {
+    const fixture = GitFixture.create();
+    try {
+      let stdout = '';
+      let stderr = '';
+      const context: RuntimeContext = {
+        stateRoot: fixture.stateRoot,
+        workspaceRoot: fixture.repo,
+        repoKey: 'repo-key',
+        workspaceKey: 'workspace-key',
+        tokenFactory: () => 'cli-token',
+      };
+      const code = await teamCommand([
+        'api', 'get-summary',
+        '--input', JSON.stringify({ team_name: '../escape' }),
+        '--json',
+      ], {
+        context,
+        stdout: (value) => { stdout += value; },
+        stderr: (value) => { stderr += value; },
+      });
+      expect(stderr).toBe('');
+      expect(code).toBe(2);
+      const payload = JSON.parse(stdout);
+      expect(payload.ok).toBe(false);
+      expect(payload.error.code).toBe('E_TEAM_API_INVALID_INPUT');
+      expect(payload.error.details).toEqual(expect.objectContaining({ team_name: '../escape' }));
     } finally {
       fixture.cleanup();
     }

@@ -202,8 +202,36 @@ function serializeMessage(message: MailboxMessageV1, body?: string): Record<stri
   };
 }
 
+function mailboxBodiesRoot(store: TeamStateStore): string {
+  return path.join(store.teamDirectory(), 'mailbox-bodies');
+}
+
+function isSafeMessageId(messageId: string): boolean {
+  return isCanonicalTeamIdentifier(messageId);
+}
+
+function validateMessageIdOrFail(
+  operation: TeamApiOperationP0,
+  messageId: string,
+): TeamApiEnvelope | undefined {
+  if (!isSafeMessageId(messageId)) {
+    return fail(
+      operation,
+      'E_TEAM_API_INVALID_INPUT',
+      'message_id must be a canonical identifier (no path separators or traversal)',
+      { message_id: messageId },
+    );
+  }
+  return undefined;
+}
+
 function bodyPath(store: TeamStateStore, messageId: string): string {
-  return path.join(store.teamDirectory(), 'mailbox-bodies', `${messageId}.txt`);
+  const bodiesRoot = path.resolve(mailboxBodiesRoot(store));
+  const target = path.resolve(bodiesRoot, `${messageId}.txt`);
+  if (target !== bodiesRoot && !target.startsWith(`${bodiesRoot}${path.sep}`)) {
+    throw new Error('message_id path escapes mailbox-bodies directory');
+  }
+  return target;
 }
 
 function writeBody(store: TeamStateStore, messageId: string, body: string): void {
@@ -213,6 +241,7 @@ function writeBody(store: TeamStateStore, messageId: string, body: string): void
 }
 
 function readBody(store: TeamStateStore, messageId: string): string | undefined {
+  if (!isSafeMessageId(messageId)) return undefined;
   const target = bodyPath(store, messageId);
   try {
     if (!fs.existsSync(target)) return undefined;
@@ -228,6 +257,8 @@ function writeBodyOrFail(
   messageId: string,
   body: string,
 ): TeamApiEnvelope | undefined {
+  const invalid = validateMessageIdOrFail(operation, messageId);
+  if (invalid !== undefined) return invalid;
   try {
     writeBody(store, messageId, body);
     return undefined;
@@ -274,17 +305,43 @@ async function opSendMessage(
   if (typeof revision !== 'number') return revision;
 
   const messageId = requireString(args, 'message_id') ?? `msg-${sha256(`${fromWorker}:${toWorker}:${body}:${nowMs(context)}`).slice(0, 16)}`;
+  const messageIdError = validateMessageIdOrFail(operation, messageId);
+  if (messageIdError !== undefined) return messageIdError;
+
   const createdAtMs = nowMs(context);
   const bodyDigest = sha256(body);
   const generation = args.generation;
+  const claimToken = requireString(args, 'claim_token');
+  const hasClaim = claimToken !== null;
+  const hasGeneration = generation !== undefined;
 
-  const bodyWriteError = writeBodyOrFail(operation, context.store, messageId, body);
-  if (bodyWriteError !== undefined) return bodyWriteError;
+  // Partial fencing is fail-closed — no silent unordered downgrade.
+  if (hasClaim !== hasGeneration) {
+    return fail(
+      operation,
+      'E_TEAM_API_INVALID_INPUT',
+      'ordered send-message requires both claim_token and generation (or neither for unordered)',
+    );
+  }
 
-  if (generation !== undefined) {
+  if (hasClaim && hasGeneration) {
     if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 1) {
       return fail(operation, 'E_TEAM_API_INVALID_INPUT', 'generation must be a positive integer when provided');
     }
+    const snapshot = context.store.read();
+    if (!snapshot.ok) {
+      return fail(operation, snapshot.error.code, snapshot.error.message, snapshot.error.details as Record<string, unknown> | undefined);
+    }
+    const task = snapshot.value.value.tasks[toWorker];
+    if (task?.claim?.token !== claimToken || task.claim.generation !== generation) {
+      return fail(operation, 'E_REVISION_CONFLICT', 'Task claim token or generation is stale', {
+        task_id: toWorker,
+      });
+    }
+
+    const bodyWriteError = writeBodyOrFail(operation, context.store, messageId, body);
+    if (bodyWriteError !== undefined) return bodyWriteError;
+
     const result = await context.store.sendOrderedMailbox(revision, toWorker, generation, {
       schemaVersion: 1,
       id: messageId,
@@ -305,6 +362,9 @@ async function opSendMessage(
       },
     };
   }
+
+  const bodyWriteError = writeBodyOrFail(operation, context.store, messageId, body);
+  if (bodyWriteError !== undefined) return bodyWriteError;
 
   const message: MailboxMessageV1 = {
     schemaVersion: 1,
@@ -388,8 +448,12 @@ function opMailboxList(
 
   // Unfenced path: unordered messages only (no sequence). Ordered traffic
   // must use claim_token + generation — never leak ordered plaintext bodies.
-  const all = context.store.mailboxFor(worker)
-    .filter((message) => message.sequence === undefined);
+  const snapshot = context.store.read();
+  if (!snapshot.ok) {
+    return fail(operation, snapshot.error.code, snapshot.error.message, snapshot.error.details as Record<string, unknown> | undefined);
+  }
+  const all = Object.values(snapshot.value.value.mailbox)
+    .filter((message) => message.recipient === worker && message.sequence === undefined);
   const filtered = includeDelivered ? all : all.filter((message) => message.deliveredAtMs === undefined);
   const sorted = filtered.slice().sort((left, right) => left.createdAtMs - right.createdAtMs);
   const messagesOrFail = serializeVerifiedMessages(operation, context.store, sorted);
@@ -447,11 +511,18 @@ async function opMailboxMarkDelivered(
 
   // Ordered: prove claim first (no delivered side-effect on bad token), then mark+ack.
   if (isOrdered && hasClaim && typeof generation === 'number') {
+    const mailboxCursor = (snapshot.value.value.mailboxCursors ?? {})[worker];
+    const proveAfterCursor = typeof args.after_cursor === 'number'
+      ? args.after_cursor
+      : (mailboxCursor?.generation === generation ? mailboxCursor.cursor : 0);
+    if (typeof proveAfterCursor !== 'number' || !Number.isSafeInteger(proveAfterCursor) || proveAfterCursor < 0) {
+      return fail(operation, 'E_TEAM_API_INVALID_INPUT', 'after_cursor must be a non-negative integer');
+    }
     const prove = context.store.listOrderedMailbox({
       taskId: worker,
       claimToken: claimToken!,
       generation,
-      afterCursor: 0,
+      afterCursor: proveAfterCursor,
     });
     if (!prove.ok) {
       return fail(operation, prove.error.code, prove.error.message, prove.error.details as Record<string, unknown> | undefined);
