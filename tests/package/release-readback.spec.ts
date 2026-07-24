@@ -5,12 +5,12 @@ import * as path from 'path';
 
 const root = path.resolve(__dirname, '../..');
 
-describe('0.3.0 release readback', () => {
+describe('0.4.0 release readback', () => {
   test('all public manifests and the workflow skill inventory agree', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const plugin = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
     const slash = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
-    expect(pkg.version).toBe('0.3.0');
+    expect(pkg.version).toBe('0.4.0');
     expect(plugin.version).toBe(pkg.version);
     expect(slash.version).toBe(pkg.version);
     expect(pkg.exports).toEqual({

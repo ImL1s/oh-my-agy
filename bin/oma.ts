@@ -65,6 +65,7 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
   // bare `help`/`version` 仍透傳給 agy（e2e 與 legacy 相容）；只有 --help/-h/--version/-v 走 oma help。
   if ([
     '--help', '-h', '--version', '-v',
+    'help', 'version',
     'autopilot', 'team', 'setup', 'doctor', 'skill',
     'workflow', 'mcp-server', 'wiki', 'hud',
     'native-status', 'lsp-status', 'sidecar-status', 'notify',
@@ -90,6 +91,24 @@ function childEnvWithPath(): NodeJS.ProcessEnv {
 }
 
 async function main() {
+  const args = process.argv.slice(2);
+
+  // Root host launch (OMX/Sol) before todo / structured / magic / continuation.
+  // shouldHostLaunch preserves exact + inline legacy magic and structured commands.
+  try {
+    const { shouldHostLaunch, runHostLaunch } = await import('../src/cli/host-launch');
+    if (shouldHostLaunch(args)) {
+      const code = await runHostLaunch(args, {});
+      process.exit(code);
+    }
+  } catch (error) {
+    if (error && typeof error === 'object' && (error as { name?: string }).name === 'HostLaunchUsageError') {
+      process.stderr.write(`${(error as Error).message}\n`);
+      process.exit((error as { exitCode?: number }).exitCode ?? 2);
+    }
+    throw error;
+  }
+
   const todoPath = process.env.OMA_TODO_PATH || '.agy/todo.json';
 
   // 1. 啟動防禦與完成數記錄
@@ -125,8 +144,6 @@ async function main() {
     process.stderr.write('系統處於熔斷狀態\n[CIRCUIT BREAKER TRIPPED]\n');
     process.exit(1);
   }
-
-  const args = process.argv.slice(2);
 
   // 結構化子命令（autopilot/team/setup/help 與 explicit mode --）走新 CLI wiring。
   // 自然語言魔術關鍵字路徑保留給既有 e2e 與 pass-through 行為。

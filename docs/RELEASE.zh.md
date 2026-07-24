@@ -3,7 +3,7 @@
 English: [RELEASE.md](./RELEASE.md) · [简体中文](./RELEASE.zh.md) · [繁體中文](./RELEASE.zh-TW.md)
 ## 当前渠道策略
 
-OMA `0.3.0` 将 GitHub Release tarball 加 `SHA256SUMS` 视为唯一可安装的发布渠道。本仓库**目前不**发布到 npmjs.org 或 GitHub Packages。`@iml1s/oh-my-agy` 是 tarball 内的 package identity，不能证明 registry 条目存在。
+OMA `0.4.0` 将 GitHub Release tarball 加 `SHA256SUMS` 视为唯一可安装的发布渠道。本仓库**目前不**发布到 npmjs.org 或 GitHub Packages。`@iml1s/oh-my-agy` 是 tarball 内的 package identity，不能证明 registry 条目存在。
 
 `.github/workflows/release.yml` 刻意仅做验证。它拥有只读权限，不能创建 tag、GitHub Release、asset 或 package。
 
