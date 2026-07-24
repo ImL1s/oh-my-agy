@@ -68,9 +68,14 @@ Usage:
   oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead|alive|unknown --process dead|alive|unknown
   oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
   oma team tick --team <id> [--worker-mode headless|interactive] [--max-parallel <n>]
+  oma team api <op> --input JSON [--json]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace] [--host all|agy|claude|grok]
   oma doctor [--json] [--no-strict-plugin]
+
+  team api P0 ops: send-message, mailbox-list, mailbox-mark-delivered, create-task,
+  list-tasks, claim-task, transition-task-status, release-task-claim, get-summary,
+  write-worker-inbox (not full OMX 33-op parity)
 
 Primary UX (Claude Code / Grok session):
   /oh-my-agy:autopilot <goal>

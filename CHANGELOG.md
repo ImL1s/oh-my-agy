@@ -6,6 +6,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+### Added
+
+- **P0 OMX-shaped `oma team api <op> --input JSON [--json]`** over the existing
+  TeamStateStore claim/mailbox aggregate (not full OMX 33-op parity). Shipped
+  ops: `send-message`, `mailbox-list`, `mailbox-mark-delivered`, `create-task`,
+  `list-tasks`, `claim-task`, `transition-task-status`, `release-task-claim`,
+  `get-summary`, `write-worker-inbox`. State stays under OMA
+  `{stateRoot}/repositories/…/teams/<id>/aggregate` (not `.omx/state/team/`).
+  Ordered mailbox requires `claim_token`+`generation`; body digests verified on
+  list; subject/description persisted on create-task. No leader/actor proof
+  (documented). P1 backlog: broadcast, events, shutdown ack, cleanup, monitor
+  snapshots, etc.
+
 ## [0.4.1] — 2026-07-24
 
 ### Fixed

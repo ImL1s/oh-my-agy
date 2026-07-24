@@ -166,6 +166,7 @@ Discover skills: host slash menu, or `oma skill list` / `oma skill show autopilo
 | Read-only plan-style launch | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
 | Multi-agent first worker (v1) | `oma team start --manifest …` then `status` / `stop` |
+| Team mailbox / claim API (P0) | `oma team api <op> --input JSON` (subset of OMX ops) |
 | Team fork resolution | `oma team resolve-fork …` |
 | Versioned repository review | `oma workflow install`, then `oma workflow run …` |
 | MCP read/proposal tools | configure [`.mcp.json`](.mcp.json) or run `oma mcp-server` |
@@ -207,6 +208,11 @@ oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --process dead
 oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
 oma team tick --team <id> [--max-parallel <n>]
+oma team api <op> --input '{"team_name":"<id>",…}' [--json]
+  # P0 only (not full OMX): send-message, mailbox-list, mailbox-mark-delivered,
+  # create-task, list-tasks, claim-task, transition-task-status, release-task-claim,
+  # get-summary, write-worker-inbox
+  # No leader/actor proof — any process with state-root access can call (CAS-fenced state).
 oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
 
 oma workflow install [--source <repository-workflow-v1.json>]

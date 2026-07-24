@@ -45,6 +45,8 @@ export interface TeamTaskSpecV1 {
   write_scope: TeamWriteScopeV1;
   mode: TeamTaskMode;
   verification: TeamVerificationV1;
+  subject?: string;
+  description?: string;
 }
 
 export interface TeamManifestV1 {

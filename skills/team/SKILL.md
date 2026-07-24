@@ -76,6 +76,20 @@ oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> …
 oma team stop --team <id>
 oma team resolve-fork …
+# CLI-first messaging / claims (P0 OMX-shaped subset — prefer over tmux send-keys):
+oma team api send-message --input '{"team_name":"<id>","from_worker":"leader","to_worker":"<task>","body":"…"}' --json
+# unordered list (no sequence). Ordered traffic needs claim_token+generation:
+oma team api mailbox-list --input '{"team_name":"<id>","worker":"<task>"}' --json
+oma team api mailbox-list --input '{"team_name":"<id>","worker":"<task>","claim_token":"<tok>","generation":1,"after_cursor":0}' --json
+oma team api claim-task --input '{"team_name":"<id>","task_id":"<task>","worker":"<id>"}' --json
+oma team api write-worker-inbox --input '{"team_name":"<id>","worker":"<id>","content":"…"}' --json
 ```
+
+P0 `team api` ops: `send-message`, `mailbox-list`, `mailbox-mark-delivered`,
+`create-task`, `list-tasks`, `claim-task`, `transition-task-status`,
+`release-task-claim`, `get-summary`, `write-worker-inbox`. Not full OMX parity.
+Ordered mailbox requires both `claim_token` and `generation` (partial fencing
+fails closed). Do **not** use primary `tmux send-keys` for mailbox traffic when
+`team api` is available.
 
 In-session plan + artifacts remain the coordination source of truth; CLI owns process lifecycle when started.

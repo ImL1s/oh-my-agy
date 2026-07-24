@@ -91,13 +91,27 @@ function parseTask(input: unknown, repoRoot: string): Result<CanonicalTeamTaskV1
   }
   const verification = parseVerification(input.verification, repoRoot);
   if (!verification.ok) return verification;
+  const subject = parseOptionalNonEmptyString(input.subject);
+  if (!subject.ok) return subject;
+  const description = parseOptionalNonEmptyString(input.description);
+  if (!description.ok) return description;
   return ok({
     id: input.id,
     dependencies: [...input.dependencies],
     write_scope: scope.value,
     mode: input.mode,
     verification: verification.value,
+    ...(subject.value === undefined ? {} : { subject: subject.value }),
+    ...(description.value === undefined ? {} : { description: description.value }),
   });
+}
+
+function parseOptionalNonEmptyString(value: unknown): Result<string | undefined> {
+  if (value === undefined) return ok(undefined);
+  if (typeof value !== 'string') return invalid('Optional task field must be a string when present');
+  const trimmed = value.trim();
+  if (trimmed === '') return invalid('Optional task field must be non-empty when present');
+  return ok(trimmed);
 }
 
 function parseScope(input: unknown, repoRoot: string): Result<TeamWriteScopeV1> {

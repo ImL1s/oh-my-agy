@@ -4,11 +4,18 @@ import { RuntimeError, runtimeError } from '../runtime/errors';
 import { StateStore } from '../runtime/state-store';
 import { Result, err, ok } from '../runtime/types';
 import {
+  executeTeamApiOperation,
+  isTeamApiOperationP0,
+  TEAM_API_OPERATIONS_P0,
+  wrapTeamApiCliEnvelope,
+} from './api-interop';
+import {
   RecoveryForkResolver,
   RecoveryForkSelectionEvidenceV1,
   RecoveryTaskAggregateV1,
 } from './recovery-fork';
 import { TeamOrchestrator } from './orchestrator';
+import { TeamStateStore } from './state';
 import { RuntimeContext, TeamActorIdentityV1 } from './types';
 import { resolveGitWorktreeIdentity } from './worktree';
 
@@ -60,6 +67,12 @@ export type ParsedTeamCommand =
       teamId: string;
       workerMode: 'interactive' | 'headless';
       maxParallel?: number;
+    }
+  | {
+      kind: 'api';
+      operation: string;
+      inputJson: string;
+      json: boolean;
     };
 
 /**
@@ -213,7 +226,46 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
       maxParallel,
     });
   }
+  if (subcommand === 'api') {
+    return parseTeamApiCommand(argv.slice(1));
+  }
   return err(runtimeError('E_VALIDATOR_REJECTED', 'Unknown team command'));
+}
+
+function parseTeamApiCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
+    return err(runtimeError(
+      'E_VALIDATOR_REJECTED',
+      `team api requires <op> --input JSON [--json]. P0 ops: ${TEAM_API_OPERATIONS_P0.join(', ')}`,
+    ));
+  }
+  const operation = argv[0];
+  if (operation.startsWith('--')) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team api requires <op> before flags'));
+  }
+  let inputJson: string | undefined;
+  let json = false;
+  for (let index = 1; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--json') {
+      json = true;
+      continue;
+    }
+    if (token === '--input') {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith('--')) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'team api --input requires a JSON value'));
+      }
+      inputJson = value;
+      index += 1;
+      continue;
+    }
+    return err(runtimeError('E_VALIDATOR_REJECTED', `Unknown team api flag: ${token}`));
+  }
+  if (inputJson === undefined) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team api requires --input JSON'));
+  }
+  return ok({ kind: 'api', operation, inputJson, json });
 }
 
 function isLiveness(value: string): value is 'alive' | 'dead' | 'unknown' {
@@ -391,6 +443,10 @@ export async function teamCommand(
     return 0;
   }
 
+  if (parsed.value.kind === 'api') {
+    return runTeamApiCommand(parsed.value, options, stdout, stderr);
+  }
+
   let evidence: RecoveryForkSelectionEvidenceV1;
   try {
     evidence = JSON.parse(fs.readFileSync(parsed.value.evidencePath, 'utf8')) as RecoveryForkSelectionEvidenceV1;
@@ -513,4 +569,62 @@ function parseStrictFlags(argv: readonly string[]): Result<Map<string, string>, 
     flags.set(key, value);
   }
   return ok(flags);
+}
+
+async function runTeamApiCommand(
+  parsed: Extract<ParsedTeamCommand, { kind: 'api' }>,
+  options: Readonly<TeamCommandOptions>,
+  stdout: (value: string) => void,
+  stderr: (value: string) => void,
+): Promise<number> {
+  let input: Record<string, unknown>;
+  try {
+    const parsedJson = JSON.parse(parsed.inputJson) as unknown;
+    if (parsedJson === null || typeof parsedJson !== 'object' || Array.isArray(parsedJson)) {
+      stderr('E_VALIDATOR_REJECTED: team api --input must be a JSON object\n');
+      return 2;
+    }
+    input = parsedJson as Record<string, unknown>;
+  } catch (error) {
+    stderr(`E_VALIDATOR_REJECTED: team api --input is not valid JSON: ${
+      error instanceof Error ? error.message : String(error)
+    }\n`);
+    return 2;
+  }
+
+  const teamId = typeof input.team_name === 'string' && input.team_name.trim() !== ''
+    ? input.team_name.trim()
+    : typeof input.team_id === 'string' && input.team_id.trim() !== ''
+      ? input.team_id.trim()
+      : '';
+  if (teamId === '') {
+    const envelope = wrapTeamApiCliEnvelope({
+      ok: false,
+      operation: isTeamApiOperationP0(parsed.operation) ? parsed.operation : 'unknown',
+      error: { code: 'E_TEAM_API_INVALID_INPUT', message: 'team_name (or team_id) is required in --input' },
+    });
+    stdout(`${JSON.stringify(envelope)}\n`);
+    return 2;
+  }
+
+  const store = new TeamStateStore(
+    options.context.stateRoot,
+    options.context.repoKey,
+    options.context.workspaceKey,
+    teamId,
+  );
+
+  const result = await executeTeamApiOperation(parsed.operation, input, {
+    store,
+    tokenFactory: options.context.tokenFactory,
+  });
+  const envelope = wrapTeamApiCliEnvelope(result);
+  stdout(`${JSON.stringify(envelope)}\n`);
+  if (!result.ok) {
+    if (result.error.code === 'E_TEAM_API_UNKNOWN' || result.error.code === 'E_TEAM_API_INVALID_INPUT') {
+      return 2;
+    }
+    return 1;
+  }
+  return 0;
 }

@@ -13,6 +13,11 @@ Managed launch 需要精確的 session ID、launch nonce 與 invocation generati
 - 危險的 `--madmax`/`--yolo` launch 需要明確確認。
 - Circuit breaker 從不執行 `git reset --hard` 或 `git clean -fd`。
 - Worktree/team 操作使用 lease、claim token、generation 與 delivery-scope 驗證。
+- `oma team api` 是覆蓋同一 TeamStateStore 的 OMX 形薄 CLI（P0 mailbox/claim 子集），
+  不是沙箱，也不是完整 OMX 33-op；狀態仍在 OMA aggregate 路徑下，而非 `.omx/state/team/`。
+  **無 leader/actor 身分證明** — 任何能存取 state root 的行程均可呼叫（actor 身分 fail-open；
+  aggregate 更新仍受 revision CAS 約束）。有序 mailbox 需同時提供 `claim_token` 與
+  `generation`（部分 fencing 會拒絕）；無 fencing 的 list/mark 僅涵蓋無 `sequence` 的無序訊息。
 - 執行時檔案限制在規範根目錄之下；在契約要求不可變之處，拒絕 symlink 逃逸與可變替換。
 - Install/update/uninstall 操作與 receipt 綁定且具備 ownership 感知。
 

@@ -20,6 +20,15 @@ destinations are fingerprinted or redacted in diagnostics.
 - Circuit breakers never run `git reset --hard` or `git clean -fd`.
 - Worktree/team operations use leases, claim tokens, generations, and
   delivery-scope validation.
+- `oma team api` is a thin OMX-shaped CLI over the same TeamStateStore
+  (P0 mailbox/claim subset). It is not a sandbox and is not full OMX
+  33-op parity; state remains under the OMA aggregate path, not
+  `.omx/state/team/`. **There is no leader/actor proof** — any process
+  with access to the state root can invoke it (fail-open authority for
+  actor identity; aggregate updates remain CAS-fenced by revision).
+  Ordered mailbox traffic requires `claim_token` + `generation` (partial
+  fencing is rejected). Unfenced `mailbox-list` / `mailbox-mark-delivered`
+  only covers unordered messages (no `sequence`).
 - Runtime files are confined beneath canonical roots; symlink escapes and
   mutable replacements are rejected where contracts require immutability.
 - Install/update/uninstall operations are receipt-bound and ownership-aware.

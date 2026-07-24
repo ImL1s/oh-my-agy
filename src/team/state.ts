@@ -747,13 +747,181 @@ export class TeamStateStore {
     return Object.values(snapshot.value.value.mailbox).filter((message) => message.recipient === recipient);
   }
 
-  summary(): { complete: boolean; blockers: readonly string[] } {
+  /**
+   * Mark a mailbox message delivered (OMX-shaped mailbox-mark-delivered).
+   * Does not advance ordered ack cursors — use acknowledgeOrderedMailbox for that.
+   */
+  async markMailboxDelivered(
+    expectedRevision: number,
+    messageId: string,
+    deliveredAtMs: number,
+  ): Promise<Result<Snapshot<TeamAggregateV1>, RuntimeError>> {
+    const before = this.requireRevision(expectedRevision);
+    if (!before.ok) return before;
+    const existing = before.value.value.mailbox[messageId];
+    if (existing === undefined) {
+      return err(runtimeError('E_NOT_FOUND', 'Mailbox message does not exist', { messageId }));
+    }
+    if (existing.deliveredAtMs !== undefined) {
+      if (existing.deliveredAtMs === deliveredAtMs) return before;
+      return before; // idempotent: already delivered
+    }
+    if (!Number.isSafeInteger(deliveredAtMs) || deliveredAtMs < 0) {
+      return err(runtimeError('E_CORRUPT_STATE', 'deliveredAtMs must be a non-negative integer'));
+    }
+    return this.store.compareAndSwap(this.key, expectedRevision, (current) => ({
+      ...current,
+      mailbox: {
+        ...current.mailbox,
+        [messageId]: { ...existing, deliveredAtMs },
+      },
+    }));
+  }
+
+  /**
+   * Append a task to the live aggregate + manifest (OMX-shaped create-task).
+   * P0: does not re-run full manifest scope/cycle validation beyond local checks.
+   */
+  async createTask(
+    expectedRevision: number,
+    task: CanonicalTeamManifestV1['tasks'][number],
+  ): Promise<Result<Snapshot<TeamAggregateV1>, RuntimeError>> {
+    const before = this.requireRevision(expectedRevision);
+    if (!before.ok) return before;
+    if (before.value.value.tasks[task.id] !== undefined
+      || before.value.value.manifest.tasks.some((entry) => entry.id === task.id)) {
+      return err(runtimeError('E_ALREADY_EXISTS', 'Team task already exists', { taskId: task.id }));
+    }
+    for (const dependency of task.dependencies) {
+      if (before.value.value.tasks[dependency] === undefined) {
+        return err(runtimeError('E_TASK_DEPENDENCY_BLOCKED', 'Task dependency does not exist', {
+          taskId: task.id,
+          dependency,
+        }));
+      }
+    }
+    return this.store.compareAndSwap(this.key, expectedRevision, (current) => ({
+      ...current,
+      manifest: {
+        ...current.manifest,
+        revision: current.manifest.revision + 1,
+        tasks: [...current.manifest.tasks, task],
+      },
+      tasks: {
+        ...current.tasks,
+        [task.id]: {
+          id: task.id,
+          revision: 0,
+          status: 'pending',
+          commandEvidence: {},
+        },
+      },
+    }));
+  }
+
+  /**
+   * Claim-token-gated status transition (OMX-shaped transition-task-status).
+   * Clearing transitions (failed/cancelled/pending) drop the claim.
+   */
+  async transitionTaskStatus(input: {
+    taskId: string;
+    expectedRevision: number;
+    from: TeamTaskStatus;
+    to: TeamTaskStatus;
+    claimToken: string;
+    generation: number;
+  }): Promise<Result<Snapshot<TeamAggregateV1>, RuntimeError>> {
+    const before = this.requireClaim(
+      input.taskId,
+      input.expectedRevision,
+      input.claimToken,
+      input.generation,
+    );
+    if (!before.ok) return before;
+    const task = before.value.value.tasks[input.taskId]!;
+    if (task.status !== input.from) {
+      return err(runtimeError('E_REVISION_CONFLICT', 'Task status does not match from', {
+        taskId: input.taskId,
+        from: input.from,
+        actual: task.status,
+      }));
+    }
+    if (!apiTransitionAllowed(input.from, input.to)) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'Illegal task status transition', {
+        from: input.from,
+        to: input.to,
+      }));
+    }
+    const clearClaim = input.to === 'failed' || input.to === 'cancelled' || input.to === 'pending';
+    return this.store.compareAndSwap(this.key, input.expectedRevision, (current) => updateTask(
+      current,
+      input.taskId,
+      (entry) => ({
+        ...entry,
+        revision: entry.revision + 1,
+        status: input.to,
+        claim: clearClaim ? undefined : entry.claim,
+      }),
+    ));
+  }
+
+  /**
+   * Voluntary claim release with token proof (OMX-shaped release-task-claim).
+   * Returns the task to pending (not orphan_identity_unproven).
+   */
+  async releaseTaskClaim(input: {
+    taskId: string;
+    expectedRevision: number;
+    claimToken: string;
+    generation: number;
+  }): Promise<Result<Snapshot<TeamAggregateV1>, RuntimeError>> {
+    const before = this.requireClaim(
+      input.taskId,
+      input.expectedRevision,
+      input.claimToken,
+      input.generation,
+    );
+    if (!before.ok) return before;
+    const task = before.value.value.tasks[input.taskId]!;
+    if (task.status !== 'in_progress' && task.status !== 'awaiting_interaction') {
+      return err(runtimeError('E_REVISION_CONFLICT', 'Task claim is not releasable in its current state', {
+        taskId: input.taskId,
+        status: task.status,
+      }));
+    }
+    return this.store.compareAndSwap(this.key, input.expectedRevision, (current) => {
+      const heartbeats = { ...current.heartbeats };
+      delete heartbeats[input.taskId];
+      return {
+        ...updateTask(current, input.taskId, (entry) => ({
+          ...entry,
+          revision: entry.revision + 1,
+          status: 'pending',
+          claim: undefined,
+        })),
+        heartbeats,
+      };
+    });
+  }
+
+  /** Absolute directory for this team's durable partition (aggregate sibling). */
+  teamDirectory(): string {
+    return path.join(this.stateRoot, path.dirname(this.key));
+  }
+
+  summary(): { complete: boolean; blockers: readonly string[]; tasks?: Readonly<Record<string, TeamTaskRuntimeV1>>; teamId?: string; revision?: number } {
     const snapshot = this.read();
     if (!snapshot.ok) return { complete: false, blockers: [snapshot.error.code] };
     const blockers = Object.values(snapshot.value.value.tasks)
       .filter((task) => task.status !== 'completed')
       .map((task) => `${task.id}:${task.status}`);
-    return { complete: blockers.length === 0, blockers };
+    return {
+      complete: blockers.length === 0,
+      blockers,
+      tasks: snapshot.value.value.tasks,
+      teamId: snapshot.value.value.teamId,
+      revision: snapshot.value.revision,
+    };
   }
 
   private requireClaim(
@@ -876,4 +1044,14 @@ function validSupervisor(value: Readonly<TeamSupervisorAuthorityV1>): boolean {
     && value.acquiredAtMs >= 0
     && value.lastProgressAtMs >= value.acquiredAtMs
     && value.leasedUntilMs >= value.lastProgressAtMs;
+}
+
+/** P0 API status graph — claim-gated; delivery/integration still use dedicated store methods. */
+function apiTransitionAllowed(from: TeamTaskStatus, to: TeamTaskStatus): boolean {
+  if (from === to) return false;
+  const allowed: Readonly<Partial<Record<TeamTaskStatus, readonly TeamTaskStatus[]>>> = {
+    in_progress: ['awaiting_interaction', 'failed', 'cancelled', 'pending'],
+    awaiting_interaction: ['in_progress', 'failed', 'cancelled', 'pending'],
+  };
+  return (allowed[from] ?? []).includes(to);
 }
