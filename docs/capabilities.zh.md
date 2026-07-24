@@ -1,7 +1,6 @@
 # 能力矩阵
 
-English | [简体中文](./capabilities.zh.md) | [繁體中文](./capabilities.zh-TW.md)
-
+English: [capabilities.md](./capabilities.md) · [简体中文](./capabilities.zh.md) · [繁體中文](./capabilities.zh-TW.md)
 OMA 将产品拥有的能力与对 Antigravity 的观测分开。`T0` 表示不可用或未观测；`T1` 表示观测到公开表面或 saved projection。两个层级都不暗示存在隐藏的原生 runtime。
 
 | Surface | OMA implementation | Native claim | Command |

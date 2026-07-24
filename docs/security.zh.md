@@ -1,7 +1,6 @@
 # 安全模型
 
-English | [简体中文](./security.zh.md) | [繁體中文](./security.zh-TW.md)
-
+English: [security.md](./security.md) · [简体中文](./security.zh.md) · [繁體中文](./security.zh-TW.md)
 ## 权限边界
 
 OMA 使用外部 per-user 状态根存放权威 aggregate，仓库本地的 `.agy/` 仅保留计划、workflow 定义/运行、recovery 副本与 proposal 产物。状态更新使用 revision/generation 检查；过期的 owner 不能静默覆盖较新的状态。

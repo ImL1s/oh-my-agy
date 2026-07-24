@@ -1,7 +1,6 @@
 # 發佈與安裝
 
-English | [简体中文](./RELEASE.zh.md) | [繁體中文](./RELEASE.zh-TW.md)
-
+English: [RELEASE.md](./RELEASE.md) · [简体中文](./RELEASE.zh.md) · [繁體中文](./RELEASE.zh-TW.md)
 ## 目前渠道策略
 
 OMA `0.3.0` 將 GitHub Release tarball 加 `SHA256SUMS` 視為唯一可安裝的發佈渠道。本儲存庫**目前不**發佈到 npmjs.org 或 GitHub Packages。`@iml1s/oh-my-agy` 是 tarball 內的 package identity，不能證明 registry 條目存在。

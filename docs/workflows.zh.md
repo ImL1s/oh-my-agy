@@ -1,7 +1,6 @@
 # 仓库 Workflow
 
-English | [简体中文](./workflows.zh.md) | [繁體中文](./workflows.zh-TW.md)
-
+English: [workflows.md](./workflows.md) · [简体中文](./workflows.zh.md) · [繁體中文](./workflows.zh-TW.md)
 OMA workflow 将经过审查的多 agent 流程保存为版本化的 `repository-workflow/v1` 定义。该定义固定 DAG、有界 fan-out、role、capability mode、MCP allowlist、写范围、artifact 契约、retry budget、verification command 与 ship predicate。公开 CLI 提供 T4 产品拥有的 authority：OMA 启动每个 worker 与 verification 进程，用 repository-external trust root 认证 receipt，并自行计算 decision。这是 product-authenticated，而非 host-signed identity claim。
 
 ## 快速开始

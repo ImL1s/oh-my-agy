@@ -1,7 +1,6 @@
 # 安全模型
 
-English | [简体中文](./security.zh.md) | [繁體中文](./security.zh-TW.md)
-
+English: [security.md](./security.md) · [简体中文](./security.zh.md) · [繁體中文](./security.zh-TW.md)
 ## 權限邊界
 
 OMA 使用外部 per-user 狀態根存放權威 aggregate，儲存庫本地的 `.agy/` 僅保留計畫、workflow 定義/執行、recovery 副本與 proposal 產物。狀態更新使用 revision/generation 檢查；過期的 owner 不能靜默覆寫較新的狀態。
