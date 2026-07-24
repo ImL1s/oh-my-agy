@@ -1,6 +1,12 @@
 /**
- * 設計概念映射：confirmDangerousLaunch 高危 launch 確認，對齊 oh-my-codex VSCode 危險旗標二次確認。
- * 僅 exact argv token；不掃 prompt 字串。TTY 確認；非 TTY fail-closed，除非顯式 override。
+ * Dangerous host-launch gate.
+ *
+ * OMX/OMG-aligned contract:
+ * - Top-level `--madmax` is explicit operator consent → no TTY prompt; strip the
+ *   wrapper token and inject Antigravity `--dangerously-skip-permissions`.
+ * - Bare `--yolo` still requires TTY `yes` (or `--i-understand-dangerous-launch`).
+ * - Managed modes (`oma ralph --madmax -- …`) remain rejected by the parser
+ *   (no silent drop before `--`).
  */
 import * as readline from 'readline';
 import { RuntimeError, runtimeError } from '../runtime/errors';
@@ -10,6 +16,8 @@ export const DANGEROUS_LAUNCH_FLAGS = Object.freeze(['--madmax', '--yolo'] as co
 export type DangerousLaunchFlag = (typeof DANGEROUS_LAUNCH_FLAGS)[number];
 
 export const DANGEROUS_OVERRIDE_FLAG = '--i-understand-dangerous-launch';
+/** Closest Antigravity full-open flag (agy does not understand --madmax/--yolo). */
+export const AGY_OPEN_FLAG = '--dangerously-skip-permissions';
 
 export function detectDangerousLaunchFlags(argv: readonly string[]): DangerousLaunchFlag[] {
   const found: DangerousLaunchFlag[] = [];
@@ -31,6 +39,8 @@ export async function confirmDangerousLaunch(
   options: Readonly<ConfirmDangerousLaunchOptions>,
 ): Promise<Result<void, RuntimeError>> {
   if (flags.length === 0) return ok(undefined);
+  // Top-level --madmax is itself the consent token (OMX/OMG host-launcher shape).
+  if (flags.includes('--madmax')) return ok(undefined);
   if (options.argv.includes(DANGEROUS_OVERRIDE_FLAG)) return ok(undefined);
 
   const list = flags.join(', ');
@@ -51,10 +61,38 @@ export async function confirmDangerousLaunch(
   return ok(undefined);
 }
 
-/** 剝除 override 旗標後再轉發給 agy；保留 --madmax/--yolo 本體。 */
+/** Strip wrapper-only tokens before forwarding to agy. */
 export function stripDangerousOverride(argv: readonly string[]): string[] {
   return argv.filter((token) => token !== DANGEROUS_OVERRIDE_FLAG);
 }
+
+/** Map OMA wrapper danger tokens onto the live Antigravity open flag. */
+export function normalizeAgyOpenArgv(argv: readonly string[]): string[] {
+  const out: string[] = [];
+  let hasOpen = false;
+  for (const token of argv) {
+    if (
+      token === MADMAX_TOKEN
+      || token === YOLO_TOKEN
+      || token === DANGEROUS_OVERRIDE_FLAG
+    ) {
+      continue;
+    }
+    if (token === AGY_OPEN_FLAG) {
+      if (!hasOpen) {
+        out.push(token);
+        hasOpen = true;
+      }
+      continue;
+    }
+    out.push(token);
+  }
+  if (!hasOpen) out.unshift(AGY_OPEN_FLAG);
+  return out;
+}
+
+const MADMAX_TOKEN = '--madmax';
+const YOLO_TOKEN = '--yolo';
 
 export interface GuardDangerousArgvOptions {
   isTTY?: boolean;
@@ -63,13 +101,15 @@ export interface GuardDangerousArgvOptions {
 }
 
 /**
- * 偵測 → 確認 → 回傳可轉發給 agy 的 argv（已剝 override）。
+ * Detect → confirm → return argv safe to forward to agy.
+ * Madmax/yolo wrapper tokens are never forwarded; the host open flag is.
  */
 export async function guardDangerousArgv(
   argv: readonly string[],
   options: Readonly<GuardDangerousArgvOptions> = {},
 ): Promise<Result<readonly string[], RuntimeError>> {
   const flags = detectDangerousLaunchFlags(argv);
+  if (flags.length === 0) return ok(stripDangerousOverride(argv));
   const confirmed = await confirmDangerousLaunch(flags, {
     isTTY: options.isTTY ?? Boolean(process.stdin.isTTY),
     argv,
@@ -77,7 +117,7 @@ export async function guardDangerousArgv(
     stderr: options.stderr,
   });
   if (!confirmed.ok) return confirmed;
-  return ok(stripDangerousOverride(argv));
+  return ok(normalizeAgyOpenArgv(argv));
 }
 
 function defaultAsk(): Promise<string> {

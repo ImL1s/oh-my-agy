@@ -284,7 +284,12 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
   CLI and records bounded transcripts. Caller-supplied claim JSON and evidence
   paths are never trusted.
 - Do not modify `AGENTS.md` without an intentional merge policy.
-- **Dangerous launch gate:** argv tokens `--madmax` / `--yolo` require TTY confirmation (`yes`) before spawning `agy`. Non-TTY fails closed unless you pass `--i-understand-dangerous-launch` (stripped before forward). Managed form `oma ralph --madmax -- task` is **rejected** (no silent drop of tokens before `--`).
+- **Dangerous launch gate:** top-level `--madmax` is explicit consent (no TTY
+  `yes`); OMA strips the wrapper token and injects Antigravity
+  `--dangerously-skip-permissions`. Bare `--yolo` still requires TTY confirmation
+  (`yes`) or `--i-understand-dangerous-launch` (stripped before forward). Managed
+  form `oma ralph --madmax -- task` is **rejected** (no silent drop of tokens
+  before `--`).
 
 ---
 

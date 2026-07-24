@@ -1,9 +1,11 @@
 import {
+  AGY_OPEN_FLAG,
   confirmDangerousLaunch,
   DANGEROUS_LAUNCH_FLAGS,
   DANGEROUS_OVERRIDE_FLAG,
   detectDangerousLaunchFlags,
   guardDangerousArgv,
+  normalizeAgyOpenArgv,
   stripDangerousOverride,
 } from '../../src/cli/dangerous-launch';
 
@@ -25,16 +27,24 @@ describe('detectDangerousLaunchFlags', () => {
 });
 
 describe('confirmDangerousLaunch', () => {
-  test('non-TTY without override rejects', async () => {
+  test('top-level --madmax is consent without TTY prompt', async () => {
     const result = await confirmDangerousLaunch(['--madmax'], {
       isTTY: false,
       argv: ['--madmax', 'run'],
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  test('non-TTY --yolo without override rejects', async () => {
+    const result = await confirmDangerousLaunch(['--yolo'], {
+      isTTY: false,
+      argv: ['--yolo', 'run'],
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error.code).toBe('E_VALIDATOR_REJECTED');
   });
 
-  test('non-TTY with override allows', async () => {
+  test('non-TTY with override allows yolo', async () => {
     const result = await confirmDangerousLaunch(['--yolo'], {
       isTTY: false,
       argv: ['--yolo', DANGEROUS_OVERRIDE_FLAG],
@@ -42,19 +52,19 @@ describe('confirmDangerousLaunch', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('TTY yes confirms', async () => {
-    const result = await confirmDangerousLaunch(['--madmax'], {
+  test('TTY yes confirms yolo', async () => {
+    const result = await confirmDangerousLaunch(['--yolo'], {
       isTTY: true,
-      argv: ['--madmax'],
+      argv: ['--yolo'],
       ask: async () => 'yes',
     });
     expect(result.ok).toBe(true);
   });
 
-  test('TTY no rejects', async () => {
-    const result = await confirmDangerousLaunch(['--madmax'], {
+  test('TTY no rejects yolo', async () => {
+    const result = await confirmDangerousLaunch(['--yolo'], {
       isTTY: true,
-      argv: ['--madmax'],
+      argv: ['--yolo'],
       ask: async () => 'no',
     });
     expect(result.ok).toBe(false);
@@ -69,19 +79,24 @@ describe('confirmDangerousLaunch', () => {
   });
 });
 
+describe('normalizeAgyOpenArgv', () => {
+  test('strips wrapper tokens and injects Antigravity open flag', () => {
+    expect(normalizeAgyOpenArgv(['--madmax', 'run'])).toEqual([AGY_OPEN_FLAG, 'run']);
+    expect(normalizeAgyOpenArgv(['--yolo', DANGEROUS_OVERRIDE_FLAG, 'x'])).toEqual([AGY_OPEN_FLAG, 'x']);
+    expect(normalizeAgyOpenArgv([AGY_OPEN_FLAG, '--madmax'])).toEqual([AGY_OPEN_FLAG]);
+  });
+});
+
 describe('guardDangerousArgv', () => {
-  test('strips override and keeps madmax after confirm', async () => {
-    const result = await guardDangerousArgv(
-      ['--madmax', 'run', DANGEROUS_OVERRIDE_FLAG],
-      { isTTY: false },
-    );
+  test('madmax consents without TTY and never forwards wrapper tokens', async () => {
+    const result = await guardDangerousArgv(['--madmax', 'run'], { isTTY: false });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.value).toEqual(['--madmax', 'run']);
+      expect(result.value).toEqual([AGY_OPEN_FLAG, 'run']);
     }
   });
 
-  test('rejects non-TTY dangerous without override', async () => {
+  test('rejects non-TTY yolo without override', async () => {
     const result = await guardDangerousArgv(['--yolo', 'x'], { isTTY: false });
     expect(result.ok).toBe(false);
   });

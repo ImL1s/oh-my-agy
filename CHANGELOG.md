@@ -8,6 +8,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Changed
 
+- Top-level `oma --madmax` is explicit consent (no TTY `yes`): wrapper tokens are
+  stripped and Antigravity `--dangerously-skip-permissions` is injected. Bare
+  `--yolo` still requires TTY confirmation or `--i-understand-dangerous-launch`.
+  Managed forms like `oma ralph --madmax -- …` remain rejected.
 - Worker host pin refreshed to Antigravity CLI `1.1.6` (required help flags and
   `gemini-3.6-flash-high` model unchanged from the 1.1.5 contract).
 
