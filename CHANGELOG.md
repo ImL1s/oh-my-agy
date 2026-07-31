@@ -60,8 +60,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   the whole Windows process tree, and a fixed force-settle backstop
   prevents a detached descendant from holding inherited pipes open indefinitely.
 - Model-bearing live canaries now use a 32-process cumulative lineage budget,
-  allowing Antigravity's bounded MCP startup fan-out without weakening the
-  passive help/version budget of 8.
+  leaving bounded headroom over the release-host peak of 19 for Antigravity's
+  MCP startup fan-out without weakening the passive help/version budget of 8.
+  Capability policy version 2 invalidates pre-change cache identities.
 - Bounded plugin-registry commands now terminate the owned POSIX process group
   or Windows descendant tree and destroy pipe readers at the settlement
   backstop, so a timed-out or oversized `agy plugin list` cannot leave an

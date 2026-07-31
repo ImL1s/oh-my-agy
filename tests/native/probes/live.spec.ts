@@ -54,13 +54,39 @@ describe('explicit live probe', () => {
     expect(malformed.observations[0]).toMatchObject({ result: 'indeterminate', detailCode: 'LIVE_MALFORMED' });
     const timeout = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, outputOverflow: false, processCountOverflow: false }) });
     expect(timeout).toMatchObject({ cacheable: false, detailCode: 'LIVE_TIMEOUT' });
-    const processOverflow = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: 'ok', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: true }) });
-    expect(processOverflow).toMatchObject({ cacheable: false, detailCode: 'LIVE_PROCESS_OVERFLOW' });
+  });
+
+  it('keeps the live model lineage budget at 32 and rejects overflow', async () => {
+    expect(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1).toBe(32);
+    const processOverflow = await runExplicitLiveProbe({
+      live: true,
+      executable: '/agy',
+      argv: [],
+      capability: 'headless.print',
+      expectedToken: 'ok',
+      context,
+      runner: async (request) => {
+        expect(request.maximumProcesses).toBe(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1);
+        return {
+          status: null,
+          signal: 'SIGKILL',
+          stdout: 'ok',
+          stderr: '',
+          timedOut: false,
+          outputOverflow: false,
+          processCountOverflow: true,
+        };
+      },
+    });
+    expect(processOverflow).toMatchObject({
+      cacheable: false,
+      detailCode: 'LIVE_PROCESS_OVERFLOW',
+      observations: [expect.objectContaining({ result: 'indeterminate' })],
+    });
   });
 
   it('allows the advertised model timeout plus bounded startup overhead', async () => {
     expect(LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS).toBeGreaterThan(LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS);
-    expect(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1).toBe(32);
     let observedTimeoutMs = 0;
     const result = await runExplicitLiveProbe({
       live: true,

@@ -3,9 +3,9 @@ import * as path from 'path';
 import { ContractViolation, assertCanonicalUtcTimestamp, canonicalBytesV1 } from '../contracts/state-schemas';
 
 export const HOST_CAPABILITY_PROFILE_SCHEMA_V1 = 'oma.host-capability-profile/v1' as const;
-export const HOST_CAPABILITY_POLICY_VERSION_V1 = 1 as const;
+export const HOST_CAPABILITY_POLICY_VERSION_V1 = 2 as const;
 export const HOST_CAPABILITY_PROBE_SET_VERSION_V1 = 1 as const;
-/** Live 模型 canary 會載入使用者已設定的 MCP；仍以固定累計 lineage 預算 fail closed。 */
+/** 發布主機實測累計 lineage 峰值為 19；保留至 32 的固定餘裕後仍 fail closed。 */
 export const LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1 = 32 as const;
 
 export const EVIDENCE_TIERS = [
@@ -117,7 +117,7 @@ const DEFAULT_LIMITS = Object.freeze({
   maximumRecords: 256,
   maximumInputBytes: 256 * 1024,
 });
-const MODEL_CANARY_LIMITS = Object.freeze({
+const LIVE_MODEL_CANARY_LIMITS = Object.freeze({
   ...DEFAULT_LIMITS,
   timeoutMs: 60_000,
   maximumProcesses: LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1,
@@ -205,7 +205,7 @@ export const HOST_CAPABILITY_POLICY_REGISTRY_V1: readonly CapabilityPolicyV1[] =
     aggregation: 'indeterminate_or_contradiction_unknown' as const,
     freshnessMs: sideEffect === 'passive-cache-only' ? 300_000 : 60_000,
     limits: key === 'headless.print' || key === 'headless.json'
-      ? MODEL_CANARY_LIMITS
+      ? LIVE_MODEL_CANARY_LIMITS
       : DEFAULT_LIMITS,
   })).sort((left, right) => compareUtf8(left.key, right.key)),
 );
