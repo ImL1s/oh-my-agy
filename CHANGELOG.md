@@ -39,7 +39,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   text-only 1.1.6 headless adapter no longer requires unused JSON output.
 - When JSON is advertised, its optional canary now runs before the required
   exact-text worker canary so optional probing cannot consume route-authority
-  freshness or authorize a different output mode.
+  freshness or authorize a different output mode. The final canary uses the
+  same worker argv builder and `--add-dir` repository mount as product workflow
+  dispatch, so an incompatible workspace flag cannot receive route authority.
 - Bounded native probes now enforce the policy process-count ceiling as well as
   combined output and wall-clock limits. Process-tree scans are asynchronous
   and share the probe deadline. POSIX probes bind a pre-spawn PID baseline to

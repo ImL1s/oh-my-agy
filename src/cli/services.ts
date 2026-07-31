@@ -206,6 +206,7 @@ export function createDefaultServices(
                 environment,
                 packageRoot,
                 pluginAdapter,
+                cwd,
               }, false);
               return native.kind === 'profile'
                 ? ok({ profile: native.profile, resolvedExecutable: native.profile.hostIdentity.realpath })
@@ -351,6 +352,7 @@ export function createDefaultServices(
               environment,
               packageRoot,
               pluginAdapter: nativeAdapter,
+              cwd,
             }, false);
             if (inspected.kind === 'host_absent') return ok(inspected);
             return ok({

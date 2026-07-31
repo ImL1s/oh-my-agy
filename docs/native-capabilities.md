@@ -24,7 +24,10 @@ oma doctor --native
   workflow workers. When the passive profile advertises structured JSON, it
   runs that separate bounded JSON canary first, then runs the route-authorizing
   exact-text canary last so optional work cannot consume the print receipt's
-  freshness window. It parses only
+  freshness window. The exact-text canary is built through the same worker argv
+  builder as product workflows and mounts the current repository with
+  `--add-dir`; a host that cannot execute that option gains no route authority.
+  It parses only
   documented terminal fields and retains no response text. The policy's
   wall-clock, combined-output, and process-count ceilings are all enforced;
   process-tree overflow or an unavailable process counter leaves evidence

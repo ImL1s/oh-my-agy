@@ -44,7 +44,7 @@ OMA 將產品擁有的能力與對 Antigravity 的觀測分開。Host 觀測改�
 - `supported: true` 只是 compatibility projection；routing 還必須滿足 policy 最低 tier，並持有有效、綁定 identity 的 candidate/receipt。
 - UI 標籤與私有檔案不是公開能力證據。
 - 可選 adapter 保持 disabled 或 unclaimed，直到明確設定。
-- `oma native capabilities` 與 `oma doctor --native` 是被動路徑；只有 `oma native probe --live` 會 opt-in。v1 在 help 宣告 JSON 時先執行 optional JSON canary，最後再執行實際授權 worker route 的 exact-text canary，避免 optional work 消耗 print evidence 的 freshness；其他具副作用 domain 都明確維持 indeterminate。
+- `oma native capabilities` 與 `oma doctor --native` 是被動路徑；只有 `oma native probe --live` 會 opt-in。v1 在 help 宣告 JSON 時先執行 optional JSON canary，最後再以與 product workflow 相同的 worker argv builder 及 `--add-dir <current-repository>` 執行實際授權 route 的 exact-text canary，避免 optional work 消耗 print evidence freshness，也不讓不相容的 workspace mount 取得權限；其他具副作用 domain 都明確維持 indeterminate。
 - 離線 fixture 與測試只證明實作行為，不證明 live-host parity。詳見 [Native capability negotiation](./native-capabilities.md)。
 - `oma production verify` 是 `production_verified` 宣稱的權威；普通單元測試僅建立實作證據。
 - Workflow production evidence 僅由 `oma production probe workflow` 建立，並使用規範的 host、plugin、repository 與 repository-external state-root 解析。Host authority 綁定規範安裝的 `agy` realpath、位元組長度與 SHA-256——不僅依賴其回報的 version/help 輸出。Package 消費者不能 import 內部 workflow authority 或 production-evidence 模組。產品執行僅作為 non-exported CLI closure 存在；每個發出的 workflow 模組都有精確 export allowlist，且不暴露 executor、dispatcher 或 authority factory。可 import 的 generic runner 永久為 advisory，且 dispatch 零個 task，即使 package 程式碼讀取 receipt key 並重建舊的 structural marker。

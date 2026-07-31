@@ -64,8 +64,10 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
   `oma native probe --live` opts in; v1 verifies the exact-text worker route and
   separately verifies structured JSON when advertised. The optional JSON
   canary runs first and the route-authorizing exact-text canary runs last so its
-  freshness is not spent on optional probing. Every other side-effect domain
-  remains explicitly indeterminate.
+  freshness is not spent on optional probing. That final canary uses the same
+  worker argv builder and `--add-dir <current-repository>` shape as product
+  workflows; incompatible workspace mounting cannot authorize their route.
+  Every other side-effect domain remains explicitly indeterminate.
 - Offline fixtures and tests prove implementation behavior, not live-host
   parity. See [Native capability negotiation](./native-capabilities.md).
 - `oma production verify` is the authority for the `production_verified`

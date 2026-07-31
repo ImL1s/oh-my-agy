@@ -349,6 +349,8 @@ exit 0
         const timeoutIndex = liveArgv.indexOf('--print-timeout');
         expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);
       }
+      const addDirIndex = liveCalls[1].indexOf('--add-dir');
+      expect(liveCalls[1].slice(addDirIndex, addDirIndex + 2)).toEqual(['--add-dir', fs.realpathSync(cwd)]);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -392,6 +394,44 @@ fi
         profile: { capabilities: Array<{ key: string; outcome: string }> };
       };
       expect(body.outcome).toBe('live_probe_failed');
+      expect(body.error.code).toBe('LIVE_MALFORMED');
+      expect(body.profile.capabilities.find(({ key }) => key === 'headless.print')?.outcome)
+        .not.toBe('supported');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('exact-text route authority requires the workflow add-dir argv to execute', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-add-dir-fence-'));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 1.1.9\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\\n' '--print'; exit 0; fi
+previous=''
+for arg in "$@"; do
+  if [ "$arg" = "--add-dir" ]; then printf 'unsupported add-dir\\n' >&2; exit 2; fi
+  if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  previous="$arg"
+done
+printf '%s\\n' "\${prompt##*: }"
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(1);
+      const body = JSON.parse(stdout) as {
+        error: { code: string };
+        profile: { capabilities: Array<{ key: string; outcome: string }> };
+      };
       expect(body.error.code).toBe('LIVE_MALFORMED');
       expect(body.profile.capabilities.find(({ key }) => key === 'headless.print')?.outcome)
         .not.toBe('supported');

@@ -334,7 +334,7 @@ export async function runNativeCommand(
 export async function inspectNativeCapabilities(
   context: Pick<
     ExtendedCommandContext,
-    'agyCommand' | 'stateRoot' | 'environment' | 'packageRoot' | 'pluginAdapter'
+    'agyCommand' | 'stateRoot' | 'environment' | 'packageRoot' | 'pluginAdapter' | 'cwd'
   >,
   live: boolean,
 ): Promise<NativeCapabilityInspectionResultV1> {
@@ -445,16 +445,20 @@ export async function inspectNativeCapabilities(
       }
     }
     const textToken = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
+    const textPrompt = `Reply with exactly this token and nothing else: ${textToken}`;
+    const textArgv = buildAgy115Argv({
+      launchMode: 'headless',
+      capabilityMode: 'read-only',
+      prompt: textPrompt,
+      boundedDuration: `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
+      workspaceDirectories: [fs.realpathSync(context.cwd)],
+      model: AGY_WORKER_MODEL,
+    });
+    if (!textArgv.ok) throw new Error(`exact-text live probe argv is invalid: ${textArgv.error.message}`);
     const textResult = await runExplicitLiveProbe({
       live: true,
       executable: hostIdentityBefore.realpath,
-      argv: [
-        '--model', AGY_WORKER_MODEL,
-        '--print', `Reply with exactly this token and nothing else: ${textToken}`,
-        '--print-timeout', `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
-        '--mode', 'plan',
-        '--sandbox',
-      ],
+      argv: textArgv.value,
       capability: 'headless.print',
       expectedToken: textToken,
       outputContract: 'exact_text',
@@ -1037,7 +1041,7 @@ async function executeCanonicalProductWorkflow(
   input: Readonly<CanonicalProductWorkflowExecutionInputV1>,
   nativeContext: Pick<
     ExtendedCommandContext,
-    'agyCommand' | 'stateRoot' | 'environment' | 'packageRoot' | 'pluginAdapter'
+    'agyCommand' | 'stateRoot' | 'environment' | 'packageRoot' | 'pluginAdapter' | 'cwd'
   >,
 ): Promise<WorkflowRunSnapshotV1> {
   const repositoryRoot = fs.realpathSync(process.cwd());
@@ -1046,6 +1050,7 @@ async function executeCanonicalProductWorkflow(
   const capabilityContext = {
     ...nativeContext,
     agyCommand: agy.realpath,
+    cwd: repositoryRoot,
     environment: process.env,
   };
   const refreshCapabilityProfile = async () => refreshProductWorkflowCapabilityProfile({
