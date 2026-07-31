@@ -77,9 +77,9 @@ review again; deletion or tampering fails closed.
 entrypoint. It resolves the literal `agy` executable from the active `PATH`,
 requires its realpath to be the canonical owner-installed
 `~/.local/bin/agy`, hashes the executable bytes through one stable file
-descriptor, validates the supported 1.1.6 public contract and the exact
-installed OMA plugin identity, derives the candidate from the current
-repository, and writes only to a repository-external platform state root. It
+descriptor, binds the current host/plugin identity to a fresh live
+`HostCapabilityProfile` and route receipt, derives the candidate from the
+current repository, and writes only to a repository-external platform state root. It
 rejects `OMA_STATE_ROOT`, plugin-config root overrides, and
 `OMA_PRODUCTION_RUN_ID`; callers cannot inject an executable, adapter,
 candidate, package identity, or evidence root. Internal runner exports expose
@@ -92,7 +92,7 @@ it accepts no executor callback. The generic importable runner is advisory and
 always performs zero dispatches, so the disk HMAC protects receipt integrity but
 never grants in-process execution privilege.
 
-## Live worker contract (Antigravity 1.1.6)
+## Fallback worker argv contract (1.1.6-compatible grammar)
 
 Each workflow task is one fresh headless `agy` session. The launch grammar is
 frozen and validated (`src/team/agy-argv.ts`); the details below are load-bearing
@@ -116,8 +116,10 @@ and only surface against a real host, not a mocked CLI:
   root is cleaned before every attempt, making each dispatch idempotent against a
   stale proposal from a crashed or repeated run.
 
-The fresh-session plugin-discovery canary is likewise pinned and tolerates agy
-1.1.6's trailing double newline, canonicalizing the stored evidence bytes.
+This frozen grammar is compatibility metadata for the existing fallback
+adapter, not a provider or native-capability gate. The fresh-session
+plugin-discovery canary likewise tolerates the observed 1.1.6 trailing double
+newline and canonicalizes the stored evidence bytes.
 
 ## Antigravity saved prompt
 

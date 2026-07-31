@@ -5,12 +5,12 @@ import * as path from 'path';
 
 const root = path.resolve(__dirname, '../..');
 
-describe('0.4.1 release readback', () => {
+describe('0.5.0 release readback', () => {
   test('all public manifests and the workflow skill inventory agree', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const plugin = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
     const slash = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
-    expect(pkg.version).toBe('0.4.1');
+    expect(pkg.version).toBe('0.5.0');
     expect(plugin.version).toBe(pkg.version);
     expect(slash.version).toBe(pkg.version);
     expect(pkg.exports).toEqual({
@@ -26,6 +26,10 @@ describe('0.4.1 release readback', () => {
       'tests/fixtures/workflow',
       'docs/RELEASE.md',
       'docs/capabilities.md',
+      'docs/native-capability-authority-ledger.md',
+      'docs/native-capabilities.md',
+      'docs/parity/oma-parity.json',
+      'docs/parity/oma-traceability.json',
       'docs/security.md',
       'docs/workflows.md',
       'docs/npm-publishing.md',
@@ -68,6 +72,17 @@ describe('0.4.1 release readback', () => {
         },
       );
       expect(installed.status).toBe(0);
+      const packedReadme = fs.readFileSync(path.join(
+        temporary,
+        'node_modules',
+        '@iml1s',
+        'oh-my-agy',
+        'README.md',
+      ), 'utf8');
+      expect(packedReadme).toContain('oma native capabilities');
+      expect(packedReadme).toContain('oma native probe --live');
+      expect(packedReadme).toContain('oma doctor --native');
+      expect(packedReadme).toContain('does not prove live host parity');
       const consumer = spawnSync(process.execPath, ['-e', `
         const path = require('path');
         for (const moduleName of [
@@ -186,12 +201,18 @@ describe('0.4.1 release readback', () => {
       'tests/fixtures/workflow/production-safety-review-v1.json',
       'docs/RELEASE.md',
       'docs/capabilities.md',
+      'docs/native-capability-authority-ledger.md',
+      'docs/native-capabilities.md',
+      'docs/parity/oma-parity.json',
+      'docs/parity/oma-traceability.json',
       'docs/security.md',
       'docs/workflows.md',
       'docs/npm-publishing.md',
       'dist/bin/oma.js',
       'dist/scripts/check-writer-ownership.js',
       'dist/src/mcp/server.js',
+      'dist/src/native/capability-profile.js',
+      'dist/src/native/probes/index.js',
       'dist/src/workflows/runner.js',
     ]) expect(files).toContain(required);
     const slash = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));

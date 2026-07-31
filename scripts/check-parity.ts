@@ -39,6 +39,14 @@ export interface ParityInventoryV1 {
     claim_status: string;
     maximum_tier: string;
   }>;
+  native_capability_contract: {
+    schema: string;
+    outcomes: string[];
+    routing_authority: string;
+    passive_commands: string[];
+    live_command: string;
+    live_evidence_required: boolean;
+  };
   workflow_contract: {
     contract: string;
     terminals: string[];
@@ -79,6 +87,18 @@ export function validateParityInventory(inventory: ParityInventoryV1): void {
       throw new Error(`Optional-unclaimed operation cannot claim verified: ${operation.canonical_name}`);
     }
   }
+  const nativeContract = inventory.native_capability_contract;
+  if (nativeContract.schema !== 'oma.host-capability-profile/v1'
+    || nativeContract.routing_authority !== 'profile_and_router_only'
+    || nativeContract.live_command !== 'oma native probe --live'
+    || nativeContract.live_evidence_required !== true) {
+    throw new Error('Native capability contract identity drifted');
+  }
+  exactArray(nativeContract.outcomes, ['supported', 'unsupported', 'unknown'], 'native capability outcomes');
+  exactArray(nativeContract.passive_commands, [
+    'oma native capabilities',
+    'oma doctor --native',
+  ], 'native passive commands');
   if (inventory.workflow_contract.contract !== 'repository-workflow/v1') {
     throw new Error('Repository workflow contract identity drifted');
   }

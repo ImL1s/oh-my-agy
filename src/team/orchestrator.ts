@@ -6,6 +6,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { sha256 } from '../runtime/atomic';
+import { HostCapabilityProfileV1 } from '../native/capability-profile';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { createDeliveryEvidence, DeliveryValidator } from './delivery';
@@ -26,6 +27,22 @@ import {
 } from './types';
 import { AuthorityLeaseStore, pathKeysFromWriteScope } from './authority-lease';
 import { GitWorktreeManager, ManagedWorktreeV1, resolveGitWorktreeIdentity } from './worktree';
+import {
+  TmuxReadinessReceiptV1,
+  preflightTeamWorkerProviderRoute,
+  routeTeamWorkerProvider,
+} from './provider';
+import {
+  createWorkerRouteAuthority,
+  workerRouteAuthorityPath,
+  writeWorkerRouteAuthority,
+} from './route-authority';
+
+export interface ProviderProfileAuthorityV1 {
+  profile: HostCapabilityProfileV1;
+  resolvedExecutable: string;
+  tmuxReadiness?: TmuxReadinessReceiptV1;
+}
 
 export interface TeamOrchestratorOptions {
   stateRoot: string;
@@ -51,6 +68,14 @@ export interface TeamOrchestratorOptions {
   workerBootstrapArgv?: readonly string[];
   /** Absolute path to worker-hold/bootstrap entry (js). Used if workerBootstrapArgv omitted. */
   workerHoldEntryPath?: string;
+  /** Evidence-bearing profile factory. The central Team router owns provider selection. */
+  providerProfileFactory?: (input: Readonly<{
+    launchMode: 'interactive' | 'headless';
+    generation: number;
+    contextDigest: string;
+    selectedAt: string;
+  }>) => Result<ProviderProfileAuthorityV1, RuntimeError>
+    | Promise<Result<ProviderProfileAuthorityV1, RuntimeError>>;
 }
 
 export interface StartedWorkerView {
@@ -63,6 +88,8 @@ export interface StartedWorkerView {
   /** 明文 claimToken 僅在此回傳一次；descriptor 只存 digest */
   claimToken: string;
   markerPath: string;
+  providerProfileDigest: string;
+  routeReceiptDigest: string;
 }
 
 export interface StartTeamView {
@@ -129,6 +156,7 @@ export class TeamOrchestrator {
   private readonly worktrees: GitWorktreeManager;
   private readonly workerExecutablePath: string;
   private readonly workerBootstrapArgv: readonly string[];
+  private readonly providerProfileFactory: TeamOrchestratorOptions['providerProfileFactory'];
 
   constructor(options: Readonly<TeamOrchestratorOptions>) {
     this.stateRoot = options.stateRoot;
@@ -146,6 +174,7 @@ export class TeamOrchestrator {
     this.worktrees = options.worktrees
       ?? new GitWorktreeManager(this.workspaceRoot, options.managedWorktreesRoot);
     this.workerExecutablePath = options.workerExecutablePath ?? process.execPath;
+    this.providerProfileFactory = options.providerProfileFactory;
     if (options.workerBootstrapArgv !== undefined) {
       this.workerBootstrapArgv = options.workerBootstrapArgv;
     } else if (options.workerHoldEntryPath !== undefined) {
@@ -611,6 +640,48 @@ export class TeamOrchestrator {
     }
     const generation = claimed.value.value.tasks[input.task.id]!.claim!.generation;
 
+    const contextDigest = sha256([
+      this.repoKey ?? '', this.workspaceKey, input.teamId, input.task.id,
+    ].join('\0'));
+    const authorityRequestedAt = new Date(this.nowMs()).toISOString();
+    const authority = this.providerProfileFactory === undefined
+      ? undefined
+      : await this.providerProfileFactory({
+        launchMode: input.workerMode,
+        generation,
+        contextDigest,
+        selectedAt: authorityRequestedAt,
+      });
+    const preflightSelectedAt = new Date(this.nowMs()).toISOString();
+    const preflight = authority === undefined
+      ? err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team worker launch requires an evidence-bearing host profile'))
+      : !authority.ok
+        ? authority
+        : preflightTeamWorkerProviderRoute({
+          profile: authority.value.profile,
+          now: preflightSelectedAt,
+          launchMode: input.workerMode,
+          generation,
+          contextDigest,
+          resolvedExecutable: authority.value.resolvedExecutable,
+          ...(authority.value.tmuxReadiness === undefined
+            ? {} : { tmuxReadiness: authority.value.tmuxReadiness }),
+        });
+    if (!preflight.ok) {
+      const rolledBack = input.launchTransaction
+        ? await this.rollbackLaunchLeases(input.teamId, input.task.id)
+        : await this.rollbackFailedTaskLaunch({
+          store: input.store,
+          teamId: input.teamId,
+          taskId: input.task.id,
+          ownerNonce: input.ownerNonce,
+          claimToken,
+          generation,
+          expectedRevision: claimed.value.revision,
+        });
+      if (!rolledBack.ok) return rolledBack;
+      return preflight;
+    }
     const branchName = `oma-team/${input.teamId}/${workerId}-g${generation}-${this.tokenFactory().slice(0, 8)}`;
     const worktree = this.worktrees.create({
       teamId: input.teamId,
@@ -639,6 +710,90 @@ export class TeamOrchestrator {
       return worktree;
     }
 
+    const rollbackPreparedWorktree = async (): Promise<Result<void, RuntimeError>> => {
+      const worktreeRollback = this.worktrees.rollbackLaunch(worktree.value, input.ownerNonce);
+      if (input.launchTransaction) {
+        const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+        if (!rolledBack.ok) return rolledBack;
+        return worktreeRollback;
+      }
+      return this.rollbackFailedTaskLaunch({
+        store: input.store,
+        teamId: input.teamId,
+        taskId: input.task.id,
+        ownerNonce: input.ownerNonce,
+        claimToken,
+        generation,
+        expectedRevision: claimed.value.revision,
+        worktree: worktree.value,
+        worktreeAlreadyRolledBack: worktreeRollback.ok,
+      });
+    };
+
+    // Preflight remains before worktree creation. Re-read authority after that
+    // potentially slow step so every launch and receipt uses current evidence.
+    const routeAuthorityRequestedAt = new Date(this.nowMs()).toISOString();
+    const routeAuthority = this.providerProfileFactory === undefined
+      ? undefined
+      : await this.providerProfileFactory({
+        launchMode: input.workerMode,
+        generation,
+        contextDigest,
+        selectedAt: routeAuthorityRequestedAt,
+      });
+    if (routeAuthority === undefined || !routeAuthority.ok) {
+      const rolledBack = await rollbackPreparedWorktree();
+      if (!rolledBack.ok) return rolledBack;
+      return routeAuthority === undefined
+        ? err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider profile authority is unavailable'))
+        : routeAuthority;
+    }
+    const routeSelectedAt = new Date(this.nowMs()).toISOString();
+    const selected = routeTeamWorkerProvider({
+      profile: routeAuthority.value.profile,
+      now: routeSelectedAt,
+      launchMode: input.workerMode,
+      generation,
+      contextDigest,
+      resolvedExecutable: routeAuthority.value.resolvedExecutable,
+      ...(routeAuthority.value.tmuxReadiness === undefined
+        ? {} : { tmuxReadiness: routeAuthority.value.tmuxReadiness }),
+    });
+    if (!selected.ok) {
+      const rolledBack = await rollbackPreparedWorktree();
+      if (!rolledBack.ok) return rolledBack;
+      return selected;
+    }
+    const routeReceipt = selected.value;
+    let routeAuthorityPath = workerRouteAuthorityPath(
+      this.stateRoot,
+      input.teamId,
+      input.task.id,
+      generation,
+    );
+    let routeAuthorityDigest: string;
+    try {
+      const persistedRouteAuthority = createWorkerRouteAuthority({
+        stateRoot: this.stateRoot,
+        teamId: input.teamId,
+        taskId: input.task.id,
+        generation,
+        contextDigest,
+        profile: routeAuthority.value.profile,
+        receipt: routeReceipt,
+        now: routeSelectedAt,
+      });
+      routeAuthorityPath = writeWorkerRouteAuthority(this.stateRoot, persistedRouteAuthority);
+      routeAuthorityDigest = persistedRouteAuthority.authorityDigest;
+    } catch (error) {
+      try { fs.rmSync(routeAuthorityPath, { force: true }); } catch (_) { /* best-effort */ }
+      const rolledBack = await rollbackPreparedWorktree();
+      if (!rolledBack.ok) return rolledBack;
+      return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker route authority could not be persisted', {
+        cause: error instanceof Error ? error.message : String(error),
+      }));
+    }
+
     const sessionBase = this.sessionNamePrefix ?? `oma-${input.teamId}`;
     const sessionName = sanitizeSession(`${sessionBase}-${workerId}-g${generation}`);
     const markerPath = path.join(worktree.value.path, '.oma-worker-ready');
@@ -659,12 +814,16 @@ export class TeamOrchestrator {
       launchNonce,
       invocationGeneration: 1,
       taskPrompt: `Execute team task ${input.task.id}`,
-      agyCommand: 'agy',
-      provider: input.workerMode === 'headless' ? 'agy_headless' : 'tmux_agy',
+      agyCommand: routeReceipt.resolvedExecutable,
+      provider: routeReceipt.provider,
+      providerProfileDigest: routeReceipt.profileDigest,
+      routeReceiptDigest: routeReceipt.receiptDigest,
+      routeContextDigest: contextDigest,
+      routeAuthorityDigest,
       capabilityMode: input.task.write_scope === 'none' ? 'read-only' : 'read-write',
       boundedDuration: '5m0s',
     };
-    fs.writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     const omaDir = path.join(worktree.value.path, '.oma');
     fs.mkdirSync(omaDir, { recursive: true, mode: 0o700 });
     const capPath = path.join(omaDir, 'worker-capability.json');
@@ -681,6 +840,7 @@ export class TeamOrchestrator {
       workerNonce,
     });
     if (!pane.ok) {
+      try { fs.rmSync(routeAuthorityPath, { force: true }); } catch (_) { /* best-effort */ }
       try { fs.rmSync(descriptorPath, { force: true }); } catch (_) { /* best-effort */ }
       try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
       const worktreeRollback = this.worktrees.rollbackLaunch(worktree.value, input.ownerNonce);
@@ -721,6 +881,7 @@ export class TeamOrchestrator {
     const hb = await input.store.recordHeartbeat(claimed.value.revision, heartbeat);
     if (!hb.ok) {
       const tmuxRollback = this.tmux.killOwnedSession(sessionName, input.ownerNonce);
+      try { fs.rmSync(routeAuthorityPath, { force: true }); } catch (_) { /* best-effort */ }
       try { fs.rmSync(descriptorPath, { force: true }); } catch (_) { /* best-effort */ }
       try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
       const worktreeRollback = this.worktrees.rollbackLaunch(worktree.value, input.ownerNonce);
@@ -758,6 +919,8 @@ export class TeamOrchestrator {
         branchName,
         claimToken,
         markerPath,
+        providerProfileDigest: routeReceipt.profileDigest,
+        routeReceiptDigest: routeReceipt.receiptDigest,
       },
     });
   }

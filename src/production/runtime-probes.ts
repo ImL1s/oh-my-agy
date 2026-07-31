@@ -17,6 +17,11 @@ import {
 import { TeamOrchestrator } from '../team/orchestrator';
 import { TeamStateStore } from '../team/state';
 import { resolveGitWorktreeIdentity } from '../team/worktree';
+import {
+  HostIdentityV1,
+  PluginIdentityV1,
+  assembleHostCapabilityProfile,
+} from '../native/capability-profile';
 
 export type RuntimeProductionSeam = Extract<ProductionEvidenceSeam, 'managed-lifecycle' | 'exact-resume' | 'worker-runtime'>;
 
@@ -428,6 +433,56 @@ async function runWorkerRuntime(
     workspaceKey: identity.workspaceKey, managedWorktreesRoot: managedRoot,
     sessionNamePrefix: prefix, workerExecutablePath: process.execPath,
     workerBootstrapArgv: [workerScript], leaseMs: 30_000,
+    providerProfileFactory: ({ selectedAt }) => {
+      // This controlled probe verifies the OMA Team launch harness only. Its
+      // profile is bound to the exact Node executable used by the harness and
+      // must not be reported as live Antigravity host parity.
+      const hostIdentity: HostIdentityV1 = {
+        realpath: fs.realpathSync(process.execPath),
+        binarySha256: sha256(fs.readFileSync(process.execPath)),
+        version: process.version,
+        versionOutputSha256: sha256(process.version),
+        helpOutputSha256: sha256('oma-production-team-harness'),
+        platform: process.platform,
+        arch: process.arch,
+      };
+      const pluginIdentity: PluginIdentityV1 = {
+        status: 'absent', realpath: null, packageDigest: null, version: null,
+        readbackDigest: null, enabled: false,
+      };
+      const empty = assembleHostCapabilityProfile({
+        evaluationTimestamp: selectedAt,
+        hostIdentityBefore: hostIdentity,
+        hostIdentityAfter: hostIdentity,
+        pluginIdentityBefore: pluginIdentity,
+        pluginIdentityAfter: pluginIdentity,
+        observations: [],
+      });
+      const profile = assembleHostCapabilityProfile({
+        evaluationTimestamp: selectedAt,
+        hostIdentityBefore: hostIdentity,
+        hostIdentityAfter: hostIdentity,
+        pluginIdentityBefore: pluginIdentity,
+        pluginIdentityAfter: pluginIdentity,
+        observations: ['headless.print', 'headless.json'].map((capability) => ({
+          capability,
+          source: 'live_probe' as const,
+          tier: 'healthy' as const,
+          result: 'positive' as const,
+          observedAt: selectedAt,
+          identityDigest: empty.identityDigest,
+          detailCode: 'PRODUCTION_TEAM_HARNESS_VERIFIED',
+          diagnostic: null,
+        })),
+      });
+      return {
+        ok: true,
+        value: {
+          profile,
+          resolvedExecutable: hostIdentity.realpath,
+        },
+      };
+    },
   });
   let sessionName: string | undefined;
   let worktreePath: string | undefined;
@@ -449,16 +504,14 @@ async function runWorkerRuntime(
     if (!launched.ok) throw new Error(`${launched.error.code}: ${launched.error.message}`);
     const heartbeat = launched.value.value.heartbeats[taskId];
     if (heartbeat === undefined) throw new Error('E_PRODUCTION_WORKER_HEARTBEAT_MISSING');
-    const providerReceiptHash = sha256(canonicalJson({
-      sessionName: worker.sessionName, paneId: worker.paneId,
-      process: heartbeat.process, generation: worker.generation,
-    }));
+    const providerReceiptHash = worker.routeReceiptDigest;
     const boundAuthority = await store.bindWorkerAuthority(
       launched.value.revision,
       worker.claimToken,
       {
         schemaVersion: 1, taskId, claimTokenDigest: sha256(worker.claimToken),
-        generation: worker.generation, provider: 'agy_headless', providerReceiptHash,
+        generation: worker.generation, provider: 'agy_headless',
+        providerProfileDigest: worker.providerProfileDigest, providerReceiptHash,
         process: heartbeat.process,
         state: 'claimed', transitionSequence: 0, boundAtMs: Date.now(),
       },

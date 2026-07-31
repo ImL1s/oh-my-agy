@@ -12,6 +12,7 @@ import {
   DANGEROUS_OVERRIDE_FLAG,
   guardDangerousArgv,
 } from './dangerous-launch';
+import { isStructuredNativeCommand } from './parser';
 
 export const MADMAX_FLAG = '--madmax';
 export const YOLO_FLAG = '--yolo';
@@ -104,7 +105,9 @@ export function rejectLauncherFlagsAfterSubcommand(argv: readonly string[]): voi
   const { head } = splitAtEndOfOptions(argv);
   if (head.length === 0) return;
   const first = head[0] ?? '';
-  const owned = STRUCTURED_FIRST_TOKENS.has(first) || LEGACY_MAGIC_FIRST.has(first.toLowerCase());
+  const owned = STRUCTURED_FIRST_TOKENS.has(first)
+    || isStructuredNativeCommand(head)
+    || LEGACY_MAGIC_FIRST.has(first.toLowerCase());
   if (!owned) return;
   for (const tok of head.slice(1)) {
     if (LAUNCHER_ONLY_FLAGS.has(tok)) {
@@ -127,7 +130,7 @@ export function shouldHostLaunch(argv: readonly string[]): boolean {
   if (argv.length === 0) return true;
   const { head } = splitAtEndOfOptions(argv);
   const first = head[0] ?? '';
-  if (STRUCTURED_FIRST_TOKENS.has(first)) return false;
+  if (STRUCTURED_FIRST_TOKENS.has(first) || isStructuredNativeCommand(head)) return false;
   if (LEGACY_MAGIC_FIRST.has(first.toLowerCase())) return false;
   if (head.includes(MADMAX_FLAG)) return true;
   if (head.includes(YOLO_FLAG)) return true;

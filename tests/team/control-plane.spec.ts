@@ -1,9 +1,28 @@
+import {
+  HostIdentityV1,
+  PluginIdentityV1,
+  assembleHostCapabilityProfile,
+  issueHostRouteReceipt,
+  routeHostCapability,
+} from '../../src/native/capability-profile';
 import { sha256 } from '../../src/runtime/atomic';
 import { WorkerEnvelopeV1 } from '../../src/contracts/worker-envelope';
 import { prepareWorkerControl } from '../../src/team/control-plane';
-import { ProviderSelectionV1 } from '../../src/team/provider';
 
-function envelope(provider: WorkerEnvelopeV1['provider']): WorkerEnvelopeV1 {
+const selectedAt = '2026-07-31T12:00:00.000Z';
+const now = '2026-07-31T12:00:01.000Z';
+const contextDigest = sha256('context');
+
+function authority(provider: 'agy_headless' | 'tmux_agy') {
+  const host: HostIdentityV1 = { realpath: '/opt/agy', binarySha256: sha256('binary'), version: null, versionOutputSha256: sha256('version'), helpOutputSha256: sha256('help'), platform: 'darwin', arch: 'arm64' };
+  const plugin: PluginIdentityV1 = { status: 'present', realpath: '/opt/plugin', packageDigest: sha256('plugin'), version: '1', readbackDigest: sha256('readback'), enabled: true };
+  const empty = assembleHostCapabilityProfile({ evaluationTimestamp: selectedAt, hostIdentityBefore: host, hostIdentityAfter: host, pluginIdentityBefore: plugin, pluginIdentityAfter: plugin, observations: [] });
+  const profile = assembleHostCapabilityProfile({ evaluationTimestamp: selectedAt, hostIdentityBefore: host, hostIdentityAfter: host, pluginIdentityBefore: plugin, pluginIdentityAfter: plugin, observations: [{ capability: 'headless.print', source: 'live_probe', tier: 'healthy', result: 'positive', observedAt: selectedAt, identityDigest: empty.identityDigest, detailCode: 'OK', diagnostic: null }] });
+  const candidate = routeHostCapability(profile, { capability: 'headless.print', provider, requestMode: provider === 'agy_headless' ? 'headless' : 'interactive', generation: 1, contextDigest, selectedAt, ttlMs: 60_000, fallbackPreconditionsSatisfied: true });
+  return { profile, receipt: issueHostRouteReceipt(candidate, '/opt/agy', `${provider}_v1`) };
+}
+
+function envelope(route: ReturnType<typeof authority>): WorkerEnvelopeV1 {
   return {
     store_kind: 'oma_worker_envelope', schema_version: 1, repository_id: 'OMA',
     run_id: 'run', team_id: 'team', task_id: 'task', task_text: 'Implement owned task',
@@ -11,49 +30,46 @@ function envelope(provider: WorkerEnvelopeV1['provider']): WorkerEnvelopeV1 {
     artifact_contract: { proposal_root: 'artifacts/task', required_files: ['src/team/out.ts'], terminal_receipt_path: 'artifacts/task/terminal.json' },
     contributor_guidance_hashes: [{ path: 'AGENTS.md', sha256: sha256('guidance') }],
     mailbox_cursor: 0, claim_id: 'claim', generation: 1, state_endpoint: 'oma://state',
-    cancellation_token_hash: sha256('cancel'), provider, native_role: 'executor',
-    capability_mode: 'read-write', deadline_ms: 300_000,
+    cancellation_token_hash: sha256('cancel'), provider: route.receipt.provider as WorkerEnvelopeV1['provider'],
+    provider_profile_digest: route.profile.profileDigest, route_receipt_digest: route.receipt.receiptDigest,
+    native_role: 'executor', capability_mode: 'read-write', deadline_ms: 300_000,
   };
 }
 
-function selection(provider: WorkerEnvelopeV1['provider']): ProviderSelectionV1 {
-  return { schemaVersion: 1, provider, generation: 1, evidenceHash: sha256(provider), observedAtMs: 1 };
+function input(route: ReturnType<typeof authority>) {
+  return {
+    envelope: envelope(route), profile: route.profile, receipt: route.receipt,
+    validation: { now, contextDigest, identityDigest: route.profile.identityDigest, fallbackPreconditionsSatisfied: true },
+    claimToken: 'secret', boundAtMs: 2,
+  };
 }
 
-describe('prepared worker control plane', () => {
-  test('headless launch is a shell-free exact argv vector bound to process receipt', () => {
-    const result = prepareWorkerControl({
-      envelope: envelope('agy_headless'), selection: selection('agy_headless'), claimToken: 'secret', boundAtMs: 2,
-      process: { pid: 42, startMarker: 'process-start' },
-    });
+describe('receipt-bound worker control plane', () => {
+  test('headless launch uses pinned executable and binds profile/receipt before launch', () => {
+    const route = authority('agy_headless');
+    const result = prepareWorkerControl({ ...input(route), process: { pid: 42, startMarker: 'process-start' } });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.launch).toEqual({
-      executable: 'agy', shell: false,
+      executable: '/opt/agy', shell: false,
       argv: ['--model', 'gemini-3.6-flash-high', '--print', 'Implement owned task', '--print-timeout', '5m0s', '--mode', 'accept-edits'],
     });
     expect(result.value.binding).toMatchObject({
-      provider: 'agy_headless', generation: 1, state: 'claimed', transitionSequence: 0,
-      claimTokenDigest: sha256('secret'), process: { pid: 42, startMarker: 'process-start' },
+      provider: 'agy_headless', generation: 1,
+      providerProfileDigest: route.profile.profileDigest,
+      providerReceiptHash: route.receipt.receiptDigest,
+      claimTokenDigest: sha256('secret'),
     });
   });
 
-  test('tmux requires pane+process while native accepts only generation-fenced conversation receipt', () => {
+  test('tmux requires pane+process and receipt tamper fails before binding', () => {
+    const route = authority('tmux_agy');
+    expect(prepareWorkerControl({ ...input(route), process: { pid: 42, startMarker: 'process-start' } }).ok).toBe(false);
     expect(prepareWorkerControl({
-      envelope: envelope('tmux_agy'), selection: selection('tmux_agy'), claimToken: 'secret', boundAtMs: 2,
+      ...input(route),
       process: { pid: 42, startMarker: 'process-start' },
+      pane: { schemaVersion: 1, sessionName: 's', paneId: '%1', ownerNonce: 'o', workerNonce: 'w' },
+      receipt: { ...route.receipt, receiptDigest: sha256('tampered') },
     }).ok).toBe(false);
-    const nativeSelection: ProviderSelectionV1 = {
-      ...selection('antigravity_native'),
-      conversationReceipt: {
-        schemaVersion: 1, provider: 'antigravity_native', conversationId: 'conversation', receiptId: 'receipt',
-        generation: 1, observedAtMs: 1, capabilityDigest: sha256('capability'),
-      },
-    };
-    const native = prepareWorkerControl({
-      envelope: envelope('antigravity_native'), selection: nativeSelection, claimToken: 'secret', boundAtMs: 2,
-    });
-    expect(native.ok).toBe(true);
-    if (native.ok) expect(native.value.launch).toBeUndefined();
   });
 });

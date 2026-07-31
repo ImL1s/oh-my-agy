@@ -33,6 +33,10 @@ describe('OMA host-launch contract', () => {
     expect(shouldHostLaunch(['--direct'])).toBe(true);
     expect(shouldHostLaunch(['--tmux'])).toBe(true);
     expect(shouldHostLaunch(['doctor'])).toBe(false);
+    expect(shouldHostLaunch(['native', 'capabilities'])).toBe(false);
+    expect(shouldHostLaunch(['native', 'probe', '--live'])).toBe(false);
+    expect(shouldHostLaunch(['native'])).toBe(false);
+    expect(shouldHostLaunch(['native', 'future'])).toBe(false);
     expect(shouldHostLaunch(['help'])).toBe(false);
     expect(shouldHostLaunch(['ralph'])).toBe(false);
     expect(shouldHostLaunch(['ralph', '--', 'ship'])).toBe(false);
@@ -44,6 +48,8 @@ describe('OMA host-launch contract', () => {
     expect(shouldHostLaunch(['fix', 'bug', '--', 'ultrawork'])).toBe(false);
     expect(() => shouldHostLaunch(['ralph', '--madmax'])).toThrow(HostLaunchUsageError);
     expect(() => shouldHostLaunch(['doctor', '--direct'])).toThrow(/E_LAUNCH_USAGE/);
+    expect(() => shouldHostLaunch(['native', 'capabilities', '--direct'])).toThrow(/E_LAUNCH_USAGE/);
+    expect(() => shouldHostLaunch(['native', 'future', '--direct'])).not.toThrow();
   });
 
   test('madmax injects open flag and rejects plan/sandbox in head', () => {

@@ -25,6 +25,8 @@ export interface WorkflowPermissionContextV1 {
   state_endpoint: string;
   cancellation_token_hash: string;
   provider: WorkerProvider;
+  provider_profile_digest?: string;
+  route_receipt_digest?: string;
   mailbox_cursor: number;
   contributor_guidance_hashes: Array<{ path: string; sha256: string }>;
 }
@@ -50,6 +52,12 @@ export function compileWorkflowPermissions(input: {
   }
   assertMcpAllowlist(stage.mcp_allowlist);
   assertStagePermissions(stage);
+  const routeBound = input.context.provider_profile_digest !== undefined
+    || input.context.route_receipt_digest !== undefined;
+  if (routeBound && (input.context.provider_profile_digest === undefined
+    || input.context.route_receipt_digest === undefined)) {
+    throw new Error('E_WORKFLOW_PERMISSION: provider route authority is incomplete');
+  }
   if (input.dependency_results.length !== input.task.dependency_task_ids.length
     || input.dependency_results.some((result, index) =>
       result.task_id !== input.task.dependency_task_ids[index])) {
@@ -93,6 +101,10 @@ export function compileWorkflowPermissions(input: {
     state_endpoint: input.context.state_endpoint,
     cancellation_token_hash: input.context.cancellation_token_hash,
     provider: input.context.provider,
+    ...(routeBound ? {
+      provider_profile_digest: input.context.provider_profile_digest,
+      route_receipt_digest: input.context.route_receipt_digest,
+    } : {}),
     native_role: stage.native_role,
     capability_mode: stage.capability_mode,
     deadline_ms: stage.timeout_ms,

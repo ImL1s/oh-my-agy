@@ -112,11 +112,11 @@ oma ralph -- "Reply with exactly one word: pong"
 
 Registry 發佈**未設定**：不要從 npmjs.org 安裝無關的未 scoped `oh-my-agy` package，也不要假設 `@iml1s/oh-my-agy` 存在於 registry。從 GitHub Release 安裝，其中包含 package tarball 與 `SHA256SUMS`。
 
-便捷一行（最新已驗證 release 為 `v0.3.0`）：
+便捷一行（最新已驗證 release 為 `v0.5.0`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh \
-  | bash -s -- --github --tag v0.3.0
+  | bash -s -- --github --tag v0.5.0
 ```
 
 手動 / 可重現選項：
@@ -125,11 +125,11 @@ curl -fsSL https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/instal
 # 先下載 installer，再解析 pinned release。
 curl -fsSLo /tmp/oma-install.sh \
   https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh
-bash /tmp/oma-install.sh --github --tag v0.3.0
+bash /tmp/oma-install.sh --github --tag v0.5.0
 
 # 完全離線：驗證並安裝精確檔案，無網路/npm/build 步驟。
 bash /tmp/oma-install.sh \
-  --asset ./iml1s-oh-my-agy-0.3.0.tgz \
+  --asset ./iml1s-oh-my-agy-0.5.0.tgz \
   --checksums ./SHA256SUMS
 ```
 
@@ -160,14 +160,14 @@ Release 位元組在啟動前經 checksum 驗證。installer 寫入 immutable re
 | 並行 / 高吞吐 | `/oh-my-agy:ultrawork` 或 `oma ultrawork -- "…"` |
 | 唯讀 plan 風格啟動 | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
-| 多 agent 首個 worker（v1） | `oma team start --manifest …` 然後 `status` / `stop` |
+| 多 agent 首個 worker（v1） | 先執行 `oma native probe --live`，再用 `oma team start --manifest … --worker-mode headless` |
 | Team mailbox / claim API（P0） | `oma team api <op> --input JSON`（OMX 子集，非 33-op 全量） |
 | Team fork 解析 | `oma team resolve-fork …` |
 | 版本化儲存庫審查 | `oma workflow install`，然後 `oma workflow run …` |
 | MCP 讀/proposal 工具 | 設定 [`.mcp.json`](../../.mcp.json) 或執行 `oma mcp-server` |
 | 狀態概覽 | `oma hud --json`（可選 `--watch`） |
 | 文件索引 | `oma wiki index`，然後 `oma wiki search <query>` |
-| 誠實的 host 能力檢視 | `oma native-status`、`lsp-status`、`sidecar-status` |
+| 誠實的 host 能力檢視 | `oma native capabilities`（被動）/ `oma native probe --live`（明確 opt-in） |
 | 精確 continuation / 有界 recovery | `oma resume …` / `oma recovery …` |
 | 普通 `agy` | `oma <agy args…>`（pass-through；剝除 managed binding env） |
 
@@ -216,6 +216,8 @@ oma workflow status|replay --run <run-id>
 oma mcp-server
 oma wiki index|list|search <query> [--limit <1..50>]
 oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
+oma native capabilities [--json]
+oma native probe --live [--json]
 oma native-status | lsp-status | sidecar-status
 oma notify status|test …
 oma resume --session <id> --conversation <id> --expected-revision <n>
@@ -228,13 +230,19 @@ oma production probe <seam> [--run-id <id>]
 oma production capture <review|ultraqa> [--run-id <id>] -- <allowlisted-cli> …
 
 oma setup
-oma doctor [--json] [--no-strict-plugin]
+oma doctor [--json] [--no-strict-plugin] [--native]
 oma <agy args...>   # pass-through（剝除 managed binding env）
 ```
 
 Build 後二進位：`oma`、`omy` → `dist/bin/oma.js`。
 
-`oma doctor` 檢查 Node ≥20、`dist` hooks、`package.json`/`plugin.json` 版本同步、`PATH` 上的 `agy`、state root，以及 plugin 已安裝並啟用（預設 fail-closed）。
+`oma doctor` 檢查 Node ≥20、`dist` hooks、`package.json`/`plugin.json` 版本同步、`PATH` 上的 `agy`、state root，以及 plugin 已安裝並啟用（預設 fail-closed）。`oma doctor --native` 只增加被動、綁定 identity 的能力診斷，不會執行 live probe。
+
+### Native 能力證據
+
+`oma native capabilities` 輸出 native/fallback routing 使用的版本化 `HostCapabilityProfile`。它區分 `supported`、`unsupported`、`unknown`，記錄 evidence tier/source 與明確 fallback，並把 cache 綁定至精確的 `agy` 與已安裝 plugin identity。版本字串只是 metadata，不是 feature gate；timeout、parse error、過期證據或 identity drift 都保持 `unknown` 並 fail closed。
+
+`oma native probe --live` 是明確 opt-in；v1 只執行一個有界公開 headless canary，其他具副作用 domain 都明確記錄為 unavailable/indeterminate。普通能力顯示與 `oma doctor --native` 都是被動路徑。離線 fixture、help、文件與通過的測試只證明 OMA 實作，**不證明 live host parity**。詳見 [Native capability negotiation](../native-capabilities.md)。
 
 ### 雙入口路徑（請讀）
 
@@ -308,8 +316,8 @@ Tag 範例：
 ```bash
 # 僅在決定性檢查、live evidence、independent review 與 UltraQA 通過後。
 # Tag 必須匹配 package.json / plugin.json / .claude-plugin version。
-git tag -a v0.3.0 -m "v0.3.0"
-git push origin v0.3.0
+git tag -a v0.5.0 -m "v0.5.0"
+git push origin v0.5.0
 ```
 
 Changelog：**[CHANGELOG.md](../../CHANGELOG.md)**。  

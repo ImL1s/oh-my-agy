@@ -1,14 +1,29 @@
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  HostCapabilityProfileV1,
+  HostRouteCandidateV1,
+  HostRouteReceiptV1,
+  EVIDENCE_TIERS,
+  HOST_CAPABILITY_POLICY_REGISTRY_V1,
+  TEAM_PROVIDER_POLICY_V1,
+  issueHostRouteReceipt,
+  isAbsoluteHostPath,
+  positiveCapabilityEvidenceExpiryMs,
+  routeHostCapability,
+  validateHostCapabilityProfile,
+  validateHostRouteCandidate,
+  validateHostRouteReceipt,
+} from '../native/capability-profile';
 import { canonicalJson, sha256 } from '../runtime/atomic';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { WorkerProvider } from '../contracts/worker-envelope';
 import { AGY_REQUIRED_HELP_FLAGS, AGY_WORKER_VERSION, validateAgy115Help } from './agy-argv';
-import { NativeConversationReceiptV1 } from './types';
 
-export const PROVIDER_EVIDENCE_MAX_AGE_MS = 300_000;
+const TEAM_ROUTE_RECEIPT_MAX_TTL_MS = 30_000;
+const TEAM_ROUTE_RECEIPT_MIN_TTL_MS = 5_000;
 
 export interface AgyCanaryReceiptV1 {
   schemaVersion: 1;
@@ -20,6 +35,7 @@ export interface AgyCanaryReceiptV1 {
   observedAtMs: number;
 }
 
+/** Passive argv-compatibility observation. It is never provider authority. */
 export interface AgyCliProbeV1 {
   schemaVersion: 1;
   installed: boolean;
@@ -34,120 +50,284 @@ export interface AgyCliProbeV1 {
   interactiveCanary?: AgyCanaryReceiptV1;
 }
 
-export interface AntigravityNativeEvidenceV1 {
-  schemaVersion: 1;
-  advertised: boolean;
-  documentedPublic: boolean;
-  invokeSubagentObserved: boolean;
-  healthy: boolean;
-  hostVersion: string;
-  documentationHash: string;
-  observedAtMs: number;
-  conversationReceipt?: NativeConversationReceiptV1;
-}
-
-export interface TmuxAgyEvidenceV1 {
-  schemaVersion: 1;
-  explicitlyEnabled: boolean;
-  tmuxObserved: boolean;
-  tmuxVersionHash: string;
-  observedAtMs: number;
-  agy: AgyCliProbeV1;
-}
-
-export interface WorkerProviderEvidenceV1 {
-  antigravityNative?: AntigravityNativeEvidenceV1;
-  agyHeadless?: AgyCliProbeV1;
-  tmuxAgy?: TmuxAgyEvidenceV1;
-}
-
-export interface ProviderSelectionV1 {
-  schemaVersion: 1;
-  provider: WorkerProvider;
-  generation: number;
-  evidenceHash: string;
-  observedAtMs: number;
-  conversationReceipt?: NativeConversationReceiptV1;
-}
-
 export interface SelectProviderInputV1 {
+  profile: HostCapabilityProfileV1;
+  candidate: HostRouteCandidateV1;
+  now: string;
   generation: number;
+  contextDigest: string;
+  identityDigest: string;
+  resolvedExecutable: string;
+  fallbackPreconditionsSatisfied: boolean;
+  tmuxReadiness?: TmuxReadinessReceiptV1;
+}
+
+export interface RouteTeamWorkerProviderInputV1 {
+  profile: HostCapabilityProfileV1;
   launchMode: 'headless' | 'interactive';
-  nowMs: number;
-  maxEvidenceAgeMs?: number;
+  now: string;
+  generation: number;
+  contextDigest: string;
+  resolvedExecutable: string;
+  tmuxReadiness?: TmuxReadinessReceiptV1;
+}
+
+export interface TmuxReadinessReceiptV1 {
+  schema: 'oma.tmux-readiness/v1';
+  explicitlyEnabled: true;
+  tmuxObserved: true;
+  interactiveCanaryAttachable: true;
+  orphanFree: true;
+  observedAt: string;
+  expiresAt: string;
+  receiptDigest: string;
 }
 
 /**
- * Exact, fail-closed provider order.  An advertised/installed provider with
- * unhealthy evidence is a blocker; selection never silently retries a lower
- * provider after a failed launch.
+ * Converts profile truth (and, for tmux, an explicit bounded canary receipt)
+ * into the boolean consumed by the canonical router. Callers cannot replace
+ * this check with a literal `true` without losing validation.
  */
-export function selectWorkerProvider(
-  evidence: Readonly<WorkerProviderEvidenceV1>,
-  input: Readonly<SelectProviderInputV1>,
-): Result<ProviderSelectionV1, RuntimeError> {
-  if (!Number.isSafeInteger(input.generation) || input.generation < 1
-    || !Number.isSafeInteger(input.nowMs) || input.nowMs < 0) {
-    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker provider selection identity is invalid'));
+export function validateProviderRoutePreconditions(
+  profileValue: unknown,
+  launchMode: 'headless' | 'interactive',
+  now: string,
+  tmuxReadiness?: Readonly<TmuxReadinessReceiptV1>,
+): Result<true, RuntimeError> {
+  let profile: HostCapabilityProfileV1;
+  try { profile = validateHostCapabilityProfile(profileValue); } catch (error) {
+    return err(capabilityError('Provider precondition profile is invalid', error));
   }
-  const maxAge = input.maxEvidenceAgeMs ?? PROVIDER_EVIDENCE_MAX_AGE_MS;
-  const native = evidence.antigravityNative;
-  if (native?.advertised === true) {
-    const receipt = native.conversationReceipt;
-    const valid = native.schemaVersion === 1
-      && native.documentedPublic
-      && native.invokeSubagentObserved
-      && native.healthy
-      && fresh(native.observedAtMs, input.nowMs, maxAge)
-      && digest(native.documentationHash)
-      && receipt !== undefined
-      && validNativeReceipt(receipt, input.generation, input.nowMs, maxAge);
-    if (!valid) return providerBlocked('antigravity_native', 'advertised native invoke_subagent evidence is stale or unhealthy');
-    return selected('antigravity_native', input.generation, native, native.observedAtMs, receipt);
+  const healthy = (key: string): boolean => {
+    const assessment = profile.capabilities.find((item) => item.key === key);
+    return assessment?.outcome === 'supported'
+      && assessment.tier !== null
+      && EVIDENCE_TIERS.indexOf(assessment.tier) >= EVIDENCE_TIERS.indexOf('healthy');
+  };
+  if (!healthy('headless.print')) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Headless print capability is not healthy'));
   }
-
-  if (input.launchMode === 'headless') {
-    const headless = evidence.agyHeadless;
-    if (headless?.installed === true) {
-      const validated = validateAgyProbe(headless, input.nowMs, maxAge, 'headless');
-      if (!validated.ok) return validated;
-      return selected('agy_headless', input.generation, headless, headless.observedAtMs);
-    }
+  if (launchMode === 'headless') {
+    return ok(true);
   }
-
-  const tmux = evidence.tmuxAgy;
-  if (tmux?.explicitlyEnabled === true) {
-    if (tmux.schemaVersion !== 1 || !tmux.tmuxObserved || !digest(tmux.tmuxVersionHash)
-      || !fresh(tmux.observedAtMs, input.nowMs, maxAge)) {
-      return providerBlocked('tmux_agy', 'explicit tmux provider evidence is stale or unhealthy');
-    }
-    const validated = validateAgyProbe(tmux.agy, input.nowMs, maxAge, 'interactive');
-    if (!validated.ok) return validated;
-    return selected('tmux_agy', input.generation, tmux, tmux.observedAtMs);
+  if (tmuxReadiness === undefined) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Interactive tmux requires an explicit bounded readiness canary'));
   }
-
-  return err(runtimeError(
-    'E_CAPABILITY_UNPROVEN',
-    'No verified Antigravity worker provider is available; Claude, Codex, and Grok fallback is forbidden',
-  ));
+  const { receiptDigest, ...withoutDigest } = tmuxReadiness;
+  const valid = tmuxReadiness.schema === 'oma.tmux-readiness/v1'
+    && tmuxReadiness.explicitlyEnabled
+    && tmuxReadiness.tmuxObserved
+    && tmuxReadiness.interactiveCanaryAttachable
+    && tmuxReadiness.orphanFree
+    && sha256(canonicalJson(withoutDigest)) === receiptDigest
+    && Number.isFinite(Date.parse(tmuxReadiness.observedAt))
+    && Date.parse(tmuxReadiness.observedAt) <= Date.parse(now)
+    && Date.parse(tmuxReadiness.expiresAt) > Date.parse(now);
+  return valid
+    ? ok(true)
+    : err(runtimeError('E_CAPABILITY_UNPROVEN', 'Interactive tmux readiness canary is invalid or stale'));
 }
 
-/** Bounded, read-only version/help probe.  It deliberately does not invent canary proof. */
-// 15s, not 5s: `--version`/`--help` are effectively instant, but fork+exec of a
-// fresh interpreter can stall well past 5s on a memory-pressured host (observed
-// with a multi-GB sibling agy session), which would spuriously block the
-// provider. The generous bound still fails fast on a genuine hang.
+/**
+ * The router candidate is the sole provider decision input. This selector only
+ * validates that authority and the implemented adapter boundary, then issues a
+ * receipt. It never reconstructs evidence or silently chooses another route.
+ */
+function selectWorkerProvider(
+  input: Readonly<SelectProviderInputV1>,
+): Result<HostRouteReceiptV1, RuntimeError> {
+  let candidate: HostRouteCandidateV1;
+  try {
+    candidate = validateHostRouteCandidate(input.candidate, input.profile, {
+      now: input.now,
+      generation: input.generation,
+      contextDigest: input.contextDigest,
+      identityDigest: input.identityDigest,
+    });
+  } catch (error) {
+    return err(capabilityError('Worker provider route candidate is invalid', error));
+  }
+
+  if (candidate.provider === 'antigravity_native') {
+    return err(runtimeError(
+      'E_NATIVE_ADAPTER_UNAVAILABLE',
+      'Antigravity native worker adapter is unavailable',
+      { provider: 'antigravity_native', adapterImplemented: false },
+    ));
+  }
+
+  if (!isImplementedProvider(candidate.provider)
+    || candidate.fallbackPreconditionsSatisfied !== input.fallbackPreconditionsSatisfied) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker provider adapter or fallback preconditions are unproven'));
+  }
+  const preconditions = validateProviderRoutePreconditions(
+    input.profile,
+    candidate.requestMode === 'headless' ? 'headless' : 'interactive',
+    input.now,
+    input.tmuxReadiness,
+  );
+  if (!preconditions.ok) return preconditions;
+  if (candidate.provider === 'agy_headless' && candidate.requestMode !== 'headless') {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Headless provider requires a headless route request'));
+  }
+  if (candidate.provider === 'tmux_agy'
+    && (candidate.requestMode !== 'interactive' || !candidate.fallbackPreconditionsSatisfied)) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Tmux provider requires explicit interactive fallback authority'));
+  }
+
+  try {
+    const receipt = issueHostRouteReceipt(
+      candidate,
+      input.resolvedExecutable,
+      candidate.provider === 'agy_headless' ? 'agy_headless_v1' : 'tmux_agy_v1',
+    );
+    return ok(validateHostRouteReceipt(receipt, input.profile, {
+      now: input.now,
+      generation: input.generation,
+      contextDigest: input.contextDigest,
+      identityDigest: input.identityDigest,
+      fallbackPreconditionsSatisfied: input.fallbackPreconditionsSatisfied,
+    }));
+  } catch (error) {
+    return err(capabilityError('Worker provider route receipt is invalid', error));
+  }
+}
+
+/**
+ * Team 的唯一 provider router。它先評估宣告的 Antigravity native contract；
+ * native 證據完整時若 adapter 尚未實作就明確失敗，不得靜默降級。只有
+ * native contract 未獲證明時，才依 launch mode 評估既定 fallback 與 canary。
+ */
+export function preflightTeamWorkerProviderRoute(
+  input: Readonly<RouteTeamWorkerProviderInputV1>,
+): Result<void, RuntimeError> {
+  const evaluated = evaluateTeamWorkerProviderRoute(input);
+  return evaluated.ok ? ok(undefined) : evaluated;
+}
+
+export function routeTeamWorkerProvider(
+  input: Readonly<RouteTeamWorkerProviderInputV1>,
+): Result<HostRouteReceiptV1, RuntimeError> {
+  const evaluated = evaluateTeamWorkerProviderRoute(input);
+  if (!evaluated.ok) return evaluated;
+  const { profile, provider, fallbackPreconditionsSatisfied, receiptTtlMs } = evaluated.value;
+
+  try {
+    const candidate = routeHostCapability(profile, {
+      capability: 'headless.print',
+      provider,
+      requestMode: input.launchMode,
+      generation: input.generation,
+      contextDigest: input.contextDigest,
+      selectedAt: input.now,
+      ttlMs: receiptTtlMs,
+      fallbackPreconditionsSatisfied,
+    });
+    return selectWorkerProvider({
+      profile,
+      candidate,
+      now: input.now,
+      generation: input.generation,
+      contextDigest: input.contextDigest,
+      identityDigest: profile.identityDigest,
+      resolvedExecutable: input.resolvedExecutable,
+      fallbackPreconditionsSatisfied,
+      ...(input.tmuxReadiness === undefined ? {} : { tmuxReadiness: input.tmuxReadiness }),
+    });
+  } catch (error) {
+    return err(capabilityError('Team provider route could not be issued', error));
+  }
+}
+
+function evaluateTeamWorkerProviderRoute(
+  input: Readonly<RouteTeamWorkerProviderInputV1>,
+): Result<{
+  profile: HostCapabilityProfileV1;
+  provider: 'agy_headless' | 'tmux_agy';
+  fallbackPreconditionsSatisfied: true;
+  receiptTtlMs: number;
+}, RuntimeError> {
+  let profile: HostCapabilityProfileV1;
+  try { profile = validateHostCapabilityProfile(input.profile); } catch (error) {
+    return err(capabilityError('Team provider profile is invalid', error));
+  }
+  if (input.resolvedExecutable !== profile.hostIdentity.realpath
+    || !isAbsoluteHostPath(input.resolvedExecutable, profile.hostIdentity.platform)) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider executable is not bound to the host profile'));
+  }
+
+  const nativePolicy = TEAM_PROVIDER_POLICY_V1.antigravity_native;
+  const nativeProven = nativePolicy.required.every(({ capability, tier }) =>
+    capabilityProvenAtTier(profile, capability, tier, input.now));
+  if (nativeProven && !nativePolicy.adapterImplemented) {
+    return err(runtimeError(
+      'E_NATIVE_ADAPTER_UNAVAILABLE',
+      'Antigravity native worker adapter is unavailable',
+      { provider: 'antigravity_native', adapterImplemented: false },
+    ));
+  }
+
+  const provider = input.launchMode === 'headless' ? 'agy_headless' : 'tmux_agy';
+  const fallbackPolicy = TEAM_PROVIDER_POLICY_V1[provider];
+  const requiredProven = fallbackPolicy.required.every(({ capability, tier }) =>
+    capabilityProvenAtTier(profile, capability, tier, input.now));
+  if (!requiredProven) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team fallback provider requirements are unproven'));
+  }
+  const preconditions = validateProviderRoutePreconditions(
+    profile,
+    input.launchMode,
+    input.now,
+    input.tmuxReadiness,
+  );
+  if (!preconditions.ok) return preconditions;
+  const receiptTtlMs = remainingRouteReceiptTtlMs(profile, 'headless.print', input.now);
+  if (receiptTtlMs === null) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider evidence is too close to expiry for bootstrap'));
+  }
+  return ok({
+    profile,
+    provider,
+    fallbackPreconditionsSatisfied: preconditions.value,
+    receiptTtlMs,
+  });
+}
+
+function remainingRouteReceiptTtlMs(
+  profile: Readonly<HostCapabilityProfileV1>,
+  capability: string,
+  now: string,
+): number | null {
+  const policy = HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === capability);
+  const assessment = profile.capabilities.find(({ key }) => key === capability);
+  const nowMs = Date.parse(now);
+  if (policy === undefined || assessment === undefined || assessment.observations.length === 0
+    || !Number.isFinite(nowMs)) return null;
+  const routeEvidenceExpiryMs = positiveCapabilityEvidenceExpiryMs(
+    assessment,
+    policy,
+    policy.routeTier,
+    nowMs,
+  );
+  if (routeEvidenceExpiryMs === null) return null;
+  const evidenceExpiryMs = Math.min(
+    Date.parse(profile.generatedAt) + policy.freshnessMs,
+    routeEvidenceExpiryMs,
+  );
+  const ttlMs = Math.min(TEAM_ROUTE_RECEIPT_MAX_TTL_MS, evidenceExpiryMs - nowMs);
+  return Number.isSafeInteger(ttlMs) && ttlMs >= TEAM_ROUTE_RECEIPT_MIN_TTL_MS ? ttlMs : null;
+}
+
+/** Bounded, read-only compatibility probe. It deliberately does not authorize routing. */
 const AGY_PROBE_TIMEOUT_MS = 15_000;
 export function probeAgy115(executable = 'agy', nowMs = Date.now()): Result<AgyCliProbeV1, RuntimeError> {
   const resolved = resolveExecutable(executable);
-  if (resolved === null) return providerBlocked('agy_headless', 'Antigravity CLI executable is not installed');
+  if (resolved === null) return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Antigravity CLI executable is not installed'));
   const version = spawnSync(resolved, ['--version'], { encoding: 'utf8', timeout: AGY_PROBE_TIMEOUT_MS, shell: false });
   const help = spawnSync(resolved, ['--help'], { encoding: 'utf8', timeout: AGY_PROBE_TIMEOUT_MS, shell: false });
   if (version.status !== 0 || help.status !== 0 || version.error !== undefined || help.error !== undefined) {
-    return providerBlocked('agy_headless', 'Antigravity CLI version/help probe failed');
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Antigravity CLI version/help compatibility probe failed'));
   }
-  // agy 1.1.5 writes its help text to stderr even on exit 0.  Treat both
-  // captured streams as bounded probe evidence rather than assuming stdout.
   const versionOutput = `${version.stdout}${version.stderr}`;
   const helpOutput = `${help.stdout}${help.stderr}`;
   const valid = validateAgy115Help(versionOutput, helpOutput);
@@ -175,97 +355,51 @@ export function withVerifiedCanary(
     : { ...probe, interactiveCanary: { ...receipt } };
 }
 
-function validateAgyProbe(
-  probe: Readonly<AgyCliProbeV1>,
-  nowMs: number,
-  maxAgeMs: number,
-  canaryKind: 'headless' | 'interactive',
-): Result<void, RuntimeError> {
-  const common = probe.schemaVersion === 1
-    && probe.installed
-    && probe.version === AGY_WORKER_VERSION
-    && path.isAbsolute(probe.executableRealpath)
-    && digest(probe.executableSha256)
-    && digest(probe.versionOutputHash)
-    && digest(probe.helpOutputHash)
-    && AGY_REQUIRED_HELP_FLAGS.every((flag) => probe.requiredFlags.includes(flag))
-    && fresh(probe.observedAtMs, nowMs, maxAgeMs);
-  const canary = canaryKind === 'headless' ? probe.headlessCanary : probe.interactiveCanary;
-  const canaryValid = canary?.schemaVersion === 1
-    && digest(canary.argvHash)
-    && fresh(canary.observedAtMs, nowMs, maxAgeMs)
-    && canary.orphanFree
-    && (canaryKind === 'headless'
-      ? canary.kind === 'headless_exit' && canary.exitCode === 0
-      : canary.kind === 'interactive_attach' && canary.attachable);
-  if (!common || !canaryValid) {
-    return providerBlocked(
-      canaryKind === 'headless' ? 'agy_headless' : 'tmux_agy',
-      `Antigravity ${AGY_WORKER_VERSION} ${canaryKind} probe/canary is missing, stale, or unhealthy`,
-    );
-  }
-  return ok(undefined);
+function isImplementedProvider(value: string): value is Exclude<WorkerProvider, 'antigravity_native'> {
+  return value === 'agy_headless' || value === 'tmux_agy';
 }
 
-function validNativeReceipt(
-  receipt: Readonly<NativeConversationReceiptV1>,
-  generation: number,
-  nowMs: number,
-  maxAgeMs: number,
+function capabilityProvenAtTier(
+  profile: Readonly<HostCapabilityProfileV1>,
+  capability: string,
+  requiredTier: typeof EVIDENCE_TIERS[number],
+  now: string,
 ): boolean {
-  return receipt.schemaVersion === 1
-    && receipt.provider === 'antigravity_native'
-    && receipt.generation === generation
-    && receipt.conversationId.trim() !== ''
-    && receipt.receiptId.trim() !== ''
-    && digest(receipt.capabilityDigest)
-    && fresh(receipt.observedAtMs, nowMs, maxAgeMs);
+  const assessment = profile.capabilities.find(({ key }) => key === capability);
+  const policy = HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === capability);
+  const ageMs = Date.parse(now) - Date.parse(profile.generatedAt);
+  return assessment?.outcome === 'supported'
+    && assessment.tier !== null
+    && policy !== undefined
+    && EVIDENCE_TIERS.indexOf(assessment.tier) >= EVIDENCE_TIERS.indexOf(requiredTier)
+    && ageMs >= 0
+    && ageMs <= policy.freshnessMs
+    && positiveCapabilityEvidenceExpiryMs(
+      assessment,
+      policy,
+      requiredTier,
+      Date.parse(now),
+    ) !== null;
 }
 
-function selected(
-  provider: WorkerProvider,
-  generation: number,
-  material: unknown,
-  observedAtMs: number,
-  conversationReceipt?: NativeConversationReceiptV1,
-): Result<ProviderSelectionV1, RuntimeError> {
-  return ok({
-    schemaVersion: 1,
-    provider,
-    generation,
-    evidenceHash: sha256(canonicalJson(material)),
-    observedAtMs,
-    ...(conversationReceipt === undefined ? {} : { conversationReceipt }),
+function capabilityError(message: string, cause: unknown): RuntimeError {
+  return runtimeError('E_CAPABILITY_UNPROVEN', message, {
+    cause: cause instanceof Error ? cause.message : String(cause),
   });
 }
 
-function providerBlocked<T>(provider: WorkerProvider, reason: string): Result<T, RuntimeError> {
-  return err(runtimeError('E_CAPABILITY_UNPROVEN', `Worker provider ${provider} blocked: ${reason}`, { provider }));
-}
-
-function fresh(observedAtMs: number, nowMs: number, maxAgeMs: number): boolean {
-  return Number.isSafeInteger(observedAtMs) && observedAtMs >= 0
-    && observedAtMs <= nowMs && nowMs - observedAtMs <= maxAgeMs;
-}
-
-function digest(value: string): boolean {
-  return /^[a-f0-9]{64}$/.test(value);
-}
-
-function resolveExecutable(command: string): string | null {
-  if (command.includes(path.sep)) {
+function resolveExecutable(executable: string): string | null {
+  if (path.isAbsolute(executable)) {
     try {
-      const resolved = fs.realpathSync(path.resolve(command));
+      const resolved = fs.realpathSync(executable);
       return fs.statSync(resolved).isFile() ? resolved : null;
     } catch (_) { return null; }
   }
   for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
     if (directory === '') continue;
-    const candidate = path.join(directory, command);
+    const candidate = path.join(directory, executable);
     try {
-      if (fs.statSync(candidate).isFile() && (fs.statSync(candidate).mode & 0o111) !== 0) {
-        return fs.realpathSync(candidate);
-      }
+      if (fs.statSync(candidate).isFile()) return fs.realpathSync(candidate);
     } catch (_) { /* continue */ }
   }
   return null;

@@ -6,8 +6,18 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-31
+
 ### Added
 
+- **Identity-bound Antigravity capability negotiation:** `oma native
+  capabilities [--json]`, explicit `oma native probe --live`, and passive `oma
+  doctor --native` now share one tri-state `HostCapabilityProfile`. Evidence
+  tiers/sources have policy ceilings; timeouts and identity drift remain
+  unknown; caches and Team route receipts bind exact host/plugin identity.
+  The native Team worker adapter remains deliberately unavailable and fails
+  with `E_NATIVE_ADAPTER_UNAVAILABLE`; existing headless/tmux paths are explicit
+  profile-routed fallbacks.
 - **P0 OMX-shaped `oma team api <op> --input JSON [--json]`** over the existing
   TeamStateStore claim/mailbox aggregate (not full OMX 33-op parity). Shipped
   ops: `send-message`, `mailbox-list`, `mailbox-mark-delivered`, `create-task`,
@@ -18,6 +28,42 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   list; subject/description persisted on create-task. No leader/actor proof
   (documented). P1 backlog: broadcast, events, shutdown ack, cleanup, monitor
   snapshots, etc.
+
+### Fixed
+
+- Capability-authorized workflow routes now refresh exact host identity before
+  every dependent batch, sample route time only after each probe finishes, and
+  renew live evidence when a 30-second route receipt lacks five seconds of
+  headroom.
+- Live canary observations are stamped after completion, and the existing
+  text-only 1.1.6 headless adapter no longer requires unused JSON output.
+- When JSON is advertised, its optional canary now runs before the required
+  exact-text worker canaries so optional probing cannot consume route-authority
+  freshness or authorize a different output mode. Route authority now requires
+  both the read-write `accept-edits` grammar in a disposable empty workspace and
+  the final read-only `plan --sandbox` grammar with the product
+  `--add-dir <repository>` mount. Both use the production worker argv builder.
+- Bounded native probes now enforce the policy process-count ceiling as well as
+  combined output and wall-clock limits. Process-tree scans are asynchronous
+  and share the probe deadline. POSIX probes bind a pre-spawn PID baseline to
+  a persistent parent-tree/process-group lineage keyed by PID plus process start
+  marker, so observed detached descendants remain counted after the root exits
+  without charging unrelated, reused, or zombie PIDs. The first snapshot also
+  retains new PID-1-reparented baseline-delta candidates even while the root is
+  alive, so rapid double-forks cannot escape before lineage is established;
+  later unrelated processes are not adopted.
+  Timeout/overflow termination covers
+  the whole Windows process tree, and a fixed force-settle backstop
+  prevents a detached descendant from holding inherited pipes open indefinitely.
+- Bounded plugin-registry commands now terminate the owned POSIX process group
+  or Windows descendant tree and destroy pipe readers at the settlement
+  backstop, so a timed-out or oversized `agy plugin list` cannot leave an
+  inherited-pipe orphan behind.
+- Windows host identity lookup resolves `.exe` commands from a semicolon PATH
+  and does not apply POSIX execute/ownership mode bits. Host, plugin, and route
+  paths use the profile platform's absolute-path rules.
+- Worker route-authority files enforce POSIX permission bits only on POSIX;
+  Windows still validates type, bounds, containment, identity, and digest.
 
 ## [0.4.1] — 2026-07-24
 
@@ -182,6 +228,9 @@ Antigravity 1.1.5 host for this release.
 
 ---
 
+[0.5.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.0
+[0.4.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.1
+[0.4.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.3.0
 [0.2.3]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.3
 [0.2.2]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.2

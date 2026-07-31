@@ -7,6 +7,7 @@ import { parseTeamCommand, teamCommand } from '../../src/team/commands';
 import { requireDeadProof } from '../../src/team/reclaim';
 import { GitFixture } from '../helpers/git-fixture';
 import { TmuxFixture } from '../helpers/tmux-fixture';
+import { headlessProviderRouteFactory } from '../helpers/team-provider-route';
 
 const maybeTmux = TmuxFixture.available() ? test : test.skip;
 
@@ -44,6 +45,7 @@ describe('supervise and reclaim', () => {
       const sessionNamePrefix = tmux.session('sup');
       tmux.session('sup-task-a-g1');
       const orch = new TeamOrchestrator({
+        providerProfileFactory: headlessProviderRouteFactory(),
         stateRoot: fixture.stateRoot,
         workspaceRoot: fixture.repo,
         repoKey: leader.repoKey,

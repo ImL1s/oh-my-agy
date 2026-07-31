@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { checkContinuation, acquireLock, releaseLock } from '../src/enforcer';
 import { ordinaryEnvironment } from '../src/cli/managed-invocation';
+import { isStructuredNativeCommand } from '../src/cli/parser';
 
 // 常用諮詢詞之正規表示式，用以過濾諮詢意圖，避免誤觸攔截
 const INFORMATIONAL_INTENT_PATTERNS = [
@@ -72,6 +73,7 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
   ].includes(first)) {
     return true;
   }
+  if (isStructuredNativeCommand(args)) return true;
   // 明確 managed：mode 後必須有 `--` 分隔 task
   if (['ralph', 'ultrawork', 'search'].includes(first) && args.includes('--')) {
     return true;
@@ -162,7 +164,10 @@ async function main() {
   if (shouldUseStructuredCli(args)) {
     const { createDefaultServices } = await import('../src/cli/services');
     const { runCli } = await import('../src/cli/application');
-    const code = await runCli(args, createDefaultServices({}));
+    const configuredAgy = process.env.OMA_AGY_BIN?.trim();
+    const code = await runCli(args, createDefaultServices(
+      configuredAgy ? { agyCommand: configuredAgy } : {},
+    ));
     process.exit(code);
   }
 

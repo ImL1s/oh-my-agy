@@ -5,6 +5,7 @@ import { TeamStateStore } from '../../src/team/state';
 import { resolveGitWorktreeIdentity } from '../../src/team/worktree';
 import { GitFixture } from '../helpers/git-fixture';
 import { TmuxFixture } from '../helpers/tmux-fixture';
+import { headlessProviderRouteFactory } from '../helpers/team-provider-route';
 
 const maybeTmux = TmuxFixture.available() ? test : test.skip;
 
@@ -26,6 +27,7 @@ describe('deliver and DAG tick', () => {
       const sessionNamePrefix = tmux.session('del');
       tmux.session('del-task-a-g1');
       const orch = new TeamOrchestrator({
+        providerProfileFactory: headlessProviderRouteFactory(),
         stateRoot: fixture.stateRoot,
         workspaceRoot: fixture.repo,
         repoKey: leader.repoKey,
@@ -93,6 +95,7 @@ describe('deliver and DAG tick', () => {
       tmux.session('dag-b-g1');
 
       const orch = new TeamOrchestrator({
+        providerProfileFactory: headlessProviderRouteFactory(),
         stateRoot: fixture.stateRoot,
         workspaceRoot: fixture.repo,
         repoKey: leader.repoKey,
@@ -174,6 +177,7 @@ describe('deliver and DAG tick', () => {
       fixture.git(['commit', '-m', 'src']);
       const sessionNamePrefix = tmux.session('lease');
       const orch = new TeamOrchestrator({
+        providerProfileFactory: headlessProviderRouteFactory(),
         stateRoot: fixture.stateRoot,
         workspaceRoot: fixture.repo,
         repoKey: leader.repoKey,
@@ -232,6 +236,7 @@ describe('deliver and DAG tick', () => {
       tmux.session('par-x-g1');
       tmux.session('par-y-g1');
       const orch = new TeamOrchestrator({
+        providerProfileFactory: headlessProviderRouteFactory(),
         stateRoot: fixture.stateRoot,
         workspaceRoot: fixture.repo,
         repoKey: leader.repoKey,

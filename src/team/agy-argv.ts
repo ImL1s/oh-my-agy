@@ -1,6 +1,10 @@
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 
+/**
+ * Launch-grammar compatibility metadata only. Provider routing must use the
+ * host capability profile/router and must never branch on this value.
+ */
 export const AGY_WORKER_VERSION = '1.1.6' as const;
 export const AGY_DEFAULT_HEADLESS_TIMEOUT = '5m0s' as const;
 export const AGY_MAX_HEADLESS_TIMEOUT_MS = 300_000;
@@ -37,9 +41,9 @@ export interface AgyLaunchArgvInputV1 {
 }
 
 /**
- * Antigravity CLI launch grammar frozen by OMA-W3 (pinned host
- * `AGY_WORKER_VERSION`). The prompt is returned as exactly one final argv
- * element; callers must use spawn(), never a shell command string.
+ * Antigravity CLI launch grammar frozen by OMA-W3. The prompt is returned as
+ * exactly one final argv element; callers must use spawn(), never a shell
+ * command string. This compatibility builder is not provider authority.
  */
 export function buildAgy115Argv(
   input: Readonly<AgyLaunchArgvInputV1>,
@@ -104,6 +108,8 @@ export function buildAgy115Argv(
 }
 
 export function validateAgy115Help(versionOutput: string, helpOutput: string): Result<void, RuntimeError> {
+  // Compatibility validation only. This result may describe the frozen argv
+  // grammar but must not independently authorize a provider route.
   if (versionOutput.trim() !== AGY_WORKER_VERSION) {
     return err(runtimeError('E_CAPABILITY_UNPROVEN', `Antigravity CLI version is not the frozen ${AGY_WORKER_VERSION} worker version`, {
       expected: AGY_WORKER_VERSION,

@@ -121,6 +121,7 @@ export interface WorkerAuthorityBindingV1 {
   claimTokenDigest: string;
   generation: number;
   provider: WorkerProvider;
+  providerProfileDigest?: string;
   providerReceiptHash: string;
   conversation?: NativeConversationReceiptV1;
   process?: ProcessMarkerV1;

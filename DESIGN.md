@@ -86,13 +86,17 @@ an emulator that merely reproduces version/help output is insufficient.
 - `src/mcp/*` exposes exactly six read/proposal operations over NDJSON JSON-RPC.
 - `src/wiki/*` creates a deterministic bounded repository documentation index.
 - `src/hud/*` renders redacted session/team/adapter projections and watch output.
-- `src/native/*` probes only public Antigravity/version/help or explicit
-  registration files and reports evidence tiers.
+- `src/native/*` probes only bounded public Antigravity surfaces and explicit
+  contained configuration. One identity-bound `HostCapabilityProfile` records
+  tri-state outcomes, evidence tiers/sources, fallbacks, and route receipts;
+  version strings remain metadata rather than feature gates.
 - `src/notify/*` provides owner-fenced terminal, tmux, and allowlisted HTTPS
   notifications; all are disabled until configured.
 
-Native team/workflow/LSP/private-memory support remains T0 unless fresh public
-evidence proves it. Private sidecars are intentionally not probed.
+Native team/workflow/LSP/public-sidecar support stays unclaimed until the
+profile carries sufficient fresh public evidence. Private sidecar/brain
+internals are intentionally never probed. Offline fixtures and tests establish
+implementation behavior, not live-host parity.
 
 ## Installation and release
 

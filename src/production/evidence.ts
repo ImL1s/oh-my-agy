@@ -17,6 +17,14 @@ import {
 } from '../native/antigravity-status';
 import { inspectHostLspStatus } from '../native/lsp-status';
 import { resolveStateRoot } from '../runtime/state-root';
+import {
+  PluginIdentityV1,
+  createHostCapabilityCacheKey,
+  issueHostRouteReceipt,
+  routeHostCapability,
+  validateHostRouteReceipt,
+} from '../native/capability-profile';
+import { HostCapabilityProfileCacheV1, inspectExecutableIdentity } from '../native/probes';
 import { PluginCommandAdapter, verifyPluginActive } from '../setup/plugin';
 import { runDoctor } from '../setup/doctor';
 import { readWorkflowJournal, replayWorkflowEvents } from '../workflows/replay';
@@ -27,7 +35,7 @@ import { planRepositoryWorkflow } from '../workflows/planner';
 import {
   assertRepositoryExternalAuthorityRoot,
 } from '../workflows/authority';
-import { validateAgy115Help } from '../team/agy-argv';
+import { validateProviderRoutePreconditions } from '../team/provider';
 import { resolveCanonicalAgyIdentity } from '../native/antigravity-status';
 
 export type ProductionEvidenceSeam =
@@ -361,6 +369,8 @@ export async function runCoreProductionProbe(
 export interface PreparedWorkflowProductionProbeV1 {
   readonly runId: string;
   readonly oid: string;
+  readonly profileDigest: string;
+  readonly routeReceiptDigest: string;
   readonly execution: Readonly<{
     definition: RepositoryWorkflowV1;
     plan: WorkflowPlanV1;
@@ -411,11 +421,19 @@ export async function prepareWorkflowProductionProbeFromCli(
   const helpProbe = spawnSync(agyRealpath, ['--help'], captureOptions(
     process.env, repositoryRoot, 15_000, 262_144,
   ));
-  const host = validateAgy115Help(
-    `${versionProbe.stdout ?? ''}`.trim(),
-    `${helpProbe.stdout ?? ''}\n${helpProbe.stderr ?? ''}`,
-  );
-  if (!host.ok) throw new Error(`${host.error.code}: ${host.error.message}`);
+  if (versionProbe.status !== 0 || helpProbe.status !== 0
+    || versionProbe.error !== undefined || helpProbe.error !== undefined) {
+    throw new Error('E_CAPABILITY_UNPROVEN: Antigravity identity probe failed');
+  }
+  const versionOutput = `${versionProbe.stdout ?? ''}${versionProbe.stderr ?? ''}`;
+  const helpOutput = `${helpProbe.stdout ?? ''}${helpProbe.stderr ?? ''}`;
+  const hostIdentity = inspectExecutableIdentity({
+    executable: agyRealpath,
+    version: versionOutput.match(/(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)/u)?.[1] ?? null,
+    versionOutput,
+    helpOutput,
+    pathEnvironment: process.env.PATH,
+  });
   const pluginAdapter = realAgyPluginAdapter(agyRealpath, process.env, repositoryRoot);
   const active = await verifyPluginActive({
     packageRoot,
@@ -432,6 +450,45 @@ export async function prepareWorkflowProductionProbeFromCli(
   const stateRoot = resolveProductionStateRoot({
     environment: { ...process.env, OMA_STATE_ROOT: undefined },
     create: true,
+  });
+  const pluginIdentity: PluginIdentityV1 = {
+    status: 'present',
+    realpath: active.value.installPath,
+    packageDigest: active.value.installedDigest,
+    version: active.value.version,
+    readbackDigest: active.value.listStdoutSha256,
+    enabled: true,
+  };
+  const cacheKey = createHostCapabilityCacheKey({ hostIdentity, pluginIdentity });
+  const selectedAt = new Date().toISOString();
+  const profile = new HostCapabilityProfileCacheV1(stateRoot).read(cacheKey, selectedAt);
+  if (profile === null) {
+    throw new Error('E_CAPABILITY_UNPROVEN: workflow production probe requires a fresh live profile; run oma native probe --live');
+  }
+  const preconditions = validateProviderRoutePreconditions(profile, 'headless', selectedAt);
+  if (!preconditions.ok) throw new Error(`${preconditions.error.code}: ${preconditions.error.message}`);
+  const routeContextDigest = sha256Hex(canonicalBytesV1([
+    'oma-production-workflow-preflight/v1', runId, oid, profile.profileDigest,
+  ]));
+  const candidate = routeHostCapability(profile, {
+    capability: 'headless.print',
+    provider: 'agy_headless',
+    requestMode: 'headless',
+    generation: 1,
+    contextDigest: routeContextDigest,
+    selectedAt,
+    ttlMs: 30_000,
+    fallbackPreconditionsSatisfied: preconditions.value,
+  });
+  const routeReceipt = issueHostRouteReceipt(candidate, agyRealpath, 'agy_headless_v1');
+  validateHostRouteReceipt(routeReceipt, profile, {
+    now: selectedAt,
+    generation: 1,
+    contextDigest: routeContextDigest,
+    identityDigest: profile.identityDigest,
+    fallbackPreconditionsSatisfied: true,
+    provider: 'agy_headless',
+    requestMode: 'headless',
   });
   const context: ProductionProbeContext = {
     packageRoot,
@@ -471,6 +528,8 @@ export async function prepareWorkflowProductionProbeFromCli(
   const prepared: PreparedWorkflowProductionProbeV1 = Object.freeze({
     runId,
     oid,
+    profileDigest: profile.profileDigest,
+    routeReceiptDigest: routeReceipt.receiptDigest,
     execution: Object.freeze({
       definition,
       plan,

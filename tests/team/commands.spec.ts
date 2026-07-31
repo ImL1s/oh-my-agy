@@ -12,6 +12,11 @@ import { resolveGitWorktreeIdentity } from '../../src/team/worktree';
 import { RuntimeContext } from '../../src/team/types';
 import { GitFixture } from '../helpers/git-fixture';
 import { TmuxFixture } from '../helpers/tmux-fixture';
+import {
+  HostIdentityV1,
+  PluginIdentityV1,
+  assembleHostCapabilityProfile,
+} from '../../src/native/capability-profile';
 
 function aggregate(root: string): RecoveryTaskAggregateV1 {
   const worktree = resolveGitWorktreeIdentity(root);
@@ -48,6 +53,17 @@ function aggregate(root: string): RecoveryTaskAggregateV1 {
 }
 
 describe('typed teamCommand surface', () => {
+  test('team start defaults to the profile-routable headless mode', () => {
+    expect(parseTeamCommand(['start', '--manifest', 'team.json'])).toEqual({
+      ok: true,
+      value: {
+        kind: 'start',
+        manifestPath: 'team.json',
+        workerMode: 'headless',
+      },
+    });
+  });
+
   test('parseTeamCommand preserves resolve-fork flags without reinterpretation', () => {
     expect(parseTeamCommand([
       'resolve-fork', '--team', 't1', '--fork', 'f1', '--winner-generation', '2',
@@ -245,6 +261,27 @@ describe('typed teamCommand surface', () => {
         })(),
         workerExecutablePath: process.execPath,
         workerBootstrapArgv: [holdJs],
+        providerProfileFactory: ({ selectedAt }) => {
+          const host: HostIdentityV1 = {
+            realpath: '/opt/agy', binarySha256: sha256('binary'), version: null,
+            versionOutputSha256: sha256('version'), helpOutputSha256: sha256('help'),
+            platform: 'darwin', arch: 'arm64',
+          };
+          const plugin: PluginIdentityV1 = {
+            status: 'present', realpath: '/opt/plugin', packageDigest: sha256('plugin'),
+            version: '1', readbackDigest: sha256('readback'), enabled: true,
+          };
+          const empty = assembleHostCapabilityProfile({ evaluationTimestamp: selectedAt, hostIdentityBefore: host, hostIdentityAfter: host, pluginIdentityBefore: plugin, pluginIdentityAfter: plugin, observations: [] });
+          const profile = assembleHostCapabilityProfile({
+            evaluationTimestamp: selectedAt, hostIdentityBefore: host, hostIdentityAfter: host,
+            pluginIdentityBefore: plugin, pluginIdentityAfter: plugin,
+            observations: ['headless.print', 'headless.json'].map((capability) => ({ capability, source: 'live_probe' as const, tier: 'healthy' as const, result: 'positive' as const, observedAt: selectedAt, identityDigest: empty.identityDigest, detailCode: 'TEST_OK', diagnostic: null })),
+          });
+          return { ok: true, value: {
+            profile,
+            resolvedExecutable: '/opt/agy',
+          } };
+        },
       });
 
       let stdout = '';

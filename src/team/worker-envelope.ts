@@ -7,10 +7,14 @@ import {
   validateWorkerEnvelope,
 } from '../contracts/worker-envelope';
 import { sha256 } from '../runtime/atomic';
+import {
+  HostCapabilityProfileV1,
+  HostRouteReceiptV1,
+  validateHostRouteReceipt,
+} from '../native/capability-profile';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { CanonicalTeamTaskV1 } from './types';
-import { ProviderSelectionV1 } from './provider';
 
 export interface ContributorGuidanceHashV1 {
   path: string;
@@ -31,7 +35,14 @@ export interface BuildWorkerEnvelopeInputV1 {
   generation: number;
   stateEndpoint: string;
   cancellationTokenHash: string;
-  selection: ProviderSelectionV1;
+  profile: HostCapabilityProfileV1;
+  receipt: HostRouteReceiptV1;
+  validation: {
+    now: string;
+    contextDigest: string;
+    identityDigest: string;
+    fallbackPreconditionsSatisfied: boolean;
+  };
   nativeRole: string;
   deadlineMs: number;
 }
@@ -39,12 +50,29 @@ export interface BuildWorkerEnvelopeInputV1 {
 export function buildWorkerEnvelope(
   input: Readonly<BuildWorkerEnvelopeInputV1>,
 ): Result<WorkerEnvelopeV1, RuntimeError> {
+  const rawInput = input as unknown as Record<string, unknown>;
+  if ('selection' in rawInput || 'evidenceHash' in rawInput || 'providerEvidence' in rawInput) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Legacy provider evidence cannot authorize a worker envelope'));
+  }
   let repositoryRoot: string;
   try { repositoryRoot = fs.realpathSync(input.repositoryRoot); } catch (_) {
     return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'Worker envelope repository root is unavailable'));
   }
-  if (input.selection.generation !== input.generation) {
-    return err(runtimeError('E_REVISION_CONFLICT', 'Provider selection generation is stale'));
+  let receipt: HostRouteReceiptV1;
+  try {
+    receipt = validateHostRouteReceipt(input.receipt, input.profile, {
+      ...input.validation,
+      generation: input.generation,
+    });
+  } catch (error) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker envelope route receipt is invalid', {
+      cause: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  if (receipt.provider === 'antigravity_native') {
+    return err(runtimeError('E_NATIVE_ADAPTER_UNAVAILABLE', 'Antigravity native worker adapter is unavailable', {
+      provider: 'antigravity_native', adapterImplemented: false,
+    }));
   }
   const expectedDependencies = [...input.task.dependencies];
   if (input.dependencyResults.length !== expectedDependencies.length
@@ -87,7 +115,9 @@ export function buildWorkerEnvelope(
     generation: input.generation,
     state_endpoint: input.stateEndpoint,
     cancellation_token_hash: input.cancellationTokenHash,
-    provider: input.selection.provider,
+    provider: receipt.provider as WorkerEnvelopeV1['provider'],
+    provider_profile_digest: receipt.profileDigest,
+    route_receipt_digest: receipt.receiptDigest,
     native_role: input.nativeRole,
     capability_mode: capabilityMode,
     deadline_ms: input.deadlineMs,

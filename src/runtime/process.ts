@@ -300,7 +300,7 @@ export class ProcessRunner {
       if (maxProcessCount !== undefined && maxProcessCount > 0 && child.pid !== undefined) {
         processCountTimer = setInterval(() => {
           if (settled || processCountOverflow) return;
-          const count = countProcessGroup(child.pid!);
+          const count = countProcessGroup(child.pid!, maxProcessCount);
           if (count !== null && count > maxProcessCount) {
             triggerKill('processCount');
           }
@@ -389,26 +389,275 @@ function redactedArgvEvidence(value: string): string {
   return `<arg:${digest}>`;
 }
 
-/** 計算 pid 及其子孫數量；darwin/linux 用 pgrep -P 遞迴。失敗回 null。 */
-function countProcessGroup(rootPid: number): number | null {
+const PROCESS_INSPECTION_MAX_OUTPUT_BYTES = 256 * 1024;
+
+/** 計算 pid 及其子孫數量；超過 policy 上限後立即停止列舉。失敗回 null。 */
+function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_INTEGER): number | null {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0
+    || !Number.isSafeInteger(stopAfter) || stopAfter <= 0) return null;
+  if (process.platform === 'win32') return null;
   try {
-    const seen = new Set<number>();
-    const queue = [rootPid];
-    while (queue.length > 0) {
-      const pid = queue.pop()!;
-      if (seen.has(pid)) continue;
-      seen.add(pid);
-      const listed = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
-      if (listed.status !== 0 && listed.status !== 1) continue;
-      const children = listed.stdout.trim() === ''
-        ? []
-        : listed.stdout.trim().split('\n').map((line) => Number(line)).filter((n) => Number.isFinite(n));
-      for (const child of children) queue.push(child);
-    }
-    return seen.size;
+    const listed = spawnSync(
+      'ps',
+      ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat=', '-o', 'lstart='],
+      {
+        encoding: 'utf8',
+        timeout: 1_000,
+        maxBuffer: PROCESS_INSPECTION_MAX_OUTPUT_BYTES,
+      },
+    );
+    if (listed.error !== undefined || listed.status !== 0) return null;
+    return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter);
   } catch (_) {
     return null;
   }
+}
+
+/**
+ * 非阻塞程序樹計數，供有硬性 wall-clock deadline 的 capability probes 使用。
+ * 整次列舉共用一個 deadline，避免每個子程序或 PowerShell fallback 各自重置 timeout。
+ */
+export async function countProcessGroupAsync(
+  rootPid: number,
+  stopAfter = Number.MAX_SAFE_INTEGER,
+  timeoutMs = 1_000,
+  lineage?: PosixProcessLineageTracker,
+): Promise<number | null> {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0
+    || !Number.isSafeInteger(stopAfter) || stopAfter <= 0
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) return null;
+  const deadlineAt = Date.now() + timeoutMs;
+  if (process.platform === 'win32') {
+    return countWindowsProcessTreeAsync(rootPid, stopAfter, deadlineAt);
+  }
+  const listed = await runProcessInspection(
+    'ps',
+    ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat=', '-o', 'lstart='],
+    deadlineAt,
+  );
+  if (listed === null || listed.status !== 0) return null;
+  return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter, lineage, listed.pid);
+}
+
+/** 在 probe spawn 前非阻塞擷取 POSIX PID/start baseline，供 root 退出後保守追蹤新程序。 */
+export async function capturePosixProcessBaselineAsync(
+  timeoutMs = 1_000,
+): Promise<ReadonlyMap<number, string> | null> {
+  if (process.platform === 'win32' || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) return null;
+  const listed = await runProcessInspection(
+    'ps',
+    ['-A', '-o', 'pid=', '-o', 'lstart='],
+    Date.now() + timeoutMs,
+  );
+  if (listed === null || listed.status !== 0) return null;
+  const processes = new Map<number, string>();
+  for (const line of listed.stdout.split('\n')) {
+    if (line.trim() === '') continue;
+    const match = /^\s*(\d+)\s+(.+?)\s*$/u.exec(line);
+    if (match === null) return null;
+    const pid = Number(match[1]);
+    const startMarker = match[2].trim();
+    if (!Number.isSafeInteger(pid) || pid <= 0 || startMarker === '') return null;
+    if (pid !== listed.pid) processes.set(pid, startMarker);
+  }
+  return processes;
+}
+
+export interface PosixProcessLineageTracker {
+  readonly baselineProcesses: ReadonlyMap<number, string>;
+  readonly observedProcesses: Map<number, string>;
+  firstSnapshotCompleted: boolean;
+}
+
+/** 跨 snapshot 保留 PID/start 證實的 probe lineage，避免誤收 PID reuse。 */
+export function createPosixProcessLineageTracker(
+  baselineProcesses: ReadonlyMap<number, string>,
+): PosixProcessLineageTracker {
+  return {
+    baselineProcesses,
+    observedProcesses: new Map<number, string>(),
+    firstSnapshotCompleted: false,
+  };
+}
+
+interface PosixProcessSnapshotRow {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  stat: string;
+  startMarker: string;
+}
+
+/**
+ * 以單一 ps snapshot 同時計算 parent tree 與 root process group。
+ * Stateful lineage 只保留由 parent/group 關係證實的 PID；首次 snapshot 另會保守納入
+ * baseline 之後已 reparent 給 PID 1 的新程序，避免 root 尚存活時漏掉快速離群的子孫。
+ */
+export function countPosixProbeSnapshot(
+  output: string,
+  rootPid: number,
+  stopAfter: number,
+  lineage?: PosixProcessLineageTracker,
+  inspectorPid?: number | null,
+): number | null {
+  const rows: PosixProcessSnapshotRow[] = [];
+  for (const line of output.split('\n')) {
+    if (line.trim() === '') continue;
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/u.exec(line);
+    if (match === null) return null;
+    const row = {
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      pgid: Number(match[3]),
+      stat: match[4],
+      startMarker: match[5].trim(),
+    };
+    if (!Number.isSafeInteger(row.pid) || row.pid <= 0
+      || !Number.isSafeInteger(row.ppid) || row.ppid < 0
+      || !Number.isSafeInteger(row.pgid) || row.pgid < 0
+      || row.stat.length === 0 || row.startMarker === '') return null;
+    if (!row.stat.startsWith('Z')) rows.push(row);
+  }
+  const eligibleRows = inspectorPid === undefined || inspectorPid === null
+    ? rows
+    : rows.filter(({ pid }) => pid !== inspectorPid);
+  const root = eligibleRows.find(({ pid }) => pid === rootPid);
+  const rootGroup = eligibleRows.filter(({ pid, pgid }) => pid !== rootPid && pgid === rootPid);
+  const firstSnapshotDetached = lineage === undefined || lineage.firstSnapshotCompleted
+    ? []
+    : eligibleRows.filter((row) => {
+      if (row.pid === rootPid || row.ppid !== 1) return false;
+      const baselineStart = lineage.baselineProcesses.get(row.pid);
+      return baselineStart === undefined || baselineStart !== row.startMarker;
+    });
+  if (root === undefined && lineage === undefined) {
+    const historicalCount = 1 + rootGroup.length;
+    return historicalCount > stopAfter ? historicalCount : null;
+  }
+  if (root !== undefined) {
+    if (root.pgid !== rootPid) return null;
+    const observedRootStart = lineage?.observedProcesses.get(rootPid);
+    if (observedRootStart !== undefined && observedRootStart !== root.startMarker) return null;
+    lineage?.observedProcesses.set(rootPid, root.startMarker);
+  }
+  if (lineage !== undefined) lineage.firstSnapshotCompleted = true;
+
+  const children = new Map<number, PosixProcessSnapshotRow[]>();
+  for (const row of eligibleRows) {
+    const entries = children.get(row.ppid) ?? [];
+    entries.push(row);
+    children.set(row.ppid, entries);
+  }
+  const seen = new Set<number>();
+  const previouslyObserved = lineage === undefined
+    ? []
+    : eligibleRows.filter(({ pid, startMarker }) =>
+      lineage.observedProcesses.get(pid) === startMarker);
+  const queue = [
+    ...(root === undefined ? [] : [root]),
+    ...rootGroup,
+    ...firstSnapshotDetached,
+    ...previouslyObserved,
+  ];
+  while (queue.length > 0) {
+    const row = queue.pop()!;
+    if (seen.has(row.pid)) continue;
+    seen.add(row.pid);
+    lineage?.observedProcesses.set(row.pid, row.startMarker);
+    const ownedCount = lineage === undefined
+      ? seen.size
+      : lineage.observedProcesses.size + (lineage.observedProcesses.has(rootPid) ? 0 : 1);
+    if (ownedCount > stopAfter) return ownedCount;
+    queue.push(...(children.get(row.pid) ?? []));
+  }
+  if (lineage !== undefined) {
+    return lineage.observedProcesses.size + (lineage.observedProcesses.has(rootPid) ? 0 : 1);
+  }
+  return seen.size;
+}
+
+async function countWindowsProcessTreeAsync(
+  rootPid: number,
+  stopAfter: number,
+  deadlineAt: number,
+): Promise<number | null> {
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    '$rows = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId',
+    '$seen = New-Object "System.Collections.Generic.HashSet[int]"',
+    '$queue = New-Object "System.Collections.Generic.Queue[int]"',
+    `$queue.Enqueue(${rootPid})`,
+    `while ($queue.Count -gt 0 -and $seen.Count -le ${stopAfter}) {`,
+    '  $pidValue = $queue.Dequeue()',
+    '  if (-not $seen.Add($pidValue)) { continue }',
+    '  foreach ($row in $rows) { if ($row.ParentProcessId -eq $pidValue) { $queue.Enqueue([int]$row.ProcessId) } }',
+    '}',
+    '[Console]::Out.Write($seen.Count)',
+  ].join('; ');
+  for (const command of ['powershell.exe', 'pwsh.exe']) {
+    const result = await runProcessInspection(
+      command,
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      deadlineAt,
+    );
+    if (result === null || result.status !== 0) continue;
+    const count = Number(result.stdout.trim());
+    if (Number.isSafeInteger(count) && count > 0) return count;
+  }
+  return null;
+}
+
+function runProcessInspection(
+  command: string,
+  argv: readonly string[],
+  deadlineAt: number,
+): Promise<{ status: number | null; stdout: string; pid: number | null } | null> {
+  return new Promise((resolve) => {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    let output = Buffer.alloc(0);
+    let child: ReturnType<typeof spawn>;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (value: { status: number | null; stdout: string; pid: number | null } | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      child = spawn(command, [...argv], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+    } catch (_) {
+      resolve(null);
+      return;
+    }
+    if (child.stdout === null) {
+      try { child.kill('SIGKILL'); } catch (_) { /* inspection 未啟動 */ }
+      resolve(null);
+      return;
+    }
+    timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch (_) { /* inspection 已結束 */ }
+      settle(null);
+    }, remainingMs);
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      if (output.length + chunk.length > PROCESS_INSPECTION_MAX_OUTPUT_BYTES) {
+        try { child.kill('SIGKILL'); } catch (_) { /* inspection 已結束 */ }
+        settle(null);
+        return;
+      }
+      output = Buffer.concat([output, chunk]);
+    });
+    child.once('error', () => settle(null));
+    child.once('close', (status) => settle({ status, stdout: output.toString('utf8'), pid: child.pid ?? null }));
+  });
 }
 
 function invokeSpawnCallback(

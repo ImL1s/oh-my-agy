@@ -42,6 +42,10 @@ export interface WorkerEnvelopeV1 {
   state_endpoint: string;
   cancellation_token_hash: string;
   provider: WorkerProvider;
+  /** Profile-backed route authority. Required for newly constructed Team envelopes. */
+  provider_profile_digest?: string;
+  /** Selector-issued HostRouteReceiptV1 digest. Required for newly constructed Team envelopes. */
+  route_receipt_digest?: string;
   native_role: string;
   capability_mode: 'read-only' | 'read-write';
   deadline_ms: number;
@@ -52,6 +56,11 @@ const WORKER_ENVELOPE_KEYS = [
   'task_text', 'dependencies', 'write_scope', 'verification_argv', 'artifact_contract',
   'contributor_guidance_hashes', 'mailbox_cursor', 'claim_id', 'generation', 'state_endpoint',
   'cancellation_token_hash', 'provider', 'native_role', 'capability_mode', 'deadline_ms',
+] as const;
+
+const RECEIPT_BOUND_WORKER_ENVELOPE_KEYS = [
+  ...WORKER_ENVELOPE_KEYS,
+  'provider_profile_digest', 'route_receipt_digest',
 ] as const;
 
 const DEPENDENCY_KEYS = ['task_id', 'result_hash', 'artifact_roots'] as const;
@@ -71,7 +80,14 @@ export function validateWorkerEnvelope(value: unknown): WorkerEnvelopeV1 {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new ContractViolation('E_WORKER_ENVELOPE', 'Worker envelope must be an object');
   }
-  assertExactObjectKeys(value as Record<string, unknown>, WORKER_ENVELOPE_KEYS, 'worker envelope');
+  const record = value as Record<string, unknown>;
+  const receiptBound = Object.prototype.hasOwnProperty.call(record, 'provider_profile_digest')
+    || Object.prototype.hasOwnProperty.call(record, 'route_receipt_digest');
+  assertExactObjectKeys(
+    record,
+    receiptBound ? RECEIPT_BOUND_WORKER_ENVELOPE_KEYS : WORKER_ENVELOPE_KEYS,
+    'worker envelope',
+  );
   const envelope = value as Partial<WorkerEnvelopeV1>;
   if (envelope.store_kind !== 'oma_worker_envelope' || envelope.schema_version !== 1
     || envelope.repository_id !== 'OMA') {
@@ -109,6 +125,10 @@ export function validateWorkerEnvelope(value: unknown): WorkerEnvelopeV1 {
     throw new ContractViolation('E_WORKER_ENVELOPE', 'Worker cursor/generation/deadline is invalid');
   }
   assertSha256(envelope.cancellation_token_hash, 'cancellation_token_hash');
+  if (receiptBound) {
+    assertSha256(envelope.provider_profile_digest, 'provider_profile_digest');
+    assertSha256(envelope.route_receipt_digest, 'route_receipt_digest');
+  }
   const dependencyIds = new Set<string>();
   for (const dependency of envelope.dependencies) {
     if (typeof dependency !== 'object' || dependency === null || Array.isArray(dependency)) {

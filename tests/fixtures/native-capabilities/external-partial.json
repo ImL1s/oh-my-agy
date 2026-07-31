@@ -1,0 +1,12 @@
+{
+  "name": "external-partial",
+  "version": "external-2026.07",
+  "versionOutput": "Antigravity external build 2026.07\n",
+  "helpOutput": "Usage: agy [flags]\n  -p, --print PROMPT\n  --output-format json\n  --model MODEL\n",
+  "expected": {
+    "headless.print": "supported",
+    "headless.json": "supported",
+    "headless.stream_json": "unsupported",
+    "headless.json_schema": "unsupported"
+  }
+}

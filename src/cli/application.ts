@@ -2,7 +2,7 @@ import { RuntimeError } from '../runtime/errors';
 import { ProcessOutcome } from '../runtime/process';
 import { Result } from '../runtime/types';
 import { ManagedMode } from '../modes/directives';
-import { ExtendedCliCommand, parseCliArguments } from './parser';
+import { ExtendedCliCommand, NativeCliCommand, parseCliArguments } from './parser';
 
 export interface CliServices {
   readonly version?: string;
@@ -13,6 +13,7 @@ export interface CliServices {
   setupCommand(argv: readonly string[]): Promise<number>;
   doctorCommand(argv: readonly string[]): Promise<number>;
   skillCommand(argv: readonly string[]): Promise<number>;
+  nativeCommand(command: NativeCliCommand, argv: readonly string[]): Promise<number>;
   extendedCommand(command: ExtendedCliCommand, argv: readonly string[]): Promise<number>;
 }
 
@@ -38,6 +39,8 @@ Usage:
   oma wiki index|list|search <query> [--limit <1..50>]
   oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
   oma native-status | lsp-status | sidecar-status
+  oma native capabilities [--json]
+  oma native probe --live [--json]
   oma notify status|test [--severity <level>] [--title <text>] [--message <text>]
   oma resume --session <id> --conversation <id> --expected-revision <n>
   oma recovery --source <transcript.jsonl> [--recovery-root <dir>] [--include-prompt]
@@ -71,7 +74,7 @@ Usage:
   oma team api <op> --input JSON [--json]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace] [--host all|agy|claude|grok]
-  oma doctor [--json] [--no-strict-plugin]
+  oma doctor [--json] [--no-strict-plugin] [--native]
 
   team api P0 ops: send-message, mailbox-list, mailbox-mark-delivered, create-task,
   list-tasks, claim-task, transition-task-status, release-task-claim, get-summary,
@@ -115,6 +118,8 @@ export async function runCli(
       return services.doctorCommand(command.args);
     case 'skill':
       return services.skillCommand(command.args);
+    case 'native':
+      return services.nativeCommand(command.command, command.args);
     case 'extended':
       return services.extendedCommand(command.command, command.args);
   }
