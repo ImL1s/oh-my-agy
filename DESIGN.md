@@ -100,10 +100,13 @@ implementation behavior, not live-host parity.
 
 ## Installation and release
 
-`src/setup/*` validates installed identity, performs install/enable/list/readback
-transactions, writes immutable ownership receipts, updates to preverified package
-roots, and uninstalls only owned inventory. `scripts/install.sh` supports local
-development, verified GitHub assets, and offline tarball+checksum installation.
+`src/setup/*` validates installed identity, snapshots and removes a
+registry-owned prior plugin before the Antigravity overlay install, performs
+install/enable/list/exact-readback transactions, writes immutable ownership
+receipts, updates to preverified package roots, and uninstalls only owned
+inventory. Failed switches clear partial candidate bytes before restoring the
+snapshot. `scripts/install.sh` supports local development, verified GitHub
+assets, and offline tarball+checksum installation.
 
 CI is deterministic and read-only. `oma production verify` is a separate
 fail-closed live gate requiring fresh, exact-commit evidence across seven seams.

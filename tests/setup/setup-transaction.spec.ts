@@ -57,10 +57,7 @@ class InstallingAdapter implements PluginCommandAdapter {
       };
     }
     if (argv[0] === 'plugin' && argv[1] === 'install' && argv[2]) {
-      if (fs.existsSync(this.installedRoot)) {
-        writable(this.installedRoot);
-        fs.rmSync(this.installedRoot, { recursive: true, force: true });
-      }
+      // 真實 Antigravity 同名安裝會覆蓋既有目錄而不清除舊檔案。
       fs.cpSync(argv[2], this.installedRoot, { recursive: true, dereference: true });
       if (this.uncertainInstall) {
         return { argv: [...argv], code: 9, stdout: '', stderr: 'timeout: result unknown' };
@@ -157,6 +154,41 @@ describe('transactional immutable plugin setup', () => {
       status: 'rolled_back',
       recovery: expect.stringContaining('restored previous'),
     }));
+  });
+
+  test('removes an existing plugin before install so overlay semantics cannot retain stale files', async () => {
+    surface(installedRoot, '0.9.0', 'previous');
+    const stale = path.join(installedRoot, 'dist', 'src', 'hooks', 'stale.js');
+    fs.writeFileSync(stale, 'stale');
+    const adapter = new InstallingAdapter(installedRoot);
+    const transaction = new PluginSetupTransaction({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      adapter,
+      idFactory: () => 'transaction-upgrade',
+    });
+
+    const result = await transaction.run();
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      value: expect.objectContaining({
+        status: 'success',
+        installedIdentity: expect.objectContaining({ version: '1.0.0' }),
+      }),
+    }));
+    expect(fs.existsSync(stale)).toBe(false);
+    expect(adapter.calls.map((argv) => argv.slice(0, 2).join(' '))).toEqual([
+      'plugin list',
+      'plugin validate',
+      'plugin disable',
+      'plugin uninstall',
+      'plugin list',
+      'plugin install',
+      'plugin enable',
+      'plugin list',
+    ]);
   });
 
   test('an uncertain install result is adopted only after exact installed readback', async () => {

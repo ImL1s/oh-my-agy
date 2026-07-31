@@ -101,5 +101,9 @@ bytes, promote it, and verify a fresh install. Any timeout is `unknown`, not
 success. Do not rebuild after freezing the bundle.
 
 `oma update --release` activates an already verified immutable package root.
+Because Antigravity installs same-name plugins with overlay semantics, the
+transaction first snapshots the registry-owned install, removes it, and then
+installs the staged candidate. Exact readback must pass; otherwise partial
+candidate bytes are removed before the snapshot is restored.
 `oma uninstall --receipt <path>` removes only receipt-owned inventory; `--purge`
 also requires the exact project-state path.
