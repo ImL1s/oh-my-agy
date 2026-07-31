@@ -304,6 +304,53 @@ exit 0
     }
   });
 
+  test('passive help evidence is timestamped after the host help probe completes', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-passive-time-'));
+    const executable = path.join(cwd, 'agy');
+    const completionMarker = path.join(cwd, 'help-complete');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 1.1.9\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then
+  /bin/sleep 0.05
+  if [ ! -f ${JSON.stringify(completionMarker)} ]; then : > ${JSON.stringify(completionMarker)}; fi
+  printf '%s\\n' '--print --output-format json'
+  exit 0
+fi
+exit 2
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      pluginAdapter: { run: async (argv) => ({ argv: [...argv], code: 1, stdout: '', stderr: 'registry unavailable' }) },
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      const body = JSON.parse(stdout) as {
+        profile: {
+          capabilities: Array<{
+            key: string;
+            observations: Array<{ source: string; observedAt: string }>;
+          }>;
+        };
+      };
+      const helpObservation = body.profile.capabilities
+        .find(({ key }) => key === 'headless.print')
+        ?.observations.find(({ source }) => source === 'help');
+      expect(helpObservation).toBeDefined();
+      expect(Date.parse(helpObservation!.observedAt) + 1).toBeGreaterThanOrEqual(
+        fs.statSync(completionMarker).mtimeMs,
+      );
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   test('failed live probe invalidates a prior success for the same host identity', async () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-invalidate-'));
     const executable = path.join(cwd, 'agy');

@@ -30,6 +30,7 @@ import {
   completeLiveCapabilityProbeCoverage,
   completePassiveObservationCoverage,
   inspectExecutableIdentity,
+  isHostCapabilityProfileFresh,
   parseHookManifestReadback,
   parsePluginReadback,
   probeConfigObject,
@@ -336,7 +337,6 @@ export async function inspectNativeCapabilities(
   >,
   live: boolean,
 ): Promise<NativeCapabilityInspectionResultV1> {
-  const inspectionStartedAt = new Date().toISOString();
   const first = await readNativeHostSurface(context.agyCommand, context.environment);
   if (first === null) {
     return {
@@ -364,33 +364,42 @@ export async function inspectNativeCapabilities(
   });
   const stateRoot = nativeStateRoot(context.stateRoot, context.environment);
   const cache = stateRoot === null ? null : new HostCapabilityProfileCacheV1(stateRoot);
+  const cacheReadAt = new Date().toISOString();
+  const cacheSnapshotBefore = cache?.readSnapshot(expectedCacheKey) ?? null;
   if (!live) {
-    const cached = cache?.read(expectedCacheKey, inspectionStartedAt);
-    if (cached !== null && cached !== undefined) {
+    if (cacheSnapshotBefore !== null
+      && isHostCapabilityProfileFresh(cacheSnapshotBefore.profile, cacheReadAt)) {
       return {
-        kind: 'profile', profile: cached, cacheStatus: 'hit', diagnostics: [], liveSucceeded: null,
+        kind: 'profile', profile: cacheSnapshotBefore.profile, cacheStatus: 'hit', diagnostics: [], liveSucceeded: null,
       };
     }
   }
   const probeContext = {
     mode: 'passive',
-    evaluationTimestamp: inspectionStartedAt,
+    evaluationTimestamp: cacheReadAt,
     identityDigest,
     hostIdentity: hostIdentityBefore,
     pluginIdentity,
     runner: async () => first.helpOutcome,
   } as const;
-  const passive = await probeDocumentedHelp(hostIdentityBefore.realpath, probeContext);
+  const passive = await probeDocumentedHelp(
+    hostIdentityBefore.realpath,
+    probeContext,
+    () => new Date().toISOString(),
+  );
+  const passiveObservedAt = passive.observations[0]?.observedAt;
+  if (passiveObservedAt === undefined) throw new Error('passive help probe returned no capability observation');
+  const readbackContext = { ...probeContext, evaluationTimestamp: passiveObservedAt } as const;
   const observations = [...passive.observations];
-  const configReadback = probeConfigObject(pluginBefore.configProjection, probeContext);
+  const configReadback = probeConfigObject(pluginBefore.configProjection, readbackContext);
   observations.push(...configReadback.observations);
   const pluginReadback = pluginIdentity.status === 'present'
-    ? parsePluginReadback(pluginBefore.readback, probeContext)
+    ? parsePluginReadback(pluginBefore.readback, readbackContext)
     : pluginIdentity.status === 'absent'
       ? { observations: [], cacheable: true, detailCode: 'PLUGIN_ABSENT' }
       : { observations: [], cacheable: false, detailCode: 'PLUGIN_READBACK_UNKNOWN' };
   observations.push(...pluginReadback.observations);
-  const hookReadback = parseHookManifestReadback(pluginBefore.hookManifestSource, probeContext);
+  const hookReadback = parseHookManifestReadback(pluginBefore.hookManifestSource, readbackContext);
   observations.push(...hookReadback.observations);
   let liveSucceeded: boolean | null = null;
   if (live) {
@@ -399,7 +408,7 @@ export async function inspectNativeCapabilities(
     const liveContext = {
       mode: 'live',
       liveOptIn: true,
-      evaluationTimestamp: inspectionStartedAt,
+      evaluationTimestamp: passiveObservedAt,
       identityDigest,
       hostIdentity: hostIdentityBefore,
       pluginIdentity,
@@ -476,7 +485,7 @@ export async function inspectNativeCapabilities(
     });
   let cacheStatus: NativeCapabilityInspectionV1['cacheStatus'] = 'non_cacheable';
   if (live && liveSucceeded !== true && cache !== null) {
-    await cache.invalidate(expectedCacheKey);
+    await cache.invalidate(expectedCacheKey, cacheSnapshotBefore);
   } else if (cache !== null && passive.cacheable && configReadback.cacheable && pluginReadback.cacheable && hookReadback.cacheable
     && profile.cacheable
     && (!live || liveSucceeded === true)) {

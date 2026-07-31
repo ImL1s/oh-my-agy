@@ -192,44 +192,36 @@ export function createDefaultServices(
         agyCommand,
         NATIVE_PLUGIN_PROBE_LIMITS,
       );
-      let native: Awaited<ReturnType<typeof inspectNativeCapabilities>> | null = null;
-      let nativeFailure: RuntimeError | null = null;
-      if (mayLaunch) {
-        try {
-          native = await inspectNativeCapabilities({
-            agyCommand,
-            stateRoot: options.stateRoot,
-            environment,
-            packageRoot,
-            pluginAdapter,
-          }, false);
-          if (native.kind === 'host_absent') {
-            nativeFailure = runtimeError(
-              'E_CAPABILITY_UNPROVEN',
-              native.diagnostics[0]?.message ?? 'Antigravity host capability profile is unavailable',
-              { diagnosticCode: native.diagnostics[0]?.code ?? 'E_CAPABILITY_HOST_UNAVAILABLE' },
-            );
-          }
-        } catch (error) {
-          nativeFailure = runtimeError(
-            'E_CAPABILITY_UNPROVEN',
-            'Antigravity host capability inspection failed',
-            { cause: error instanceof Error ? error.message : String(error) },
-          );
-        }
-      }
       return runTeamCommand(argv, {
         context: context.value,
         storeRoot: context.value.stateRoot,
         stdout,
         stderr,
         ...(mayLaunch ? {
-          providerProfileFactory: () => native?.kind === 'profile'
-            ? ok({ profile: native.profile, resolvedExecutable: native.profile.hostIdentity.realpath })
-            : err(nativeFailure ?? runtimeError(
-              'E_CAPABILITY_UNPROVEN',
-              'Antigravity host capability profile is unavailable',
-            )),
+          providerProfileFactory: async () => {
+            try {
+              const native = await inspectNativeCapabilities({
+                agyCommand,
+                stateRoot: options.stateRoot,
+                environment,
+                packageRoot,
+                pluginAdapter,
+              }, false);
+              return native.kind === 'profile'
+                ? ok({ profile: native.profile, resolvedExecutable: native.profile.hostIdentity.realpath })
+                : err(runtimeError(
+                  'E_CAPABILITY_UNPROVEN',
+                  native.diagnostics[0]?.message ?? 'Antigravity host capability profile is unavailable',
+                  { diagnosticCode: native.diagnostics[0]?.code ?? 'E_CAPABILITY_HOST_UNAVAILABLE' },
+                ));
+            } catch (error) {
+              return err(runtimeError(
+                'E_CAPABILITY_UNPROVEN',
+                'Antigravity host capability inspection failed',
+                { cause: error instanceof Error ? error.message : String(error) },
+              ));
+            }
+          },
         } : {}),
       });
     },

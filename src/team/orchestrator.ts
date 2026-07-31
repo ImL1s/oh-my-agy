@@ -74,7 +74,8 @@ export interface TeamOrchestratorOptions {
     generation: number;
     contextDigest: string;
     selectedAt: string;
-  }>) => Result<ProviderProfileAuthorityV1, RuntimeError>;
+  }>) => Result<ProviderProfileAuthorityV1, RuntimeError>
+    | Promise<Result<ProviderProfileAuthorityV1, RuntimeError>>;
 }
 
 export interface StartedWorkerView {
@@ -642,35 +643,30 @@ export class TeamOrchestrator {
     const contextDigest = sha256([
       this.repoKey ?? '', this.workspaceKey, input.teamId, input.task.id,
     ].join('\0'));
-    const selectedAt = new Date(this.nowMs()).toISOString();
-    const authority = this.providerProfileFactory?.({
-      launchMode: input.workerMode,
-      generation,
-      contextDigest,
-      selectedAt,
-    });
-    let routeProfile: HostCapabilityProfileV1 | undefined;
-    let routeResolvedExecutable: string | undefined;
-    let routeTmuxReadiness: TmuxReadinessReceiptV1 | undefined;
+    const authorityRequestedAt = new Date(this.nowMs()).toISOString();
+    const authority = this.providerProfileFactory === undefined
+      ? undefined
+      : await this.providerProfileFactory({
+        launchMode: input.workerMode,
+        generation,
+        contextDigest,
+        selectedAt: authorityRequestedAt,
+      });
+    const preflightSelectedAt = new Date(this.nowMs()).toISOString();
     const preflight = authority === undefined
       ? err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team worker launch requires an evidence-bearing host profile'))
       : !authority.ok
         ? authority
-        : (() => {
-          routeProfile = authority.value.profile;
-          routeResolvedExecutable = authority.value.resolvedExecutable;
-          routeTmuxReadiness = authority.value.tmuxReadiness;
-          return preflightTeamWorkerProviderRoute({
-            profile: authority.value.profile,
-            now: selectedAt,
-            launchMode: input.workerMode,
-            generation,
-            contextDigest,
-            resolvedExecutable: authority.value.resolvedExecutable,
-            ...(authority.value.tmuxReadiness === undefined
-              ? {} : { tmuxReadiness: authority.value.tmuxReadiness }),
-          });
-        })();
+        : preflightTeamWorkerProviderRoute({
+          profile: authority.value.profile,
+          now: preflightSelectedAt,
+          launchMode: input.workerMode,
+          generation,
+          contextDigest,
+          resolvedExecutable: authority.value.resolvedExecutable,
+          ...(authority.value.tmuxReadiness === undefined
+            ? {} : { tmuxReadiness: authority.value.tmuxReadiness }),
+        });
     if (!preflight.ok) {
       const rolledBack = input.launchTransaction
         ? await this.rollbackLaunchLeases(input.teamId, input.task.id)
@@ -686,22 +682,6 @@ export class TeamOrchestrator {
       if (!rolledBack.ok) return rolledBack;
       return preflight;
     }
-    if (routeProfile === undefined || routeResolvedExecutable === undefined) {
-      const rolledBack = input.launchTransaction
-        ? await this.rollbackLaunchLeases(input.teamId, input.task.id)
-        : await this.rollbackFailedTaskLaunch({
-          store: input.store,
-          teamId: input.teamId,
-          taskId: input.task.id,
-          ownerNonce: input.ownerNonce,
-          claimToken,
-          generation,
-          expectedRevision: claimed.value.revision,
-        });
-      if (!rolledBack.ok) return rolledBack;
-      return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider profile authority is unavailable'));
-    }
-
     const branchName = `oma-team/${input.teamId}/${workerId}-g${generation}-${this.tokenFactory().slice(0, 8)}`;
     const worktree = this.worktrees.create({
       teamId: input.teamId,
@@ -750,17 +730,34 @@ export class TeamOrchestrator {
       });
     };
 
-    // Preflight remains before worktree creation, but the short-lived receipt
-    // is issued only after that potentially slow preparation step.
+    // Preflight remains before worktree creation. Re-read authority after that
+    // potentially slow step so every launch and receipt uses current evidence.
+    const routeAuthorityRequestedAt = new Date(this.nowMs()).toISOString();
+    const routeAuthority = this.providerProfileFactory === undefined
+      ? undefined
+      : await this.providerProfileFactory({
+        launchMode: input.workerMode,
+        generation,
+        contextDigest,
+        selectedAt: routeAuthorityRequestedAt,
+      });
+    if (routeAuthority === undefined || !routeAuthority.ok) {
+      const rolledBack = await rollbackPreparedWorktree();
+      if (!rolledBack.ok) return rolledBack;
+      return routeAuthority === undefined
+        ? err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider profile authority is unavailable'))
+        : routeAuthority;
+    }
     const routeSelectedAt = new Date(this.nowMs()).toISOString();
     const selected = routeTeamWorkerProvider({
-      profile: routeProfile,
+      profile: routeAuthority.value.profile,
       now: routeSelectedAt,
       launchMode: input.workerMode,
       generation,
       contextDigest,
-      resolvedExecutable: routeResolvedExecutable,
-      ...(routeTmuxReadiness === undefined ? {} : { tmuxReadiness: routeTmuxReadiness }),
+      resolvedExecutable: routeAuthority.value.resolvedExecutable,
+      ...(routeAuthority.value.tmuxReadiness === undefined
+        ? {} : { tmuxReadiness: routeAuthority.value.tmuxReadiness }),
     });
     if (!selected.ok) {
       const rolledBack = await rollbackPreparedWorktree();
@@ -776,18 +773,18 @@ export class TeamOrchestrator {
     );
     let routeAuthorityDigest: string;
     try {
-      const routeAuthority = createWorkerRouteAuthority({
+      const persistedRouteAuthority = createWorkerRouteAuthority({
         stateRoot: this.stateRoot,
         teamId: input.teamId,
         taskId: input.task.id,
         generation,
         contextDigest,
-        profile: routeProfile,
+        profile: routeAuthority.value.profile,
         receipt: routeReceipt,
         now: routeSelectedAt,
       });
-      routeAuthorityPath = writeWorkerRouteAuthority(this.stateRoot, routeAuthority);
-      routeAuthorityDigest = routeAuthority.authorityDigest;
+      routeAuthorityPath = writeWorkerRouteAuthority(this.stateRoot, persistedRouteAuthority);
+      routeAuthorityDigest = persistedRouteAuthority.authorityDigest;
     } catch (error) {
       try { fs.rmSync(routeAuthorityPath, { force: true }); } catch (_) { /* best-effort */ }
       const rolledBack = await rollbackPreparedWorktree();

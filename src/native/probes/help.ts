@@ -1,10 +1,11 @@
+import { assertCanonicalUtcTimestamp } from '../../contracts/state-schemas';
 import { redactDiagnostic } from '../../runtime/redaction';
 import { CapabilityObservationV1, CapabilitySource } from '../capability-profile';
 import { PASSIVE_PROBE_LIMITS_V1, PassiveProbeContextV1, ProbeResultV1 } from './types';
 import { runBoundedProbe } from './runner';
 
 const HELP_TOKENS: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
-  'headless.print': [/(?:^|\s)-p(?:\s|,|$)/mu, /--print\b/mu],
+  'headless.print': [/(?:^|\s)-p(?:\s|,|$)/mu, /(?:^|\s)--print(?:[\s=,]|$)/mu],
   'headless.json': [
     /(?:^|\s)--output-format(?:=|\s+)json(?=$|\s)/mu,
     /^[ \t]*--output-format\b[^\r\n]*(?:[\s,(|])json(?=$|[\s,)|])/mu,
@@ -27,6 +28,7 @@ const HELP_TOKENS: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
 export async function probeDocumentedHelp(
   executable: string,
   context: Readonly<PassiveProbeContextV1>,
+  now?: () => string,
 ): Promise<ProbeResultV1> {
   const outcome = await (context.runner ?? runBoundedProbe)({
     command: executable,
@@ -35,13 +37,17 @@ export async function probeDocumentedHelp(
     maximumOutputBytes: PASSIVE_PROBE_LIMITS_V1.maximumOutputBytes,
     maximumProcesses: PASSIVE_PROBE_LIMITS_V1.maximumProcesses,
   });
+  const completedContext = now === undefined
+    ? context
+    : { ...context, evaluationTimestamp: now() };
+  assertCanonicalUtcTimestamp(completedContext.evaluationTimestamp, 'help probe observedAt');
   if (outcome.timedOut || outcome.outputOverflow || outcome.processCountOverflow
     || outcome.error !== undefined || outcome.status !== 0) {
     const detailCode = outcome.timedOut ? 'HELP_TIMEOUT' : outcome.outputOverflow ? 'HELP_OVERFLOW'
       : outcome.processCountOverflow ? 'HELP_PROCESS_OVERFLOW' : 'HELP_UNAVAILABLE';
     return {
       observations: Object.keys(HELP_TOKENS).map((capability) => observation(
-        capability, 'indeterminate', context, detailCode,
+        capability, 'indeterminate', completedContext, detailCode,
         `${outcome.stderr}\n${outcome.error ?? ''}`,
       )),
       cacheable: false,
@@ -53,7 +59,7 @@ export async function probeDocumentedHelp(
     observations: Object.entries(HELP_TOKENS).map(([capability, patterns]) => observation(
       capability,
       patterns.some((pattern) => pattern.test(help)) ? 'positive' : 'negative',
-      context,
+      completedContext,
       patterns.some((pattern) => pattern.test(help)) ? 'HELP_ADVERTISED' : 'HELP_AFFIRMATIVE_ABSENCE',
       null,
     )),

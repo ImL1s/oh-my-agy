@@ -27,6 +27,48 @@ describe('documented help probe', () => {
     });
   });
 
+  it('matches only the exact long print option and stamps completion time after the probe', async () => {
+    const events: string[] = [];
+    const relatedOnly = await probeDocumentedHelp('/agy', {
+      ...base,
+      runner: async () => {
+        events.push('help-complete');
+        return {
+          status: 0,
+          signal: null,
+          stdout: '  --print-timeout DURATION\nprose--print\n',
+          stderr: '',
+          timedOut: false,
+          outputOverflow: false,
+          processCountOverflow: false,
+        };
+      },
+    }, () => {
+      events.push('clock');
+      return '2026-07-31T12:00:05.000Z';
+    });
+    expect(events).toEqual(['help-complete', 'clock']);
+    expect(relatedOnly.observations.find(({ capability }) => capability === 'headless.print'))
+      .toMatchObject({ result: 'negative', observedAt: '2026-07-31T12:00:05.000Z' });
+
+    for (const advertised of ['--print\n', '--print PROMPT\n', '--print=VALUE\n', '--print, -p\n']) {
+      const result = await probeDocumentedHelp('/agy', {
+        ...base,
+        runner: async () => ({
+          status: 0,
+          signal: null,
+          stdout: advertised,
+          stderr: '',
+          timedOut: false,
+          outputOverflow: false,
+          processCountOverflow: false,
+        }),
+      });
+      expect(result.observations.find(({ capability }) => capability === 'headless.print'))
+        .toMatchObject({ result: 'positive' });
+    }
+  });
+
   it.each([
     ['timeout', { timedOut: true, outputOverflow: false }, 'HELP_TIMEOUT'],
     ['overflow', { timedOut: false, outputOverflow: true }, 'HELP_OVERFLOW'],

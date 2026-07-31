@@ -8,9 +8,9 @@ import { absentPluginIdentity } from '../../../src/native/probes/identity';
 const host: HostIdentityV1 = { realpath: '/agy', binarySha256: 'a'.repeat(64), version: '1.0.0', versionOutputSha256: 'b'.repeat(64), helpOutputSha256: 'c'.repeat(64), platform: 'darwin', arch: 'arm64' };
 const FRESH_NOW = '2026-07-31T12:00:01.000Z';
 
-function makeProfile(identity: HostIdentityV1) {
+function makeProfile(identity: HostIdentityV1, evaluationTimestamp = '2026-07-31T12:00:00.000Z') {
   const plugin = absentPluginIdentity();
-  return assembleHostCapabilityProfile({ evaluationTimestamp: '2026-07-31T12:00:00.000Z', hostIdentityBefore: identity, hostIdentityAfter: identity, pluginIdentityBefore: plugin, pluginIdentityAfter: plugin, observations: [] });
+  return assembleHostCapabilityProfile({ evaluationTimestamp, hostIdentityBefore: identity, hostIdentityAfter: identity, pluginIdentityBefore: plugin, pluginIdentityAfter: plugin, observations: [] });
 }
 
 describe('host capability cache', () => {
@@ -49,11 +49,34 @@ describe('host capability cache', () => {
       const cache = new HostCapabilityProfileCacheV1(root);
       const current = makeProfile({ ...host, binarySha256: 'e'.repeat(64) });
       expect(await cache.commit(current)).toBe('created');
-      expect(await cache.invalidate('f'.repeat(64))).toBe('conflict');
+      const snapshot = cache.readSnapshot(current.cacheKey);
+      expect(snapshot).not.toBeNull();
+      expect(await cache.invalidate('f'.repeat(64), snapshot)).toBe('conflict');
       expect(cache.read(current.cacheKey, FRESH_NOW)).toEqual(current);
-      expect(await cache.invalidate(current.cacheKey)).toBe('removed');
+      expect(await cache.invalidate(current.cacheKey, snapshot)).toBe('removed');
       expect(cache.read(current.cacheKey, FRESH_NOW)).toBeNull();
-      expect(await cache.invalidate(current.cacheKey)).toBe('unchanged');
+      expect(await cache.invalidate(current.cacheKey, snapshot)).toBe('unchanged');
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('does not let a stale failed probe invalidate a newer successful profile', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-profile-invalidate-race-'));
+    try {
+      const cache = new HostCapabilityProfileCacheV1(root);
+      const first = makeProfile(host);
+      const newer = makeProfile(host, '2026-07-31T12:00:01.000Z');
+      expect(await cache.commit(first)).toBe('created');
+      const staleFailureView = cache.readSnapshot(first.cacheKey);
+      expect(staleFailureView).not.toBeNull();
+      expect(await cache.commit(newer)).toBe('updated');
+
+      expect(await cache.invalidate(first.cacheKey, staleFailureView)).toBe('conflict');
+      expect(cache.read(newer.cacheKey, '2026-07-31T12:00:02.000Z')?.profileDigest)
+        .toBe(newer.profileDigest);
+
+      expect(await cache.invalidate(newer.cacheKey, null)).toBe('unchanged');
+      expect(cache.read(newer.cacheKey, '2026-07-31T12:00:02.000Z')?.profileDigest)
+        .toBe(newer.profileDigest);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 });

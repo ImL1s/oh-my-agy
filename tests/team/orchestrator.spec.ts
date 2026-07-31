@@ -263,8 +263,9 @@ describe('TeamOrchestrator v1 vertical slice', () => {
       hasSession: () => false,
       inspectOwnedPane: () => err(runtimeError('E_NOT_FOUND', 'not live')),
     };
+    const refreshTimes: number[] = [];
+    const baseProviderFactory = providerRouteOptions().providerProfileFactory!;
     const orch = new TeamOrchestrator({
-      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -273,6 +274,10 @@ describe('TeamOrchestrator v1 vertical slice', () => {
       nowMs: () => now,
       worktrees: slowWorktrees as GitWorktreeManager,
       tmux: fakeTmux as any,
+      providerProfileFactory: async (input) => {
+        refreshTimes.push(Date.parse(input.selectedAt));
+        return baseProviderFactory(input);
+      },
     });
 
     const started = await orch.startFromManifest(manifestPath, 'headless');
@@ -286,7 +291,8 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     ), 'utf8')) as { receipt: { selectedAt: string; expiresAt: string } };
     expect(Date.parse(authority.receipt.selectedAt)).toBe(baseNow + 31_000);
     expect(Date.parse(authority.receipt.selectedAt)).toBeGreaterThan(baseNow + 30_000);
-    expect(Date.parse(authority.receipt.expiresAt)).toBe(baseNow + 60_000);
+    expect(Date.parse(authority.receipt.expiresAt)).toBe(baseNow + 61_000);
+    expect(refreshTimes).toEqual([baseNow, baseNow + 31_000]);
   });
 
   maybe('claim-time launch failure rolls back state and allows the same team ID to retry', async () => {

@@ -147,7 +147,7 @@ function liveOutputMatches(
     return typeof record.conversation_id === 'string'
       && record.conversation_id.trim() !== ''
       && typeof record.status === 'string'
-      && !['ERROR', 'FAILED'].includes(record.status.toUpperCase())
+      && record.status.toUpperCase() === 'SUCCESS'
       && typeof record.response === 'string'
       && record.response.trim() === expectedToken
       && (record.error === undefined || record.error === null || record.error === '');

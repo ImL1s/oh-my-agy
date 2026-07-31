@@ -11,6 +11,11 @@ import {
 export const HOST_CAPABILITY_CACHE_STORE_V1 = 'oma_host_capability_cache' as const;
 export const HOST_CAPABILITY_CACHE_KEY_V1 = 'native/host-capability-profile-v1' as const;
 
+export interface HostCapabilityProfileCacheSnapshotV1 {
+  revision: number;
+  profile: HostCapabilityProfileV1;
+}
+
 export class HostCapabilityProfileCacheV1 {
   private readonly store: ContractStateStore<HostCapabilityProfileV1>;
 
@@ -22,10 +27,16 @@ export class HostCapabilityProfileCacheV1 {
   }
 
   read(expectedCacheKey: string, now = new Date().toISOString()): HostCapabilityProfileV1 | null {
+    const snapshot = this.readSnapshot(expectedCacheKey);
+    return snapshot !== null && isHostCapabilityProfileFresh(snapshot.profile, now)
+      ? snapshot.profile
+      : null;
+  }
+
+  readSnapshot(expectedCacheKey: string): HostCapabilityProfileCacheSnapshotV1 | null {
     const result = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
     return result.ok && result.value.value.cacheKey === expectedCacheKey
-      && isHostCapabilityProfileFresh(result.value.value, now)
-      ? result.value.value
+      ? { revision: result.value.revision, profile: result.value.value }
       : null;
   }
 
@@ -50,7 +61,12 @@ export class HostCapabilityProfileCacheV1 {
     return updated.ok ? 'updated' : 'conflict';
   }
 
-  async invalidate(expectedCacheKey: string): Promise<'removed' | 'unchanged' | 'conflict'> {
+  async invalidate(
+    expectedCacheKey: string,
+    expectedSnapshot: Readonly<HostCapabilityProfileCacheSnapshotV1> | null,
+  ): Promise<'removed' | 'unchanged' | 'conflict'> {
+    if (expectedSnapshot === null) return 'unchanged';
+    if (expectedSnapshot.profile.cacheKey !== expectedCacheKey) return 'conflict';
     const exactCachePath = path.join(this.store.root, `${HOST_CAPABILITY_CACHE_KEY_V1}.json`);
     const lock = await acquireOwnerLock(`${exactCachePath}.lock`, { timeoutMs: 5_000 });
     if (!lock.ok) return 'conflict';
@@ -58,10 +74,11 @@ export class HostCapabilityProfileCacheV1 {
       const current = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
       if (!current.ok) {
         if (current.error.code === 'E_NOT_FOUND') return 'unchanged';
-        fs.rmSync(exactCachePath, { force: true });
-        return 'removed';
+        return 'conflict';
       }
-      if (current.value.value.cacheKey !== expectedCacheKey) return 'conflict';
+      if (current.value.value.cacheKey !== expectedCacheKey
+        || current.value.revision !== expectedSnapshot.revision
+        || current.value.value.profileDigest !== expectedSnapshot.profile.profileDigest) return 'conflict';
       fs.rmSync(exactCachePath, { force: true });
       return 'removed';
     } finally {

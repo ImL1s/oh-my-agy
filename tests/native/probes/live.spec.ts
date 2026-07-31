@@ -139,6 +139,10 @@ describe('explicit live probe', () => {
     expect(verified).toMatchObject({ cacheable: true, detailCode: 'LIVE_VERIFIED' });
     for (const stdout of [
       JSON.stringify({ conversation_id: 'conversation', status: 'ERROR', response: 'canary' }),
+      JSON.stringify({ conversation_id: 'conversation', status: 'FAILED', response: 'canary' }),
+      JSON.stringify({ conversation_id: 'conversation', status: 'CANCELLED', response: 'canary' }),
+      JSON.stringify({ conversation_id: 'conversation', status: 'TIMED_OUT', response: 'canary' }),
+      JSON.stringify({ conversation_id: 'conversation', status: 'PENDING', response: 'canary' }),
       JSON.stringify({ conversation_id: 'conversation', status: 'SUCCESS', response: 'near-canary' }),
       'not-json',
     ]) {
