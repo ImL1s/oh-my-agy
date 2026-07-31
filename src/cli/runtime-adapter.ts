@@ -274,7 +274,7 @@ export interface NativeCapabilityUnavailableV1 {
   readonly diagnostics: readonly { code: string; message: string }[];
 }
 
-type NativeCapabilityInspectionResultV1 = NativeCapabilityInspectionV1 | NativeCapabilityUnavailableV1;
+export type NativeCapabilityInspectionResultV1 = NativeCapabilityInspectionV1 | NativeCapabilityUnavailableV1;
 
 export async function runNativeCommand(
   command: NativeCliCommand,
@@ -891,7 +891,7 @@ interface ProductWorkflowExecutionContextV1 {
   readonly environment: NodeJS.ProcessEnv;
   readonly workflow_input: Readonly<Record<string, unknown>>;
   readonly state_root: string;
-  readonly capability_profile: HostCapabilityProfileV1;
+  capability_profile: HostCapabilityProfileV1;
   readonly route_authorities: Map<string, ProductWorkflowRouteAuthorityV1>;
 }
 
@@ -905,6 +905,71 @@ interface ProductWorkflowVerdictV1 {
   readonly findings: WorkflowProductAuthorityV1['verdict']['findings'];
 }
 
+const PRODUCT_WORKFLOW_ROUTE_TTL_MS = 30_000;
+const PRODUCT_WORKFLOW_ROUTE_REFRESH_HEADROOM_MS = 5_000;
+
+export interface ProductWorkflowCapabilityRefreshInputV1 {
+  readonly expected_realpath: string;
+  readonly expected_binary_sha256: string;
+  readonly now: string;
+  inspect(live: boolean): Promise<NativeCapabilityInspectionResultV1>;
+}
+
+/** 每批重讀精確 host 身分；只有 route freshness 不足時才更新 live evidence。 */
+export async function refreshProductWorkflowCapabilityProfile(
+  input: Readonly<ProductWorkflowCapabilityRefreshInputV1>,
+): Promise<HostCapabilityProfileV1> {
+  const passive = await input.inspect(false);
+  const passiveProfile = exactProductWorkflowHostProfile(passive, input);
+  if (productWorkflowProfileCanRoute(passiveProfile, input.now)) return passiveProfile;
+
+  const live = await input.inspect(true);
+  const liveProfile = exactProductWorkflowHostProfile(live, input);
+  if (live.kind !== 'profile' || live.liveSucceeded !== true
+    || !productWorkflowProfileCanRoute(liveProfile, input.now)) {
+    throw new Error('E_CAPABILITY_UNPROVEN: workflow host profile could not be refreshed');
+  }
+  return liveProfile;
+}
+
+function exactProductWorkflowHostProfile(
+  inspected: NativeCapabilityInspectionResultV1,
+  expected: Pick<
+    ProductWorkflowCapabilityRefreshInputV1,
+    'expected_realpath' | 'expected_binary_sha256'
+  >,
+): HostCapabilityProfileV1 {
+  if (inspected.kind !== 'profile'
+    || inspected.profile.hostIdentity.realpath !== expected.expected_realpath
+    || inspected.profile.hostIdentity.binarySha256 !== expected.expected_binary_sha256) {
+    throw new Error('E_CAPABILITY_UNPROVEN: workflow host identity lacks an exact capability profile');
+  }
+  return inspected.profile;
+}
+
+function productWorkflowProfileCanRoute(
+  profile: HostCapabilityProfileV1,
+  selectedAt: string,
+): boolean {
+  const preconditions = validateProviderRoutePreconditions(profile, 'headless', selectedAt);
+  if (!preconditions.ok) return false;
+  try {
+    routeHostCapability(profile, {
+      capability: 'headless.print',
+      provider: 'agy_headless',
+      requestMode: 'headless',
+      generation: 0,
+      contextDigest: sha256Hex(canonicalBytesV1(['oma-product-workflow-refresh/v1'])),
+      selectedAt,
+      ttlMs: PRODUCT_WORKFLOW_ROUTE_TTL_MS + PRODUCT_WORKFLOW_ROUTE_REFRESH_HEADROOM_MS,
+      fallbackPreconditionsSatisfied: preconditions.value,
+    });
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 async function executeCanonicalProductWorkflow(
   input: Readonly<CanonicalProductWorkflowExecutionInputV1>,
   nativeContext: Pick<
@@ -915,16 +980,18 @@ async function executeCanonicalProductWorkflow(
   const repositoryRoot = fs.realpathSync(process.cwd());
   validateCanonicalProductRun(input, repositoryRoot);
   const agy = resolveCanonicalAgyIdentity();
-  const native = await inspectNativeCapabilities({
+  const capabilityContext = {
     ...nativeContext,
     agyCommand: agy.realpath,
     environment: process.env,
-  }, false);
-  if (native.kind !== 'profile'
-    || native.profile.hostIdentity.realpath !== agy.realpath
-    || native.profile.hostIdentity.binarySha256 !== agy.sha256) {
-    throw new Error('E_CAPABILITY_UNPROVEN: workflow host identity lacks an exact capability profile');
-  }
+  };
+  const refreshCapabilityProfile = async () => refreshProductWorkflowCapabilityProfile({
+    expected_realpath: agy.realpath,
+    expected_binary_sha256: agy.sha256,
+    now: new Date().toISOString(),
+    inspect: async (live) => inspectNativeCapabilities(capabilityContext, live),
+  });
+  const initialProfile = await refreshCapabilityProfile();
   const resolved = resolveStateRoot({
     env: process.env,
     homeDirectory: os.homedir(),
@@ -941,7 +1008,7 @@ async function executeCanonicalProductWorkflow(
     environment: process.env,
     workflow_input: input.workflow_input,
     state_root: stateRoot,
-    capability_profile: native.profile,
+    capability_profile: initialProfile,
     route_authorities: new Map(),
   };
   const adapter: WorkflowDispatchAdapterV1 = {
@@ -954,6 +1021,9 @@ async function executeCanonicalProductWorkflow(
     adapter,
     authority_state_root: stateRoot,
     repository_root: repositoryRoot,
+    refresh_capability_profile: async () => {
+      context.capability_profile = await refreshCapabilityProfile();
+    },
     permission_context: (taskId, attempt) => {
       const task = input.plan.tasks.find((entry) => entry.task_id === taskId);
       if (task === undefined) throw new Error('E_CAPABILITY_UNPROVEN: workflow task route is unbound');
@@ -1015,7 +1085,7 @@ function issueProductWorkflowRoute(
     generation,
     contextDigest,
     selectedAt,
-    ttlMs: 30_000,
+    ttlMs: PRODUCT_WORKFLOW_ROUTE_TTL_MS,
     fallbackPreconditionsSatisfied: preconditions.value,
   });
   const receipt = issueHostRouteReceipt(candidate, context.agy_command, 'agy_headless_v1');
@@ -1037,17 +1107,18 @@ function productWorkflowRouteKey(taskId: string, attempt: number): string {
   return `${taskId}\0${attempt}`;
 }
 
-interface PrivateProductRepositoryWorkflowInputV1 {
+export interface PrivateProductRepositoryWorkflowInputV1 {
   readonly definition: RepositoryWorkflowV1;
   readonly plan: WorkflowPlanV1;
   readonly journal_path: string;
   readonly adapter: WorkflowDispatchAdapterV1;
   readonly authority_state_root: string;
   readonly repository_root: string;
+  refresh_capability_profile(): Promise<void>;
   permission_context(taskId: string, attempt: number): WorkflowPermissionContextV1;
 }
 
-async function executePrivateProductRepositoryWorkflow(
+export async function executePrivateProductRepositoryWorkflow(
   input: PrivateProductRepositoryWorkflowInputV1,
 ): Promise<WorkflowRunSnapshotV1> {
   const definition = validateRepositoryWorkflow(input.definition);
@@ -1080,11 +1151,20 @@ async function executePrivateProductRepositoryWorkflow(
   while (true) {
     const ready = selectPrivateProductReadyBatch(definition, input.plan, snapshot);
     if (ready.length === 0) break;
+    let routeProfileReady = true;
+    try {
+      await input.refresh_capability_profile();
+    } catch (_) {
+      routeProfileReady = false;
+    }
     const dispatches = ready.map((task) => {
       const runtime = snapshot.tasks[task.task_id];
       const attempt = runtime.attempts + 1;
       const stage = definition.stages.find((entry) => entry.stage_id === task.stage_id)!;
       try {
+        if (!routeProfileReady) {
+          throw new Error('E_CAPABILITY_UNPROVEN: workflow route profile refresh failed');
+        }
         const dependencyResults = dependencyResultsFromReceipts(task, snapshot.tasks);
         const permission = compileWorkflowPermissions({
           definition,
@@ -1235,12 +1315,24 @@ async function reconcilePrivateProductInterrupted(
   input: PrivateProductRepositoryWorkflowInputV1,
   snapshot: WorkflowRunSnapshotV1,
 ): Promise<void> {
-  for (const runtime of Object.values(snapshot.tasks)
-    .filter((entry) => entry.status === 'dispatched')) {
+  const interrupted = Object.values(snapshot.tasks)
+    .filter((entry) => entry.status === 'dispatched');
+  let routeProfileReady = true;
+  if (interrupted.length > 0) {
+    try {
+      await input.refresh_capability_profile();
+    } catch (_) {
+      routeProfileReady = false;
+    }
+  }
+  for (const runtime of interrupted) {
     const stage = input.definition.stages.find(
       (entry) => entry.stage_id === runtime.task.stage_id,
     )!;
     try {
+      if (!routeProfileReady) {
+        throw new Error('E_CAPABILITY_UNPROVEN: workflow route profile refresh failed');
+      }
       const dependencyResults = dependencyResultsFromReceipts(runtime.task, snapshot.tasks);
       const permission = compileWorkflowPermissions({
         definition: input.definition,

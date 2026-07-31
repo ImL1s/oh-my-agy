@@ -12,7 +12,10 @@ export interface ExecutableIdentityInputV1 {
 }
 
 export function inspectExecutableIdentity(input: Readonly<ExecutableIdentityInputV1>): HostIdentityV1 {
-  const resolved = resolveExecutable(input.executable, input.pathEnvironment ?? process.env.PATH ?? '');
+  const resolved = resolveExecutablePath(
+    input.executable,
+    input.pathEnvironment ?? process.env.PATH ?? '',
+  );
   const lexical = path.resolve(resolved);
   const before = fs.lstatSync(lexical);
   const realpath = fs.realpathSync(lexical);
@@ -20,8 +23,13 @@ export function inspectExecutableIdentity(input: Readonly<ExecutableIdentityInpu
   try {
     const openedBefore = fs.fstatSync(descriptor);
     const currentUid = typeof process.getuid === 'function' ? process.getuid() : openedBefore.uid;
-    if (!openedBefore.isFile() || (openedBefore.mode & 0o111) === 0 || (openedBefore.mode & 0o022) !== 0
-      || (openedBefore.uid !== currentUid && openedBefore.uid !== 0)) {
+    const permissionsTrusted = process.platform === 'win32'
+      ? openedBefore.isFile()
+      : openedBefore.isFile()
+        && (openedBefore.mode & 0o111) !== 0
+        && (openedBefore.mode & 0o022) === 0
+        && (openedBefore.uid === currentUid || openedBefore.uid === 0);
+    if (!permissionsTrusted) {
       throw new Error('E_CAPABILITY_IDENTITY: executable permissions are not trusted');
     }
     const bytes = fs.readFileSync(descriptor);
@@ -88,12 +96,29 @@ export function identityTupleMatches(left: HostIdentityV1 | PluginIdentityV1, ri
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function resolveExecutable(executable: string, pathEnvironment: string): string {
-  if (path.isAbsolute(executable)) return executable;
-  for (const directory of pathEnvironment.split(path.delimiter)) {
-    if (directory === '' || !path.isAbsolute(directory)) continue;
-    const candidate = path.join(directory, executable);
-    if (fs.existsSync(candidate)) return candidate;
+export function resolveExecutablePath(
+  executable: string,
+  pathEnvironment: string,
+  platform: NodeJS.Platform = process.platform,
+  exists: (candidate: string) => boolean = fs.existsSync,
+): string {
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const delimiter = platform === 'win32' ? ';' : ':';
+  const names = platform === 'win32' && pathApi.extname(executable) === ''
+    ? [`${executable}.exe`, executable]
+    : [executable];
+  if (pathApi.isAbsolute(executable)) {
+    for (const candidate of names) {
+      if (exists(candidate)) return candidate;
+    }
+    throw new Error('E_CAPABILITY_IDENTITY: executable was not found at the absolute path');
+  }
+  for (const directory of pathEnvironment.split(delimiter)) {
+    if (directory === '' || !pathApi.isAbsolute(directory)) continue;
+    for (const name of names) {
+      const candidate = pathApi.join(directory, name);
+      if (exists(candidate)) return candidate;
+    }
   }
   throw new Error('E_CAPABILITY_IDENTITY: executable was not found on trusted PATH');
 }
