@@ -251,11 +251,35 @@ describe('HostCapabilityProfileV1', () => {
         { ...observation('positive', 'live_probe'), observedAt: afterSlowCanary },
       ],
     });
-    expect(routeHostCapability(refreshedAfterSlowCanary, {
+    const slowCanaryCandidate = routeHostCapability(refreshedAfterSlowCanary, {
       capability: 'headless.print', provider: 'agy_headless', requestMode: 'headless', generation: 3,
       contextDigest: CONTEXT, selectedAt: afterSlowCanary, ttlMs: 35_000,
       fallbackPreconditionsSatisfied: true,
-    })).toMatchObject({ selectedAt: afterSlowCanary, expiresAt: '2026-07-31T12:01:20.000Z' });
+    });
+    expect(slowCanaryCandidate).toMatchObject({
+      selectedAt: afterSlowCanary,
+      expiresAt: '2026-07-31T12:01:20.000Z',
+    });
+    const slowCanaryExpected = {
+      now: afterSlowCanary,
+      generation: 3,
+      contextDigest: CONTEXT,
+      identityDigest: refreshedAfterSlowCanary.identityDigest,
+    };
+    expect(validateHostRouteCandidate(
+      slowCanaryCandidate,
+      refreshedAfterSlowCanary,
+      slowCanaryExpected,
+    )).toEqual(slowCanaryCandidate);
+    const slowCanaryReceipt = issueHostRouteReceipt(
+      slowCanaryCandidate,
+      host.realpath,
+      'agy_headless_v1',
+    );
+    expect(validateHostRouteReceipt(slowCanaryReceipt, refreshedAfterSlowCanary, {
+      ...slowCanaryExpected,
+      fallbackPreconditionsSatisfied: true,
+    })).toEqual(slowCanaryReceipt);
   });
 
   it('invalidates cache identity when policy version alone changes', () => {

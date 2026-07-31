@@ -454,15 +454,8 @@ export function routeHostCapability(
     throw violation('E_CAPABILITY_UNPROVEN', 'Host capability profile is stale for routing');
   }
   const expiresAtMs = selectedAtMs + request.ttlMs;
-  const routeEvidence = assessment.observations.filter((observation) => {
-    const ceiling = policy.sourceCeilings[observation.source];
-    return observation.result === 'positive' && ceiling !== undefined
-      && tierRank(minTier(observation.tier, ceiling)) >= tierRank(policy.routeTier);
-  });
-  if (!routeEvidence.some(({ observedAt }) => {
-    const observedAtMs = Date.parse(observedAt);
-    return selectedAtMs >= observedAtMs && expiresAtMs - observedAtMs <= policy.freshnessMs;
-  }) || expiresAtMs - Date.parse(profile.generatedAt) > policy.freshnessMs) {
+  if (!routeAuthorizingEvidenceCovers(assessment, policy, selectedAtMs, expiresAtMs)
+    || expiresAtMs - Date.parse(profile.generatedAt) > policy.freshnessMs) {
     throw violation('E_CAPABILITY_UNPROVEN', 'Host capability evidence expires before the requested route');
   }
   if (policy.fallbackId !== 'fail_closed' && !request.fallbackPreconditionsSatisfied) {
@@ -512,6 +505,8 @@ export function validateHostRouteCandidate(
   const profileAgeAtSelectionMs = selectedAtMs - Date.parse(profile.generatedAt);
   const routeTtlMs = expiresAtMs - selectedAtMs;
   const { candidateDigest, ...withoutDigest } = candidate;
+  const routeEvidenceValid = policy !== undefined && assessment !== undefined
+    && routeAuthorizingEvidenceCovers(assessment, policy, selectedAtMs, expiresAtMs);
   if (typeof candidate.capability !== 'string'
     || typeof candidate.provider !== 'string' || !safeRouteField(candidate.provider)
     || typeof candidate.requestMode !== 'string' || !safeRouteField(candidate.requestMode)
@@ -535,15 +530,26 @@ export function validateHostRouteCandidate(
     || profileAgeAtSelectionMs < 0 || profileAgeAtSelectionMs > (policy?.freshnessMs ?? 0)
     || routeTtlMs <= 0 || routeTtlMs > (policy?.freshnessMs ?? 0)
     || expiresAtMs - Date.parse(profile.generatedAt) > (policy?.freshnessMs ?? 0)
-    || !assessment.observations.every(({ observedAt }) => {
-      const observedAtMs = Date.parse(observedAt);
-      return selectedAtMs >= observedAtMs
-        && expiresAtMs - observedAtMs <= (policy?.freshnessMs ?? 0);
-    })
+    || !routeEvidenceValid
     || selectedAtMs > nowMs || expiresAtMs <= nowMs) {
     throw violation('E_CAPABILITY_ROUTE', 'Route candidate is tampered, mismatched, or expired');
   }
   return candidate;
+}
+
+function routeAuthorizingEvidenceCovers(
+  assessment: Readonly<CapabilityAssessmentV1>,
+  policy: Readonly<CapabilityPolicyV1>,
+  selectedAtMs: number,
+  expiresAtMs: number,
+): boolean {
+  return assessment.observations.some((observation) => {
+    const ceiling = policy.sourceCeilings[observation.source];
+    if (observation.result !== 'positive' || ceiling === undefined
+      || tierRank(minTier(observation.tier, ceiling)) < tierRank(policy.routeTier)) return false;
+    const observedAtMs = Date.parse(observation.observedAt);
+    return selectedAtMs >= observedAtMs && expiresAtMs - observedAtMs <= policy.freshnessMs;
+  });
 }
 
 export function issueHostRouteReceipt(
