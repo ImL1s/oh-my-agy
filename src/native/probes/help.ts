@@ -5,7 +5,10 @@ import { runBoundedProbe } from './runner';
 
 const HELP_TOKENS: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
   'headless.print': [/(?:^|\s)-p(?:\s|,|$)/mu, /--print\b/mu],
-  'headless.json': [/--output-format(?:[=\s]+)json\b/mu, /\bjson\b/mu],
+  'headless.json': [
+    /(?:^|\s)--output-format(?:=|\s+)json(?=$|\s)/mu,
+    /^[ \t]*--output-format\b[^\r\n]*(?:[\s,(|])json(?=$|[\s,)|])/mu,
+  ],
   'headless.stream_json': [/stream-json\b/mu],
   'headless.json_schema': [/--json-schema\b/mu],
   'conversation.continue': [/--continue\b/mu],

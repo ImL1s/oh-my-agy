@@ -240,9 +240,11 @@ process.exit(2);
   test('explicit native live command reaches the fixed bounded canary and returns a profile', async () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-'));
     const executable = path.join(cwd, 'agy');
+    const argvLog = path.join(cwd, 'live-argv.log');
     fs.writeFileSync(executable, `#!/bin/sh
 if [ "$1" = "--version" ]; then printf 'agy 1.1.6\\n'; exit 0; fi
 if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
+printf '%s\\n' "$@" >> ${JSON.stringify(argvLog)}
 previous=''
 for arg in "$@"; do
   if [ "$previous" = "--print" ]; then prompt="$arg"; fi
@@ -272,6 +274,9 @@ exit 0
         .toEqual(expect.objectContaining({ outcome: 'supported' }));
       expect(body.profile.capabilities.find(({ key }) => key === 'headless.json'))
         .toEqual(expect.objectContaining({ outcome: 'supported' }));
+      const liveArgv = fs.readFileSync(argvLog, 'utf8').trim().split('\n');
+      const timeoutIndex = liveArgv.indexOf('--print-timeout');
+      expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }

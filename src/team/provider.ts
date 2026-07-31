@@ -9,6 +9,7 @@ import {
   HOST_CAPABILITY_POLICY_REGISTRY_V1,
   TEAM_PROVIDER_POLICY_V1,
   issueHostRouteReceipt,
+  isAbsoluteHostPath,
   routeHostCapability,
   validateHostCapabilityProfile,
   validateHostRouteCandidate,
@@ -19,6 +20,9 @@ import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { WorkerProvider } from '../contracts/worker-envelope';
 import { AGY_REQUIRED_HELP_FLAGS, AGY_WORKER_VERSION, validateAgy115Help } from './agy-argv';
+
+const TEAM_ROUTE_RECEIPT_MAX_TTL_MS = 30_000;
+const TEAM_ROUTE_RECEIPT_MIN_TTL_MS = 5_000;
 
 export interface AgyCanaryReceiptV1 {
   schemaVersion: 1;
@@ -195,14 +199,61 @@ function selectWorkerProvider(
  * native 證據完整時若 adapter 尚未實作就明確失敗，不得靜默降級。只有
  * native contract 未獲證明時，才依 launch mode 評估既定 fallback 與 canary。
  */
+export function preflightTeamWorkerProviderRoute(
+  input: Readonly<RouteTeamWorkerProviderInputV1>,
+): Result<void, RuntimeError> {
+  const evaluated = evaluateTeamWorkerProviderRoute(input);
+  return evaluated.ok ? ok(undefined) : evaluated;
+}
+
 export function routeTeamWorkerProvider(
   input: Readonly<RouteTeamWorkerProviderInputV1>,
 ): Result<HostRouteReceiptV1, RuntimeError> {
+  const evaluated = evaluateTeamWorkerProviderRoute(input);
+  if (!evaluated.ok) return evaluated;
+  const { profile, provider, fallbackPreconditionsSatisfied, receiptTtlMs } = evaluated.value;
+
+  try {
+    const candidate = routeHostCapability(profile, {
+      capability: 'headless.print',
+      provider,
+      requestMode: input.launchMode,
+      generation: input.generation,
+      contextDigest: input.contextDigest,
+      selectedAt: input.now,
+      ttlMs: receiptTtlMs,
+      fallbackPreconditionsSatisfied,
+    });
+    return selectWorkerProvider({
+      profile,
+      candidate,
+      now: input.now,
+      generation: input.generation,
+      contextDigest: input.contextDigest,
+      identityDigest: profile.identityDigest,
+      resolvedExecutable: input.resolvedExecutable,
+      fallbackPreconditionsSatisfied,
+      ...(input.tmuxReadiness === undefined ? {} : { tmuxReadiness: input.tmuxReadiness }),
+    });
+  } catch (error) {
+    return err(capabilityError('Team provider route could not be issued', error));
+  }
+}
+
+function evaluateTeamWorkerProviderRoute(
+  input: Readonly<RouteTeamWorkerProviderInputV1>,
+): Result<{
+  profile: HostCapabilityProfileV1;
+  provider: 'agy_headless' | 'tmux_agy';
+  fallbackPreconditionsSatisfied: true;
+  receiptTtlMs: number;
+}, RuntimeError> {
   let profile: HostCapabilityProfileV1;
   try { profile = validateHostCapabilityProfile(input.profile); } catch (error) {
     return err(capabilityError('Team provider profile is invalid', error));
   }
-  if (input.resolvedExecutable !== profile.hostIdentity.realpath || !path.isAbsolute(input.resolvedExecutable)) {
+  if (input.resolvedExecutable !== profile.hostIdentity.realpath
+    || !isAbsoluteHostPath(input.resolvedExecutable, profile.hostIdentity.platform)) {
     return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider executable is not bound to the host profile'));
   }
 
@@ -234,32 +285,34 @@ export function routeTeamWorkerProvider(
     input.tmuxReadiness,
   );
   if (!preconditions.ok) return preconditions;
-
-  try {
-    const candidate = routeHostCapability(profile, {
-      capability: 'headless.print',
-      provider,
-      requestMode: input.launchMode,
-      generation: input.generation,
-      contextDigest: input.contextDigest,
-      selectedAt: input.now,
-      ttlMs: 30_000,
-      fallbackPreconditionsSatisfied: preconditions.value,
-    });
-    return selectWorkerProvider({
-      profile,
-      candidate,
-      now: input.now,
-      generation: input.generation,
-      contextDigest: input.contextDigest,
-      identityDigest: profile.identityDigest,
-      resolvedExecutable: input.resolvedExecutable,
-      fallbackPreconditionsSatisfied: preconditions.value,
-      ...(input.tmuxReadiness === undefined ? {} : { tmuxReadiness: input.tmuxReadiness }),
-    });
-  } catch (error) {
-    return err(capabilityError('Team provider route could not be issued', error));
+  const receiptTtlMs = remainingRouteReceiptTtlMs(profile, 'headless.print', input.now);
+  if (receiptTtlMs === null) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider evidence is too close to expiry for bootstrap'));
   }
+  return ok({
+    profile,
+    provider,
+    fallbackPreconditionsSatisfied: preconditions.value,
+    receiptTtlMs,
+  });
+}
+
+function remainingRouteReceiptTtlMs(
+  profile: Readonly<HostCapabilityProfileV1>,
+  capability: string,
+  now: string,
+): number | null {
+  const policy = HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === capability);
+  const assessment = profile.capabilities.find(({ key }) => key === capability);
+  const nowMs = Date.parse(now);
+  if (policy === undefined || assessment === undefined || assessment.observations.length === 0
+    || !Number.isFinite(nowMs)) return null;
+  const evidenceExpiryMs = Math.min(
+    Date.parse(profile.generatedAt) + policy.freshnessMs,
+    ...assessment.observations.map(({ observedAt }) => Date.parse(observedAt) + policy.freshnessMs),
+  );
+  const ttlMs = Math.min(TEAM_ROUTE_RECEIPT_MAX_TTL_MS, evidenceExpiryMs - nowMs);
+  return Number.isSafeInteger(ttlMs) && ttlMs >= TEAM_ROUTE_RECEIPT_MIN_TTL_MS ? ttlMs : null;
 }
 
 /** Bounded, read-only compatibility probe. It deliberately does not authorize routing. */

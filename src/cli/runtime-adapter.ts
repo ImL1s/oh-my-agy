@@ -21,6 +21,8 @@ import {
 } from '../native/capability-profile';
 import {
   HostCapabilityProfileCacheV1,
+  LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
+  LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS,
   BoundedProbeOutcomeV1,
   assemblePassiveHostCapabilityProfile,
   absentPluginIdentity,
@@ -409,13 +411,14 @@ export async function inspectNativeCapabilities(
         '--model', AGY_WORKER_MODEL,
         ...(jsonAdvertised ? ['--output-format', 'json'] : []),
         '--print', prompt,
-        '--print-timeout', '45s',
+        '--print-timeout', `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
         '--mode', 'plan',
         '--sandbox',
       ],
       capability: jsonAdvertised ? 'headless.json' : 'headless.print',
       expectedToken: token,
       outputContract: jsonAdvertised ? 'agy_json' : 'exact_text',
+      timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
       environment: context.environment,
       context: liveContext,
     });

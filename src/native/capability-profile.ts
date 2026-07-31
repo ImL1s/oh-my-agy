@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import * as path from 'path';
 import { ContractViolation, assertCanonicalUtcTimestamp, canonicalBytesV1 } from '../contracts/state-schemas';
 
 export const HOST_CAPABILITY_PROFILE_SCHEMA_V1 = 'oma.host-capability-profile/v1' as const;
@@ -107,12 +108,16 @@ const C: Readonly<Partial<Record<CapabilitySource, EvidenceTier>>> = { config: '
 const P: Readonly<Partial<Record<CapabilitySource, EvidenceTier>>> = { plugin_readback: 'loadable' };
 const S: Readonly<Partial<Record<CapabilitySource, EvidenceTier>>> = { structured_init: 'observed' };
 const L: Readonly<Partial<Record<CapabilitySource, EvidenceTier>>> = { live_probe: 'verified' };
-const LIMITS = Object.freeze({
+const DEFAULT_LIMITS = Object.freeze({
   timeoutMs: 5_000,
   maximumOutputBytes: 64 * 1024,
   maximumProcesses: 8,
   maximumRecords: 256,
   maximumInputBytes: 256 * 1024,
+});
+const MODEL_CANARY_LIMITS = Object.freeze({
+  ...DEFAULT_LIMITS,
+  timeoutMs: 60_000,
 });
 const EVIDENCE_PREDICATES = Object.freeze({
   positive: 'result_positive' as const,
@@ -196,7 +201,9 @@ export const HOST_CAPABILITY_POLICY_REGISTRY_V1: readonly CapabilityPolicyV1[] =
     evidencePredicates: EVIDENCE_PREDICATES,
     aggregation: 'indeterminate_or_contradiction_unknown' as const,
     freshnessMs: sideEffect === 'passive-cache-only' ? 300_000 : 60_000,
-    limits: LIMITS,
+    limits: key === 'headless.print' || key === 'headless.json'
+      ? MODEL_CANARY_LIMITS
+      : DEFAULT_LIMITS,
   })).sort((left, right) => compareUtf8(left.key, right.key)),
 );
 
@@ -269,10 +276,10 @@ export function assembleHostCapabilityProfile(
   const hostIdentity = clone(input.hostIdentityAfter);
   const pluginIdentity = clone(input.pluginIdentityAfter);
   validateHostIdentity(hostIdentity);
-  validatePluginIdentity(pluginIdentity);
+  validatePluginIdentity(pluginIdentity, hostIdentity.platform);
   const identityDigest = digestOf({ hostIdentity, pluginIdentity });
   const normalized = input.observations.map((observation) => normalizeObservation(observation, evaluationMs));
-  if (normalized.length > LIMITS.maximumRecords) {
+  if (normalized.length > DEFAULT_LIMITS.maximumRecords) {
     throw violation('E_CAPABILITY_PROFILE', 'Capability observation count exceeds policy bound');
   }
   const policyVersion = input.policyVersion ?? HOST_CAPABILITY_POLICY_VERSION_V1;
@@ -318,7 +325,7 @@ export function validateHostCapabilityProfile(value: unknown): HostCapabilityPro
   assertCanonicalUtcTimestamp(profile.generatedAt, 'generatedAt');
   const evaluationMs = Date.parse(profile.generatedAt);
   validateHostIdentity(profile.hostIdentity);
-  validatePluginIdentity(profile.pluginIdentity);
+  validatePluginIdentity(profile.pluginIdentity, profile.hostIdentity.platform);
   if (typeof profile.profileDigest !== 'string' || typeof profile.identityDigest !== 'string'
     || typeof profile.cacheKey !== 'string' || !/^[a-f0-9]{64}$/u.test(profile.profileDigest)
     || !/^[a-f0-9]{64}$/u.test(profile.identityDigest) || !/^[a-f0-9]{64}$/u.test(profile.cacheKey)) {
@@ -343,7 +350,7 @@ export function validateHostCapabilityProfile(value: unknown): HostCapabilityPro
     evaluationMs,
     profile.identityStatus,
   ));
-  if (observations.length > LIMITS.maximumRecords) {
+  if (observations.length > DEFAULT_LIMITS.maximumRecords) {
     throw violation('E_CAPABILITY_PROFILE', 'Capability observation count exceeds policy bound');
   }
   if (!isObject(profile.freshness)) throw violation('E_CAPABILITY_PROFILE', 'Profile freshness must be an object');
@@ -382,7 +389,7 @@ export function createHostCapabilityCacheKey(input: {
 
 export function hostCapabilityIdentityDigest(hostIdentity: HostIdentityV1, pluginIdentity: PluginIdentityV1): string {
   validateHostIdentity(hostIdentity);
-  validatePluginIdentity(pluginIdentity);
+  validatePluginIdentity(pluginIdentity, hostIdentity.platform);
   return digestOf({ hostIdentity, pluginIdentity });
 }
 
@@ -540,7 +547,7 @@ export function issueHostRouteReceipt(
   resolvedExecutable: string,
   adapter: string,
 ): HostRouteReceiptV1 {
-  if (!resolvedExecutable.startsWith('/') || adapter.trim() === '') throw violation('E_CAPABILITY_ROUTE', 'Route adapter identity is invalid');
+  if (!isPortableAbsolutePath(resolvedExecutable) || adapter.trim() === '') throw violation('E_CAPABILITY_ROUTE', 'Route adapter identity is invalid');
   const { candidateDigest, ...candidateWithoutDigest } = candidate;
   if (candidateDigest !== digestOf(candidateWithoutDigest)) throw violation('E_CAPABILITY_ROUTE', 'Route candidate digest is invalid');
   const withoutDigest = { ...candidate, schema: 'oma.host-route-receipt/v1' as const, resolvedExecutable, adapter };
@@ -565,6 +572,7 @@ export function validateHostRouteReceipt(
   const { receiptDigest: _ignored, ...withoutDigest } = receipt;
   if (receiptDigest !== digestOf(withoutDigest) || receipt.fallbackPreconditionsSatisfied !== expected.fallbackPreconditionsSatisfied
     || receipt.resolvedExecutable !== validatedProfile.hostIdentity.realpath
+    || !isAbsoluteHostPath(receipt.resolvedExecutable, validatedProfile.hostIdentity.platform)
     || !safeRouteField(receipt.adapter)) {
     throw violation('E_CAPABILITY_ROUTE', 'Route receipt is tampered or fallback conditions changed');
   }
@@ -675,18 +683,19 @@ function validateHostIdentity(identity: HostIdentityV1): void {
   assertKeys(identity as unknown as Record<string, unknown>, [
     'realpath', 'binarySha256', 'version', 'versionOutputSha256', 'helpOutputSha256', 'platform', 'arch',
   ], 'Host identity');
-  if (typeof identity.realpath !== 'string' || !identity.realpath.startsWith('/')
+  if (typeof identity.realpath !== 'string'
     || typeof identity.binarySha256 !== 'string' || typeof identity.versionOutputSha256 !== 'string'
     || typeof identity.helpOutputSha256 !== 'string'
     || [identity.binarySha256, identity.versionOutputSha256, identity.helpOutputSha256].some((digest) => !/^[a-f0-9]{64}$/u.test(digest))
     || (identity.version !== null && typeof identity.version !== 'string')
     || typeof identity.platform !== 'string' || identity.platform.trim() === ''
-    || typeof identity.arch !== 'string' || identity.arch.trim() === '') {
+    || typeof identity.arch !== 'string' || identity.arch.trim() === ''
+    || !isAbsoluteHostPath(identity.realpath, identity.platform)) {
     throw violation('E_CAPABILITY_IDENTITY', 'Host identity is invalid');
   }
 }
 
-function validatePluginIdentity(identity: PluginIdentityV1): void {
+function validatePluginIdentity(identity: PluginIdentityV1, platform: string): void {
   if (!isObject(identity)) throw violation('E_CAPABILITY_IDENTITY', 'Plugin identity must be an object');
   assertKeys(identity as unknown as Record<string, unknown>, [
     'status', 'realpath', 'packageDigest', 'version', 'readbackDigest', 'enabled',
@@ -705,7 +714,9 @@ function validatePluginIdentity(identity: PluginIdentityV1): void {
     && (identity.realpath !== null || identity.packageDigest !== null || identity.version !== null || identity.readbackDigest !== null || identity.enabled)) {
     throw violation('E_CAPABILITY_IDENTITY', 'Non-present plugin identity must be explicit');
   }
-  if (identity.status === 'present' && (identity.realpath === null || !identity.realpath.startsWith('/') || identity.packageDigest === null || identity.version === null || identity.readbackDigest === null)) {
+  if (identity.status === 'present' && (identity.realpath === null
+    || !isAbsoluteHostPath(identity.realpath, platform)
+    || identity.packageDigest === null || identity.version === null || identity.readbackDigest === null)) {
     throw violation('E_CAPABILITY_IDENTITY', 'Present plugin identity is incomplete');
   }
 }
@@ -734,6 +745,13 @@ function assertKeys(value: Record<string, unknown>, expected: readonly string[],
 }
 function safeRouteField(value: string): boolean {
   return value.length > 0 && value.length <= 256 && !/[\0\r\n]/u.test(value) && value.trim() === value;
+}
+export function isAbsoluteHostPath(value: string, platform: string): boolean {
+  return value.length > 0 && value.length <= 4096 && !/[\0\r\n]/u.test(value)
+    && (platform === 'win32' ? path.win32.isAbsolute(value) : path.posix.isAbsolute(value));
+}
+function isPortableAbsolutePath(value: string): boolean {
+  return isAbsoluteHostPath(value, 'win32') || isAbsoluteHostPath(value, 'linux');
 }
 function secretLike(value: string): boolean { return /(?:authorization|cookie|token|secret|password)\s*[=:]\s*(?!<redacted>|\[redacted\])\S+/iu.test(value); }
 function violation(code: string, message: string): ContractViolation { return new ContractViolation(code, message); }

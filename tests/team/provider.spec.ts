@@ -144,6 +144,48 @@ describe('profile-backed fail-closed worker provider selection', () => {
     expect(tmux.ok && tmux.value.provider).toBe('tmux_agy');
   });
 
+  test('routes a profile bound to a native Windows executable path', () => {
+    const windowsHost: HostIdentityV1 = {
+      ...host,
+      realpath: 'C:\\Program Files\\Antigravity\\agy.exe',
+      platform: 'win32',
+      arch: 'x64',
+    };
+    const windowsPlugin: PluginIdentityV1 = {
+      ...plugin,
+      realpath: 'C:\\Users\\tester\\.gemini\\config\\plugins\\oh-my-agy',
+    };
+    const empty = assembleHostCapabilityProfile({
+      evaluationTimestamp: selectedAt,
+      hostIdentityBefore: windowsHost,
+      hostIdentityAfter: windowsHost,
+      pluginIdentityBefore: windowsPlugin,
+      pluginIdentityAfter: windowsPlugin,
+      observations: [],
+    });
+    const value = assembleHostCapabilityProfile({
+      evaluationTimestamp: selectedAt,
+      hostIdentityBefore: windowsHost,
+      hostIdentityAfter: windowsHost,
+      pluginIdentityBefore: windowsPlugin,
+      pluginIdentityAfter: windowsPlugin,
+      observations: ['headless.print', 'headless.json'].map((capability) => ({
+        capability, source: 'live_probe' as const, tier: 'healthy' as const,
+        result: 'positive' as const, observedAt: selectedAt,
+        identityDigest: empty.identityDigest, detailCode: 'WINDOWS_LIVE_OK', diagnostic: null,
+      })),
+    });
+    const selected = routeTeamWorkerProvider({
+      profile: value,
+      launchMode: 'headless',
+      now,
+      generation: 3,
+      contextDigest,
+      resolvedExecutable: windowsHost.realpath,
+    });
+    expect(selected.ok && selected.value.resolvedExecutable).toBe(windowsHost.realpath);
+  });
+
   test('profile tamper, executable drift, and implicit tmux fallback fail closed', () => {
     const value = headlessProfile();
     expect(routeTeamWorkerProvider({

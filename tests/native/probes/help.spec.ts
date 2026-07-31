@@ -7,9 +7,23 @@ const host: HostIdentityV1 = { realpath: '/agy', binarySha256: 'a'.repeat(64), v
 const base: PassiveProbeContextV1 = { mode: 'passive', evaluationTimestamp: '2026-07-31T12:00:00.000Z', identityDigest: 'd'.repeat(64), hostIdentity: host, pluginIdentity: absentPluginIdentity() };
 
 describe('documented help probe', () => {
-  it('parses stderr on exit zero and never promotes help above observed', async () => {
+  it('requires JSON on the output-format line and never promotes help above observed', async () => {
     const result = await probeDocumentedHelp('/agy', { ...base, runner: async () => ({ status: 0, signal: null, stdout: '', stderr: '  --output-format stream-json\n  --json-schema FILE\n  -p PROMPT', timedOut: false, outputOverflow: false }) });
     expect(result.observations.find(({ capability }) => capability === 'headless.stream_json')).toMatchObject({ result: 'positive', tier: 'observed' });
+    expect(result.observations.find(({ capability }) => capability === 'headless.json')).toMatchObject({ result: 'negative', tier: 'observed' });
+
+    const exact = await probeDocumentedHelp('/agy', { ...base, runner: async () => ({
+      status: 0,
+      signal: null,
+      stdout: '  --output-format  Output format for print mode (text, json, stream-json) (default text)\n',
+      stderr: '',
+      timedOut: false,
+      outputOverflow: false,
+    }) });
+    expect(exact.observations.find(({ capability }) => capability === 'headless.json')).toMatchObject({
+      result: 'positive',
+      tier: 'observed',
+    });
   });
 
   it.each([

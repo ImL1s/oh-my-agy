@@ -1,5 +1,7 @@
 import {
   LIVE_CAPABILITY_PROBE_PLAN_V1,
+  LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
+  LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS,
   completeLiveCapabilityProbeCoverage,
   runExplicitLiveProbe,
 } from '../../../src/native/probes/live';
@@ -50,6 +52,35 @@ describe('explicit live probe', () => {
     expect(malformed.observations[0]).toMatchObject({ result: 'indeterminate', detailCode: 'LIVE_MALFORMED' });
     const timeout = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, outputOverflow: false }) });
     expect(timeout).toMatchObject({ cacheable: false, detailCode: 'LIVE_TIMEOUT' });
+  });
+
+  it('allows the advertised model timeout plus bounded startup overhead', async () => {
+    expect(LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS).toBeGreaterThan(LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS);
+    let observedTimeoutMs = 0;
+    const result = await runExplicitLiveProbe({
+      live: true,
+      executable: '/agy',
+      argv: [],
+      capability: 'headless.print',
+      expectedToken: 'ok',
+      timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
+      context,
+      runner: async (request) => {
+        observedTimeoutMs = request.timeoutMs;
+        return { status: 0, signal: null, stdout: 'ok\n', stderr: '', timedOut: false, outputOverflow: false };
+      },
+    });
+    expect(observedTimeoutMs).toBe(LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS);
+    expect(result).toMatchObject({ cacheable: true, detailCode: 'LIVE_VERIFIED' });
+    await expect(runExplicitLiveProbe({
+      live: true,
+      executable: '/agy',
+      argv: [],
+      capability: 'headless.print',
+      expectedToken: 'ok',
+      timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS + 1,
+      context,
+    })).rejects.toThrow(/E_LIVE_PROBE_LIMIT/);
   });
 
   it('accepts only an exact successful Antigravity JSON terminal response', async () => {

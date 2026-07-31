@@ -16,6 +16,7 @@ import {
   assembleHostCapabilityProfile,
 } from '../../src/native/capability-profile';
 import { TeamOrchestratorOptions } from '../../src/team/orchestrator';
+import { workerRouteAuthorityPath } from '../../src/team/route-authority';
 
 const maybe = TmuxFixture.available() ? test : test.skip;
 
@@ -219,6 +220,73 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     });
     expect(fs.readdirSync(fixture.managedWorktreesRoot)).toEqual([]);
     expect(fs.readdirSync(fixture.repo).some((entry) => entry.includes('worker-descriptor'))).toBe(false);
+  });
+
+  test('issues the short-lived route receipt after slow worktree preparation', async () => {
+    const leader = resolveGitWorktreeIdentity(fixture.repo);
+    const teamId = 'slow-worktree-route';
+    const manifestPath = path.join(fixture.root, 'slow-worktree-manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      schema: 'oma.team-manifest/v1',
+      teamId,
+      revision: 1,
+      tasks: [{
+        id: 'task-a', dependencies: [], write_scope: [{ kind: 'file', path: 'slow.txt' }],
+        mode: 'headless', verification: { version: 1, commands: [], requiredArtifacts: [] },
+      }],
+    }));
+    const baseNow = 1_700_000_000_000;
+    let now = baseNow;
+    const realWorktrees = new GitWorktreeManager(fixture.repo, fixture.managedWorktreesRoot);
+    const slowWorktrees = {
+      create: (input: any) => {
+        expect(fs.existsSync(workerRouteAuthorityPath(
+          fixture.stateRoot,
+          teamId,
+          'task-a',
+          1,
+        ))).toBe(false);
+        const created = realWorktrees.create(input);
+        if (created.ok) now += 31_000;
+        return created;
+      },
+      rollbackLaunch: realWorktrees.rollbackLaunch.bind(realWorktrees),
+    };
+    const fakeTmux = {
+      startWorker: (input: any) => ok({
+        sessionName: input.sessionName,
+        paneId: '%slow',
+        ownerNonce: input.ownerNonce,
+        workerNonce: input.workerNonce,
+      }),
+      killOwnedSession: () => ok(undefined),
+      hasSession: () => false,
+      inspectOwnedPane: () => err(runtimeError('E_NOT_FOUND', 'not live')),
+    };
+    const orch = new TeamOrchestrator({
+      ...providerRouteOptions(),
+      stateRoot: fixture.stateRoot,
+      workspaceRoot: fixture.repo,
+      repoKey: leader.repoKey,
+      workspaceKey: leader.workspaceKey,
+      managedWorktreesRoot: fixture.managedWorktreesRoot,
+      nowMs: () => now,
+      worktrees: slowWorktrees as GitWorktreeManager,
+      tmux: fakeTmux as any,
+    });
+
+    const started = await orch.startFromManifest(manifestPath, 'headless');
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const authority = JSON.parse(fs.readFileSync(workerRouteAuthorityPath(
+      fixture.stateRoot,
+      teamId,
+      'task-a',
+      1,
+    ), 'utf8')) as { receipt: { selectedAt: string; expiresAt: string } };
+    expect(Date.parse(authority.receipt.selectedAt)).toBe(baseNow + 31_000);
+    expect(Date.parse(authority.receipt.selectedAt)).toBeGreaterThan(baseNow + 30_000);
+    expect(Date.parse(authority.receipt.expiresAt)).toBe(baseNow + 60_000);
   });
 
   maybe('claim-time launch failure rolls back state and allows the same team ID to retry', async () => {

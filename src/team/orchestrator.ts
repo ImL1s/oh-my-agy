@@ -27,8 +27,16 @@ import {
 } from './types';
 import { AuthorityLeaseStore, pathKeysFromWriteScope } from './authority-lease';
 import { GitWorktreeManager, ManagedWorktreeV1, resolveGitWorktreeIdentity } from './worktree';
-import { TmuxReadinessReceiptV1, routeTeamWorkerProvider } from './provider';
-import { createWorkerRouteAuthority, writeWorkerRouteAuthority } from './route-authority';
+import {
+  TmuxReadinessReceiptV1,
+  preflightTeamWorkerProviderRoute,
+  routeTeamWorkerProvider,
+} from './provider';
+import {
+  createWorkerRouteAuthority,
+  workerRouteAuthorityPath,
+  writeWorkerRouteAuthority,
+} from './route-authority';
 
 export interface ProviderProfileAuthorityV1 {
   profile: HostCapabilityProfileV1;
@@ -642,13 +650,17 @@ export class TeamOrchestrator {
       selectedAt,
     });
     let routeProfile: HostCapabilityProfileV1 | undefined;
-    const selected = authority === undefined
+    let routeResolvedExecutable: string | undefined;
+    let routeTmuxReadiness: TmuxReadinessReceiptV1 | undefined;
+    const preflight = authority === undefined
       ? err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team worker launch requires an evidence-bearing host profile'))
       : !authority.ok
         ? authority
         : (() => {
           routeProfile = authority.value.profile;
-          return routeTeamWorkerProvider({
+          routeResolvedExecutable = authority.value.resolvedExecutable;
+          routeTmuxReadiness = authority.value.tmuxReadiness;
+          return preflightTeamWorkerProviderRoute({
             profile: authority.value.profile,
             now: selectedAt,
             launchMode: input.workerMode,
@@ -659,7 +671,7 @@ export class TeamOrchestrator {
               ? {} : { tmuxReadiness: authority.value.tmuxReadiness }),
           });
         })();
-    if (!selected.ok) {
+    if (!preflight.ok) {
       const rolledBack = input.launchTransaction
         ? await this.rollbackLaunchLeases(input.teamId, input.task.id)
         : await this.rollbackFailedTaskLaunch({
@@ -672,9 +684,9 @@ export class TeamOrchestrator {
           expectedRevision: claimed.value.revision,
         });
       if (!rolledBack.ok) return rolledBack;
-      return selected;
+      return preflight;
     }
-    if (routeProfile === undefined) {
+    if (routeProfile === undefined || routeResolvedExecutable === undefined) {
       const rolledBack = input.launchTransaction
         ? await this.rollbackLaunchLeases(input.teamId, input.task.id)
         : await this.rollbackFailedTaskLaunch({
@@ -689,39 +701,6 @@ export class TeamOrchestrator {
       if (!rolledBack.ok) return rolledBack;
       return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team provider profile authority is unavailable'));
     }
-    const routeReceipt = selected.value;
-    let routeAuthorityPath: string;
-    let routeAuthorityDigest: string;
-    try {
-      const routeAuthority = createWorkerRouteAuthority({
-        stateRoot: this.stateRoot,
-        teamId: input.teamId,
-        taskId: input.task.id,
-        generation,
-        contextDigest,
-        profile: routeProfile,
-        receipt: routeReceipt,
-        now: selectedAt,
-      });
-      routeAuthorityPath = writeWorkerRouteAuthority(this.stateRoot, routeAuthority);
-      routeAuthorityDigest = routeAuthority.authorityDigest;
-    } catch (error) {
-      const rolledBack = input.launchTransaction
-        ? await this.rollbackLaunchLeases(input.teamId, input.task.id)
-        : await this.rollbackFailedTaskLaunch({
-          store: input.store,
-          teamId: input.teamId,
-          taskId: input.task.id,
-          ownerNonce: input.ownerNonce,
-          claimToken,
-          generation,
-          expectedRevision: claimed.value.revision,
-        });
-      if (!rolledBack.ok) return rolledBack;
-      return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker route authority could not be persisted', {
-        cause: error instanceof Error ? error.message : String(error),
-      }));
-    }
 
     const branchName = `oma-team/${input.teamId}/${workerId}-g${generation}-${this.tokenFactory().slice(0, 8)}`;
     const worktree = this.worktrees.create({
@@ -733,7 +712,6 @@ export class TeamOrchestrator {
       ownerNonce: input.ownerNonce,
     });
     if (!worktree.ok) {
-      try { fs.rmSync(routeAuthorityPath, { force: true }); } catch (_) { /* best-effort */ }
       if (input.launchTransaction) {
         const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
         if (!rolledBack.ok) return rolledBack;
@@ -750,6 +728,73 @@ export class TeamOrchestrator {
         if (!rolledBack.ok) return rolledBack;
       }
       return worktree;
+    }
+
+    const rollbackPreparedWorktree = async (): Promise<Result<void, RuntimeError>> => {
+      const worktreeRollback = this.worktrees.rollbackLaunch(worktree.value, input.ownerNonce);
+      if (input.launchTransaction) {
+        const rolledBack = await this.rollbackLaunchLeases(input.teamId, input.task.id);
+        if (!rolledBack.ok) return rolledBack;
+        return worktreeRollback;
+      }
+      return this.rollbackFailedTaskLaunch({
+        store: input.store,
+        teamId: input.teamId,
+        taskId: input.task.id,
+        ownerNonce: input.ownerNonce,
+        claimToken,
+        generation,
+        expectedRevision: claimed.value.revision,
+        worktree: worktree.value,
+        worktreeAlreadyRolledBack: worktreeRollback.ok,
+      });
+    };
+
+    // Preflight remains before worktree creation, but the short-lived receipt
+    // is issued only after that potentially slow preparation step.
+    const routeSelectedAt = new Date(this.nowMs()).toISOString();
+    const selected = routeTeamWorkerProvider({
+      profile: routeProfile,
+      now: routeSelectedAt,
+      launchMode: input.workerMode,
+      generation,
+      contextDigest,
+      resolvedExecutable: routeResolvedExecutable,
+      ...(routeTmuxReadiness === undefined ? {} : { tmuxReadiness: routeTmuxReadiness }),
+    });
+    if (!selected.ok) {
+      const rolledBack = await rollbackPreparedWorktree();
+      if (!rolledBack.ok) return rolledBack;
+      return selected;
+    }
+    const routeReceipt = selected.value;
+    let routeAuthorityPath = workerRouteAuthorityPath(
+      this.stateRoot,
+      input.teamId,
+      input.task.id,
+      generation,
+    );
+    let routeAuthorityDigest: string;
+    try {
+      const routeAuthority = createWorkerRouteAuthority({
+        stateRoot: this.stateRoot,
+        teamId: input.teamId,
+        taskId: input.task.id,
+        generation,
+        contextDigest,
+        profile: routeProfile,
+        receipt: routeReceipt,
+        now: routeSelectedAt,
+      });
+      routeAuthorityPath = writeWorkerRouteAuthority(this.stateRoot, routeAuthority);
+      routeAuthorityDigest = routeAuthority.authorityDigest;
+    } catch (error) {
+      try { fs.rmSync(routeAuthorityPath, { force: true }); } catch (_) { /* best-effort */ }
+      const rolledBack = await rollbackPreparedWorktree();
+      if (!rolledBack.ok) return rolledBack;
+      return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker route authority could not be persisted', {
+        cause: error instanceof Error ? error.message : String(error),
+      }));
     }
 
     const sessionBase = this.sessionNamePrefix ?? `oma-${input.teamId}`;

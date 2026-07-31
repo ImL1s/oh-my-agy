@@ -9,6 +9,8 @@ import { runBoundedProbe } from './runner';
 import { probeStructuredInitOutput } from './structured-init';
 
 const MANAGED_KEYS = ['OMA_SESSION_ID', 'OMA_LAUNCH_NONCE', 'OMA_INVOCATION_GENERATION', 'OMA_CONVERSATION_ID'] as const;
+export const LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS = 45_000;
+export const LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS = 60_000;
 
 export const LIVE_CAPABILITY_PROBE_PLAN_V1 = Object.freeze(
   HOST_CAPABILITY_POLICY_REGISTRY_V1
@@ -28,6 +30,7 @@ export interface LiveProbeRequestV1 {
   capability: string;
   expectedToken: string;
   outputContract?: 'exact_text' | 'agy_json';
+  timeoutMs?: number;
   environment?: NodeJS.ProcessEnv;
   context: LiveProbeContextV1;
   runner?: BoundedProbeRunnerV1;
@@ -41,6 +44,10 @@ export async function runExplicitLiveProbe(request: Readonly<LiveProbeRequestV1>
   if (policy === undefined || policy.sourceCeilings.live_probe === undefined) {
     throw new Error(`E_LIVE_PROBE_UNREGISTERED: ${request.capability}`);
   }
+  const timeoutMs = request.timeoutMs ?? policy.limits.timeoutMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > policy.limits.timeoutMs) {
+    throw new Error(`E_LIVE_PROBE_LIMIT: ${request.capability}`);
+  }
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-'));
   fs.chmodSync(scratch, 0o700);
   const environment = { ...(request.environment ?? process.env) };
@@ -51,7 +58,7 @@ export async function runExplicitLiveProbe(request: Readonly<LiveProbeRequestV1>
       argv: request.argv,
       cwd: scratch,
       environment,
-      timeoutMs: policy.limits.timeoutMs,
+      timeoutMs,
       maximumOutputBytes: policy.limits.maximumOutputBytes,
     });
     const exact = outcome.status === 0 && !outcome.timedOut && !outcome.outputOverflow && outcome.error === undefined

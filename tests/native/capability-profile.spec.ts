@@ -78,6 +78,9 @@ describe('HostCapabilityProfileV1', () => {
       evidencePredicates.affirmativeNegative === 'result_negative_same_identity'
         && aggregation === 'indeterminate_or_contradiction_unknown'
         && Object.values(limits).every((value) => value > 0))).toBe(true);
+    expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'headless.print')?.limits.timeoutMs).toBe(60_000);
+    expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'headless.json')?.limits.timeoutMs).toBe(60_000);
+    expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'hook.stop')?.limits.timeoutMs).toBe(5_000);
     expect(TEAM_PROVIDER_POLICY_V1.antigravity_native).toMatchObject({ adapterImplemented: false });
     expect(TEAM_PROVIDER_POLICY_V1.agy_headless.oneOf).toEqual(['headless.stream_json', 'headless.json']);
   });
@@ -119,6 +122,55 @@ describe('HostCapabilityProfileV1', () => {
     });
     expect(drifted).toMatchObject({ identityStatus: 'drifted', cacheable: false });
     expect(drifted.capabilities.every(({ outcome }) => outcome === 'unknown')).toBe(true);
+  });
+
+  it('accepts Windows absolute host, plugin, and route paths only for win32 identities', () => {
+    const windowsHost: HostIdentityV1 = {
+      ...host,
+      realpath: 'C:\\Program Files\\Antigravity\\agy.exe',
+      platform: 'win32',
+      arch: 'x64',
+    };
+    const windowsPlugin: PluginIdentityV1 = {
+      ...plugin,
+      realpath: 'C:\\Users\\tester\\.gemini\\config\\plugins\\oh-my-agy',
+    };
+    const empty = assembleHostCapabilityProfile({
+      evaluationTimestamp: NOW,
+      hostIdentityBefore: windowsHost,
+      hostIdentityAfter: windowsHost,
+      pluginIdentityBefore: windowsPlugin,
+      pluginIdentityAfter: windowsPlugin,
+      observations: [],
+    });
+    const routed = assembleHostCapabilityProfile({
+      evaluationTimestamp: NOW,
+      hostIdentityBefore: windowsHost,
+      hostIdentityAfter: windowsHost,
+      pluginIdentityBefore: windowsPlugin,
+      pluginIdentityAfter: windowsPlugin,
+      observations: [{
+        capability: 'headless.print', source: 'live_probe', tier: 'healthy', result: 'positive',
+        observedAt: NOW, identityDigest: empty.identityDigest, detailCode: 'WINDOWS_LIVE_OK', diagnostic: null,
+      }],
+    });
+    const candidate = routeHostCapability(routed, {
+      capability: 'headless.print', provider: 'agy_headless', requestMode: 'headless', generation: 1,
+      contextDigest: CONTEXT, selectedAt: NOW, ttlMs: 5_000, fallbackPreconditionsSatisfied: true,
+    });
+    const receipt = issueHostRouteReceipt(candidate, windowsHost.realpath, 'agy_headless_v1');
+    expect(validateHostRouteReceipt(receipt, routed, {
+      now: NOW, generation: 1, contextDigest: CONTEXT,
+      identityDigest: routed.identityDigest, fallbackPreconditionsSatisfied: true,
+    })).toEqual(receipt);
+    expect(() => assembleHostCapabilityProfile({
+      evaluationTimestamp: NOW,
+      hostIdentityBefore: { ...windowsHost, platform: 'darwin' },
+      hostIdentityAfter: { ...windowsHost, platform: 'darwin' },
+      pluginIdentityBefore: windowsPlugin,
+      pluginIdentityAfter: windowsPlugin,
+      observations: [],
+    })).toThrow(/Host identity is invalid/);
   });
 
   it('recomputes evidence projections and rejects a resigned forged route profile', () => {
