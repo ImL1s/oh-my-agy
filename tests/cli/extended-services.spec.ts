@@ -105,6 +105,42 @@ describe('public composition CLI services', () => {
     }
   });
 
+  test('native status preserves unavailable bounded version/help outcomes at T0', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-status-failed-probes-'));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, '#!/bin/sh\nexit 2\n', { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      pluginAdapter: { run: async (argv) => ({ argv: [...argv], code: 1, stdout: '', stderr: 'registry unavailable' }) },
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.extendedCommand('native-status', [])).toBe(0);
+      const body = JSON.parse(stdout) as {
+        status: string;
+        detail_code: string;
+        capabilities: Array<{ capability: string; status: string; evidence_tier: string }>;
+      };
+      expect(body).toMatchObject({
+        status: 'unavailable',
+        detail_code: 'HOST_CAPABILITY_PUBLIC_CLI_UNAVAILABLE',
+      });
+      expect(body.capabilities.find(({ capability }) => capability === 'public_cli')).toEqual({
+        capability: 'public_cli',
+        status: 'unobserved',
+        evidence_tier: 'T0',
+      });
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   test('plugin readback failure remains unknown and non-cacheable instead of affirmative absence', async () => {
     const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-plugin-failure-')));
     const executable = path.join(cwd, 'agy');

@@ -159,6 +159,7 @@ function inspection(profile: HostCapabilityProfileV1, live: boolean): NativeCapa
     cacheStatus: live ? 'rebuilt' : 'hit',
     diagnostics: [],
     liveSucceeded: live ? true : null,
+    publicCliStatus: 'public_cli_observed',
   };
 }
 

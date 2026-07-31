@@ -4,25 +4,33 @@ import { CapabilityObservationV1, CapabilitySource } from '../capability-profile
 import { PASSIVE_PROBE_LIMITS_V1, PassiveProbeContextV1, ProbeResultV1 } from './types';
 import { runBoundedProbe } from './runner';
 
+function exactLongOption(name: string): RegExp {
+  return new RegExp(`(?:^|\\s)--${name}(?:[\\s=,]|$)`, 'mu');
+}
+
+function exactHelpToken(token: string): RegExp {
+  return new RegExp(`(?:^|[\\s,(|])${token}(?=$|[\\s,):|])`, 'imu');
+}
+
 const HELP_TOKENS: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
-  'headless.print': [/(?:^|\s)-p(?:\s|,|$)/mu, /(?:^|\s)--print(?:[\s=,]|$)/mu],
+  'headless.print': [/(?:^|\s)-p(?:\s|,|$)/mu, exactLongOption('print')],
   'headless.json': [
     /(?:^|\s)--output-format(?:=|\s+)json(?=$|\s)/mu,
-    /^[ \t]*--output-format\b[^\r\n]*(?:[\s,(|])json(?=$|[\s,)|])/mu,
+    /^[ \t]*--output-format(?:[ \t=,]|$)[^\r\n]*(?:[\s,(|])json(?=$|[\s,)|])/mu,
   ],
-  'headless.stream_json': [/stream-json\b/mu],
-  'headless.json_schema': [/--json-schema\b/mu],
-  'conversation.continue': [/--continue\b/mu],
-  'conversation.exact': [/--conversation(?:-id)?\b/mu],
-  'conversation.fork': [/--fork\b/mu],
-  'conversation.branch': [/--branch\b/mu],
-  'project.association': [/--project\b/mu],
-  'model.discovery': [/--model\b/mu],
-  'model.selection': [/--model\b/mu],
-  'effort.discovery': [/--effort\b/mu],
-  'effort.selection': [/--effort\b/mu],
-  'mcp.local_config': [/\bmcp\b/imu],
-  'mcp.remote_config': [/\bmcp\b/imu],
+  'headless.stream_json': [exactHelpToken('(?:--)?stream-json')],
+  'headless.json_schema': [exactLongOption('json-schema')],
+  'conversation.continue': [exactLongOption('continue')],
+  'conversation.exact': [exactLongOption('conversation'), exactLongOption('conversation-id')],
+  'conversation.fork': [exactLongOption('fork')],
+  'conversation.branch': [exactLongOption('branch')],
+  'project.association': [exactLongOption('project')],
+  'model.discovery': [exactLongOption('model')],
+  'model.selection': [exactLongOption('model')],
+  'effort.discovery': [exactLongOption('effort')],
+  'effort.selection': [exactLongOption('effort')],
+  'mcp.local_config': [exactHelpToken('mcp')],
+  'mcp.remote_config': [exactHelpToken('mcp')],
 });
 
 export async function probeDocumentedHelp(

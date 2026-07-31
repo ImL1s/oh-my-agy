@@ -69,6 +69,53 @@ describe('documented help probe', () => {
     }
   });
 
+  it('does not promote related long options or prefixed help tokens', async () => {
+    const result = await probeDocumentedHelp('/agy', {
+      ...base,
+      runner: async () => ({
+        status: 0,
+        signal: null,
+        stdout: [
+          '--output-format-extra json',
+          '--stream-json-lines',
+          '--json-schema-version',
+          '--continue-on-error',
+          '--conversation-root',
+          '--conversation-id-extra',
+          '--fork-point',
+          '--branch-name',
+          '--project-root',
+          '--model-cache',
+          '--effort-level',
+          'mcp-server',
+        ].join('\n'),
+        stderr: '',
+        timedOut: false,
+        outputOverflow: false,
+        processCountOverflow: false,
+      }),
+    });
+    for (const capability of [
+      'headless.json',
+      'headless.stream_json',
+      'headless.json_schema',
+      'conversation.continue',
+      'conversation.exact',
+      'conversation.fork',
+      'conversation.branch',
+      'project.association',
+      'model.discovery',
+      'model.selection',
+      'effort.discovery',
+      'effort.selection',
+      'mcp.local_config',
+      'mcp.remote_config',
+    ]) {
+      expect(result.observations.find(({ capability: key }) => key === capability))
+        .toMatchObject({ result: 'negative' });
+    }
+  });
+
   it.each([
     ['timeout', { timedOut: true, outputOverflow: false }, 'HELP_TIMEOUT'],
     ['overflow', { timedOut: false, outputOverflow: true }, 'HELP_OVERFLOW'],

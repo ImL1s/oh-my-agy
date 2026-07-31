@@ -270,6 +270,7 @@ export interface NativeCapabilityInspectionV1 {
   readonly cacheStatus: 'hit' | 'miss' | 'rebuilt' | 'non_cacheable';
   readonly diagnostics: readonly { code: string; message: string }[];
   readonly liveSucceeded: boolean | null;
+  readonly publicCliStatus: 'unavailable' | 'public_cli_partial' | 'public_cli_observed';
 }
 
 export interface NativeCapabilityUnavailableV1 {
@@ -351,6 +352,7 @@ export async function inspectNativeCapabilities(
     helpOutput: first.helpOutput,
     pathEnvironment: context.environment.PATH,
   });
+  const publicCliStatusBefore = classifyNativePublicCliStatus(first);
   const pluginBefore = await inspectNativePlugin(context);
   const pluginIdentity = pluginBefore.identity;
   const diagnostics: Array<{ code: string; message: string }> = [...pluginBefore.diagnostics];
@@ -370,7 +372,8 @@ export async function inspectNativeCapabilities(
     if (cacheSnapshotBefore !== null
       && isHostCapabilityProfileFresh(cacheSnapshotBefore.profile, cacheReadAt)) {
       return {
-        kind: 'profile', profile: cacheSnapshotBefore.profile, cacheStatus: 'hit', diagnostics: [], liveSucceeded: null,
+        kind: 'profile', profile: cacheSnapshotBefore.profile, cacheStatus: 'hit', diagnostics: [],
+        liveSucceeded: null, publicCliStatus: publicCliStatusBefore,
       };
     }
   }
@@ -461,6 +464,10 @@ export async function inspectNativeCapabilities(
     helpOutput: second.helpOutput,
     pathEnvironment: context.environment.PATH,
   });
+  const publicCliStatus = combineNativePublicCliStatus(
+    publicCliStatusBefore,
+    classifyNativePublicCliStatus(second),
+  );
   const pluginAfter = await inspectNativePlugin(context);
   diagnostics.push(...pluginAfter.diagnostics);
   const evaluationTimestamp = new Date().toISOString();
@@ -494,7 +501,7 @@ export async function inspectNativeCapabilities(
   } else if (!live && cache === null) {
     cacheStatus = 'miss';
   }
-  return { kind: 'profile', profile, cacheStatus, diagnostics, liveSucceeded };
+  return { kind: 'profile', profile, cacheStatus, diagnostics, liveSucceeded, publicCliStatus };
 }
 
 async function inspectNativePlugin(
@@ -607,6 +614,7 @@ async function readNativeHostSurface(
   version: string | null;
   versionOutput: string;
   helpOutput: string;
+  versionOutcome: BoundedProbeOutcomeV1;
   helpOutcome: BoundedProbeOutcomeV1;
 } | null> {
   const limits = {
@@ -634,7 +642,31 @@ async function readNativeHostSurface(
     && versionOutcome.error === undefined
     ? versionOutput.match(/(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)/u)?.[1] ?? null
     : null;
-  return { version: parsed, versionOutput, helpOutput, helpOutcome };
+  return { version: parsed, versionOutput, helpOutput, versionOutcome, helpOutcome };
+}
+
+function classifyNativePublicCliStatus(surface: Readonly<{
+  versionOutcome: BoundedProbeOutcomeV1;
+  helpOutcome: BoundedProbeOutcomeV1;
+}>): NativeCapabilityInspectionV1['publicCliStatus'] {
+  const versionObserved = boundedProbeSucceeded(surface.versionOutcome);
+  const helpObserved = boundedProbeSucceeded(surface.helpOutcome);
+  return versionObserved && helpObserved
+    ? 'public_cli_observed'
+    : versionObserved || helpObserved ? 'public_cli_partial' : 'unavailable';
+}
+
+function combineNativePublicCliStatus(
+  before: NativeCapabilityInspectionV1['publicCliStatus'],
+  after: NativeCapabilityInspectionV1['publicCliStatus'],
+): NativeCapabilityInspectionV1['publicCliStatus'] {
+  if (before === 'public_cli_observed' && after === 'public_cli_observed') return 'public_cli_observed';
+  return before === 'unavailable' && after === 'unavailable' ? 'unavailable' : 'public_cli_partial';
+}
+
+function boundedProbeSucceeded(outcome: Readonly<BoundedProbeOutcomeV1>): boolean {
+  return outcome.status === 0 && !outcome.timedOut && !outcome.outputOverflow
+    && !outcome.processCountOverflow && outcome.error === undefined;
 }
 
 function isExecutableMissing(result: Readonly<BoundedProbeOutcomeV1>): boolean {
@@ -2360,19 +2392,20 @@ async function runNativeStatusCommand(
     return 0;
   }
   const profile = inspected.profile;
+  const publicCliObserved = inspected.publicCliStatus !== 'unavailable';
   const projected = (key: string) => profile.capabilities.find((entry) => entry.key === key)?.outcome === 'supported';
   context.stdout(`${JSON.stringify({
     store_kind: 'oma_antigravity_public_status',
     schema_version: 1,
     repository_id: 'OMA',
-    status: 'public_cli_observed',
+    status: inspected.publicCliStatus,
     executable: profile.hostIdentity.realpath,
     version: profile.hostIdentity.version,
     version_sha256: profile.hostIdentity.version === null
       ? null : sha256Hex(profile.hostIdentity.version),
     public_subcommands: [],
     capabilities: [
-      legacyNativeCapability('public_cli', true),
+      legacyNativeCapability('public_cli', publicCliObserved),
       legacyNativeCapability('plugins', projected('plugin.skills')),
       legacyNativeCapability('plugin_fresh_session_discovery', false),
       legacyNativeCapability('native_status', projected('ui.statusline')),
@@ -2380,8 +2413,10 @@ async function runNativeStatusCommand(
       legacyNativeCapability('native_team', projected('subagent.manage')),
       legacyNativeCapability('native_workflows', projected('custom_agent.markdown')),
     ],
-    detail_code: 'HOST_CAPABILITY_PROFILE_PROJECTION',
-    diagnostic: null,
+    detail_code: publicCliObserved
+      ? 'HOST_CAPABILITY_PROFILE_PROJECTION'
+      : 'HOST_CAPABILITY_PUBLIC_CLI_UNAVAILABLE',
+    diagnostic: publicCliObserved ? null : 'bounded version/help probes were unavailable',
     profile_digest: profile.profileDigest,
   }, null, 2)}\n`);
   return 0;
