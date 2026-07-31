@@ -14,7 +14,7 @@ import {
   RecoveryForkSelectionEvidenceV1,
   RecoveryTaskAggregateV1,
 } from './recovery-fork';
-import { TeamOrchestrator } from './orchestrator';
+import { TeamOrchestrator, TeamOrchestratorOptions } from './orchestrator';
 import { isCanonicalTeamIdentifier } from './manifest';
 import { TeamStateStore } from './state';
 import { RuntimeContext, TeamActorIdentityV1 } from './types';
@@ -117,7 +117,10 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
     if (!flags.value.has('--manifest')) {
       return err(runtimeError('E_VALIDATOR_REJECTED', 'team start requires --manifest'));
     }
-    const workerMode = flags.value.get('--worker-mode') ?? 'interactive';
+    // Headless is the only public CLI default with a complete profile-backed
+    // readiness path. Interactive tmux remains explicit and fail-closed until
+    // the caller supplies a fresh bounded readiness receipt.
+    const workerMode = flags.value.get('--worker-mode') ?? 'headless';
     if (workerMode !== 'interactive' && workerMode !== 'headless') {
       return err(runtimeError('E_VALIDATOR_REJECTED', 'worker-mode must be interactive or headless'));
     }
@@ -283,9 +286,14 @@ export interface TeamCommandOptions {
    * 設計概念映射：CLI 不內嵌編排細節，委派 TeamOrchestrator。
    */
   orchestratorFactory?: (context: RuntimeContext) => TeamOrchestrator;
+  /** CLI composition supplies evidence-bearing profiles; Team owns routing. */
+  providerProfileFactory?: TeamOrchestratorOptions['providerProfileFactory'];
 }
 
-function defaultOrchestrator(context: RuntimeContext): TeamOrchestrator {
+function defaultOrchestrator(
+  context: RuntimeContext,
+  providerProfileFactory: TeamOrchestratorOptions['providerProfileFactory'],
+): TeamOrchestrator {
   const managedRoot = path.join(context.stateRoot, 'managed-worktrees');
   // 生產預設 worker-bootstrap（真 agy）；測試仍可 inject hold
   const bootstrapEntry = path.resolve(__dirname, 'worker-bootstrap.js');
@@ -297,6 +305,7 @@ function defaultOrchestrator(context: RuntimeContext): TeamOrchestrator {
     managedWorktreesRoot: managedRoot,
     tokenFactory: context.tokenFactory,
     workerHoldEntryPath: bootstrapEntry,
+    providerProfileFactory,
   });
 }
 
@@ -314,9 +323,11 @@ export async function teamCommand(
     stderr(`${parsed.error.code}: ${parsed.error.message}\n`);
     return 2;
   }
+  const getOrchestrator = (): TeamOrchestrator => options.orchestratorFactory?.(options.context)
+    ?? defaultOrchestrator(options.context, options.providerProfileFactory);
   if (parsed.value.kind === 'start') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const result = await factory(options.context).startFromManifest(
+    const orchestrator = getOrchestrator();
+    const result = await orchestrator.startFromManifest(
       parsed.value.manifestPath,
       parsed.value.workerMode,
     );
@@ -347,8 +358,8 @@ export async function teamCommand(
   }
 
   if (parsed.value.kind === 'status') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const result = await factory(options.context).status(parsed.value.teamId);
+    const orchestrator = getOrchestrator();
+    const result = await orchestrator.status(parsed.value.teamId);
     if (!result.ok) {
       stderr(`${result.error.code}: ${result.error.message}\n`);
       return 1;
@@ -358,8 +369,7 @@ export async function teamCommand(
   }
 
   if (parsed.value.kind === 'stop') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const result = await factory(options.context).stop(parsed.value.teamId);
+    const result = await getOrchestrator().stop(parsed.value.teamId);
     if (!result.ok) {
       stderr(`${result.error.code}: ${result.error.message}\n`);
       return 1;
@@ -369,8 +379,7 @@ export async function teamCommand(
   }
 
   if (parsed.value.kind === 'supervise') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const result = await factory(options.context).superviseOnce(parsed.value.teamId);
+    const result = await getOrchestrator().superviseOnce(parsed.value.teamId);
     if (!result.ok) {
       stderr(`${result.error.code}: ${result.error.message}\n`);
       return 1;
@@ -380,8 +389,7 @@ export async function teamCommand(
   }
 
   if (parsed.value.kind === 'reclaim') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const result = await factory(options.context).reclaimTask(
+    const result = await getOrchestrator().reclaimTask(
       parsed.value.teamId,
       parsed.value.taskId,
       parsed.value.expectedRevision,
@@ -399,8 +407,7 @@ export async function teamCommand(
   }
 
   if (parsed.value.kind === 'deliver') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const result = await factory(options.context).deliverTask({
+    const result = await getOrchestrator().deliverTask({
       teamId: parsed.value.teamId,
       taskId: parsed.value.taskId,
       expectedRevision: parsed.value.expectedRevision,
@@ -417,8 +424,7 @@ export async function teamCommand(
   }
 
   if (parsed.value.kind === 'tick') {
-    const factory = options.orchestratorFactory ?? defaultOrchestrator;
-    const orch = factory(options.context);
+    const orch = getOrchestrator();
     if (parsed.value.maxParallel !== undefined) {
       orch.setMaxParallelWorkers(parsed.value.maxParallel);
     }

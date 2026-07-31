@@ -10,6 +10,7 @@ export type ParsedCliCommand =
   | { readonly kind: 'setup'; readonly args: readonly string[] }
   | { readonly kind: 'doctor'; readonly args: readonly string[] }
   | { readonly kind: 'skill'; readonly args: readonly string[] }
+  | { readonly kind: 'native'; readonly command: NativeCliCommand; readonly args: readonly string[] }
   | {
     readonly kind: 'extended';
     readonly command: ExtendedCliCommand;
@@ -33,6 +34,8 @@ export type ExtendedCliCommand =
   | 'uninstall'
   | 'parity'
   | 'production';
+
+export type NativeCliCommand = 'capabilities' | 'probe';
 
 const MANAGED_MODES = new Set<ManagedMode>(['ralph', 'ultrawork', 'search']);
 const EXTENDED_COMMANDS = new Set<ExtendedCliCommand>([
@@ -95,6 +98,9 @@ export function parseCliArguments(argv: readonly string[]): ParsedCliCommand {
   if (first === 'setup') return { kind: 'setup', args: argv.slice(1) };
   if (first === 'doctor') return { kind: 'doctor', args: argv.slice(1) };
   if (first === 'skill') return { kind: 'skill', args: argv.slice(1) };
+  if (first === 'native' && isNativeCliCommand(argv[1])) {
+    return { kind: 'native', command: argv[1], args: argv.slice(2) };
+  }
   if (isExtendedCommand(first)) {
     return { kind: 'extended', command: first, args: argv.slice(1) };
   }
@@ -107,4 +113,12 @@ function isManagedMode(value: string | undefined): value is ManagedMode {
 
 function isExtendedCommand(value: string | undefined): value is ExtendedCliCommand {
   return value !== undefined && EXTENDED_COMMANDS.has(value as ExtendedCliCommand);
+}
+
+export function isStructuredNativeCommand(argv: readonly string[]): boolean {
+  return argv[0] === 'native' && isNativeCliCommand(argv[1]);
+}
+
+function isNativeCliCommand(value: string | undefined): value is NativeCliCommand {
+  return value === 'capabilities' || value === 'probe';
 }

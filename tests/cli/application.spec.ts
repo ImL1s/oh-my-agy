@@ -45,6 +45,10 @@ describe('CLI application wiring', () => {
         ReturnType<CliServices['skillCommand']>,
         Parameters<CliServices['skillCommand']>
       >(async () => 0),
+      nativeCommand: jest.fn<
+        ReturnType<CliServices['nativeCommand']>,
+        Parameters<CliServices['nativeCommand']>
+      >(async () => 0),
       extendedCommand: jest.fn<
         ReturnType<CliServices['extendedCommand']>,
         Parameters<CliServices['extendedCommand']>
@@ -91,6 +95,8 @@ describe('CLI application wiring', () => {
     expect(await runCli(['--help'], services, io)).toBe(0);
     expect(output().stdout).toContain('autopilot resume --session <id> --conversation <id> --expected-revision <n>');
     expect(output().stdout).toContain('oma doctor');
+    expect(output().stdout).toContain('oma native capabilities [--json]');
+    expect(output().stdout).toContain('oma native probe --live [--json]');
     expect(output().stdout).toContain('team resolve-fork --team <id> --fork <id> --winner-generation <n>');
   });
 
@@ -99,5 +105,15 @@ describe('CLI application wiring', () => {
     expect(await runCli(['workflow', 'list'], services, io)).toBe(0);
     expect(services.extendedCommand).toHaveBeenCalledWith('workflow', ['list']);
     expect(services.passThrough).not.toHaveBeenCalled();
+  });
+
+  test('routes recognized nested native commands and preserves unknown forms', async () => {
+    const { services, io } = fixture();
+    expect(await runCli(['native', 'capabilities', '--json'], services, io)).toBe(0);
+    expect(services.nativeCommand).toHaveBeenCalledWith('capabilities', ['--json']);
+    expect(services.passThrough).not.toHaveBeenCalled();
+
+    expect(await runCli(['native', 'future', '--json'], services, io)).toBe(0);
+    expect(services.passThrough).toHaveBeenCalledWith(['native', 'future', '--json']);
   });
 });

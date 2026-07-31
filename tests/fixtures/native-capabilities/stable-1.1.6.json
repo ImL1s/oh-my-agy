@@ -1,0 +1,12 @@
+{
+  "name": "stable-1.1.6",
+  "version": "1.1.6",
+  "versionOutput": "1.1.6\n",
+  "helpOutput": "Usage: agy [flags]\n  -p, --print PROMPT\n  --conversation ID\n  --mode MODE\n  --model MODEL\n  --sandbox\n",
+  "expected": {
+    "headless.print": "supported",
+    "headless.json": "unsupported",
+    "headless.stream_json": "unsupported",
+    "headless.json_schema": "unsupported"
+  }
+}

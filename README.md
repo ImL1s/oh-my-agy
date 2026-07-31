@@ -165,14 +165,14 @@ Discover skills: host slash menu, or `oma skill list` / `oma skill show autopilo
 | Parallel / high-throughput | `/oh-my-agy:ultrawork` or `oma ultrawork -- "…"` |
 | Read-only plan-style launch | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
-| Multi-agent first worker (v1) | `oma team start --manifest …` then `status` / `stop` |
+| Multi-agent first worker (v1) | `oma native probe --live`, then `oma team start --manifest … --worker-mode headless` |
 | Team mailbox / claim API (P0) | `oma team api <op> --input JSON` (subset of OMX ops) |
 | Team fork resolution | `oma team resolve-fork …` |
 | Versioned repository review | `oma workflow install`, then `oma workflow run …` |
 | MCP read/proposal tools | configure [`.mcp.json`](.mcp.json) or run `oma mcp-server` |
 | State overview | `oma hud --json` (optionally `--watch`) |
 | Docs index | `oma wiki index`, then `oma wiki search <query>` |
-| Honest host capability view | `oma native-status`, `lsp-status`, `sidecar-status` |
+| Honest host capability view | `oma native capabilities` (passive) / `oma native probe --live` (opt-in) |
 | Exact continuation / bounded recovery | `oma resume …` / `oma recovery …` |
 | Ordinary `agy` | `oma <agy args…>` (pass-through; strips managed binding env) |
 
@@ -222,6 +222,8 @@ oma workflow status|replay --run <run-id>
 oma mcp-server
 oma wiki index|list|search <query> [--limit <1..50>]
 oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
+oma native capabilities [--json]
+oma native probe --live [--json]
 oma native-status | lsp-status | sidecar-status
 oma notify status|test …
 oma resume --session <id> --conversation <id> --expected-revision <n>
@@ -234,13 +236,30 @@ oma production probe <seam> [--run-id <id>]
 oma production capture <review|ultraqa> [--run-id <id>] -- <allowlisted-cli> …
 
 oma setup
-oma doctor [--json] [--no-strict-plugin]
+oma doctor [--json] [--no-strict-plugin] [--native]
 oma <agy args...>   # pass-through (strips managed binding env)
 ```
 
 Bins after build: `oma`, `omy` → `dist/bin/oma.js`.
 
-`oma doctor` checks Node ≥20, `dist` hooks, `package.json`/`plugin.json` version sync, `agy` on PATH, state root, and plugin installed+enabled (fail-closed by default).
+`oma doctor` checks Node ≥20, `dist` hooks, `package.json`/`plugin.json` version sync, `agy` on PATH, state root, and plugin installed+enabled (fail-closed by default). `oma doctor --native` adds passive, identity-bound capability diagnostics; it never runs live probes.
+
+### Native capability evidence
+
+`oma native capabilities` reports the versioned `HostCapabilityProfile` used by
+native/fallback routing. It distinguishes `supported`, `unsupported`, and
+`unknown`, records evidence tier/source plus an explicit fallback, and binds the
+cache to the exact `agy` and installed-plugin identities. Version strings are
+metadata, not feature gates. Timeouts, parse errors, stale evidence, or identity
+drift stay `unknown` and fail closed.
+
+`oma native probe --live` is an explicit opt-in; v1 runs one bounded public
+headless canary and records every other side-effect domain as explicitly
+unavailable/indeterminate.
+Ordinary capability display and `oma doctor --native` are passive. Offline
+fixtures, help text, docs, and green tests prove implementation behavior; this
+does not prove live host parity. See
+[Native capability negotiation](docs/native-capabilities.md).
 
 ### Dual entry paths (read this)
 
@@ -282,7 +301,9 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 - Workflow workers receive frozen permission envelopes; repository writes are proposal-only.
 - MCP exposes six bounded read/proposal operations, never a generic command runner.
 - Transcript recovery is explicitly partial and preserves broken-chain / unknown-record warnings.
-- Native workflow/team/LSP/private-sidecar claims remain T0 unless fresh public evidence exists.
+- Native workflow/team/LSP/public-sidecar claims remain unclaimed until the
+  capability profile carries sufficient fresh public evidence; private
+  sidecar/brain internals are never probed.
 - `oma production verify` reads only canonical product-owned receipts and fails
   closed without fresh, commit-bound evidence for every live seam.
 - `oma production probe <seam>` derives claims from actual product/host

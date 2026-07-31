@@ -6,6 +6,11 @@ import { resolveStateRoot } from '../runtime/state-root';
 import { RuntimeError } from '../runtime/errors';
 import { Result, ok } from '../runtime/types';
 import {
+  HostCapabilityProfileV1,
+  validateHostCapabilityProfile,
+} from '../native/capability-profile';
+import { isHostCapabilityProfileFresh } from '../native/probes/cache';
+import {
   PluginCommandAdapter,
   readPackagePluginName,
   resolveHookEntrypoints,
@@ -29,7 +34,35 @@ export interface DoctorReportV1 {
   packageVersion: string;
   mode: 'development' | 'strict' | 'release';
   checks: DoctorCheckV1[];
+  nativeCapabilities?: DoctorNativeCapabilitiesV1;
 }
+
+export interface RedactedNativeDiagnosticV1 {
+  code: string;
+  message: string;
+}
+
+export interface DoctorNativeCapabilitiesV1 {
+  schema: 'oma.doctor-native/v1';
+  profileDigest: string | null;
+  outcome: 'supported' | 'unsupported' | 'unknown' | 'mixed';
+  counts: { supported: number; unsupported: number; unknown: number };
+  cacheStatus: 'hit' | 'miss' | 'rebuilt' | 'non_cacheable';
+  identityStatus: 'matched' | 'absent' | 'drifted';
+  diagnostics: RedactedNativeDiagnosticV1[];
+}
+
+export type NativeDoctorProbeResultV1 =
+  | {
+    readonly kind: 'profile';
+    readonly profile: HostCapabilityProfileV1;
+    readonly cacheStatus: DoctorNativeCapabilitiesV1['cacheStatus'];
+    readonly diagnostics?: readonly RedactedNativeDiagnosticV1[];
+  }
+  | {
+    readonly kind: 'host_absent';
+    readonly diagnostics: readonly RedactedNativeDiagnosticV1[];
+  };
 
 export interface RunDoctorInput {
   packageRoot: string;
@@ -42,6 +75,9 @@ export interface RunDoctorInput {
   antigravityConfigRoot?: string;
   homeDir?: string;
   stateRoot?: string;
+  includeNativeCapabilities?: boolean;
+  nativeCapabilitiesProbe?: () => Promise<Result<NativeDoctorProbeResultV1, RuntimeError>>;
+  nowMs?: () => number;
 }
 
 /**
@@ -85,6 +121,16 @@ export async function runDoctor(
   });
   checks.push(pluginCheck);
 
+  let nativeCapabilities: DoctorNativeCapabilitiesV1 | undefined;
+  if (input.includeNativeCapabilities === true) {
+    const native = await checkNativeCapabilities(
+      input.nativeCapabilitiesProbe,
+      input.nowMs ?? Date.now,
+    );
+    checks.push(native.check);
+    nativeCapabilities = native.projection;
+  }
+
   const hasFail = checks.some((c) => c.status === 'fail');
   const hasWarn = checks.some((c) => c.status === 'warn');
   const exitCode: 0 | 1 | 2 = hasFail ? 1 : hasWarn ? 2 : 0;
@@ -97,7 +143,137 @@ export async function runDoctor(
     packageVersion,
     mode,
     checks,
+    ...(nativeCapabilities === undefined ? {} : { nativeCapabilities }),
   });
+}
+
+async function checkNativeCapabilities(
+  probe: RunDoctorInput['nativeCapabilitiesProbe'],
+  nowMs: () => number,
+): Promise<{ check: DoctorCheckV1; projection: DoctorNativeCapabilitiesV1 }> {
+  if (probe === undefined) {
+    return nativeDoctorFailure('E_NATIVE_PROFILE_UNAVAILABLE', 'native capability profile provider unavailable');
+  }
+  let result: Awaited<ReturnType<NonNullable<typeof probe>>>;
+  try {
+    result = await probe();
+  } catch (error) {
+    return nativeDoctorFailure(
+      'E_NATIVE_PROFILE_FAILED',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  if (!result.ok) {
+    return nativeDoctorFailure(result.error.code, result.error.message);
+  }
+  if (result.value.kind === 'host_absent') {
+    const projection: DoctorNativeCapabilitiesV1 = {
+      schema: 'oma.doctor-native/v1',
+      profileDigest: null,
+      outcome: 'unknown',
+      counts: { supported: 0, unsupported: 0, unknown: 0 },
+      cacheStatus: 'miss',
+      identityStatus: 'absent',
+      diagnostics: [...result.value.diagnostics],
+    };
+    return {
+      check: {
+        id: 'native_capabilities',
+        status: 'warn',
+        message: 'native capabilities unavailable (agy host absent)',
+        detail: projection,
+      },
+      projection,
+    };
+  }
+  try {
+    const now = new Date(nowMs()).toISOString();
+    const profile = validateHostCapabilityProfile(result.value.profile);
+    const counts = profile.capabilities.reduce((current, capability) => ({
+      ...current,
+      [capability.outcome]: current[capability.outcome] + 1,
+    }), { supported: 0, unsupported: 0, unknown: 0 });
+    const present = (Object.keys(counts) as Array<keyof typeof counts>)
+      .filter((key) => counts[key] > 0);
+    const outcome = present.length === 1 ? present[0] : 'mixed';
+    const projection: DoctorNativeCapabilitiesV1 = {
+      schema: 'oma.doctor-native/v1',
+      profileDigest: profile.profileDigest,
+      outcome,
+      counts,
+      cacheStatus: profile.cacheable ? result.value.cacheStatus : 'non_cacheable',
+      identityStatus: profile.identityStatus,
+      diagnostics: [...(result.value.diagnostics ?? [])],
+    };
+    if (!isHostCapabilityProfileFresh(profile, now)) {
+      const staleProjection: DoctorNativeCapabilitiesV1 = {
+        ...projection,
+        cacheStatus: 'non_cacheable',
+        diagnostics: [
+          ...projection.diagnostics,
+          { code: 'E_CAPABILITY_PROFILE_STALE', message: 'native capability profile evidence is stale' },
+        ],
+      };
+      return {
+        check: {
+          id: 'native_capabilities',
+          status: 'fail',
+          message: 'native capability profile evidence is stale',
+          detail: staleProjection,
+        },
+        projection: staleProjection,
+      };
+    }
+    if (profile.identityStatus === 'drifted') {
+      return {
+        check: {
+          id: 'native_capabilities',
+          status: 'fail',
+          message: 'native capability identity drifted during passive inspection',
+          detail: projection,
+        },
+        projection,
+      };
+    }
+    return {
+      check: {
+        id: 'native_capabilities',
+        status: 'pass',
+        message: `native capability profile valid (${outcome})`,
+        detail: projection,
+      },
+      projection,
+    };
+  } catch (error) {
+    return nativeDoctorFailure(
+      'E_NATIVE_PROFILE_INVALID',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+function nativeDoctorFailure(
+  code: string,
+  message: string,
+): { check: DoctorCheckV1; projection: DoctorNativeCapabilitiesV1 } {
+  const projection: DoctorNativeCapabilitiesV1 = {
+    schema: 'oma.doctor-native/v1',
+    profileDigest: null,
+    outcome: 'unknown',
+    counts: { supported: 0, unsupported: 0, unknown: 0 },
+    cacheStatus: 'non_cacheable',
+    identityStatus: 'drifted',
+    diagnostics: [{ code, message }],
+  };
+  return {
+    check: {
+      id: 'native_capabilities',
+      status: 'fail',
+      message: `native capability profile invalid (${code})`,
+      detail: projection,
+    },
+    projection,
+  };
 }
 
 function checkNodeVersion(): DoctorCheckV1 {

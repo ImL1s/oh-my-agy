@@ -1,9 +1,13 @@
 import { WorkerEnvelopeV1, validateWorkerEnvelope } from '../contracts/worker-envelope';
+import {
+  HostCapabilityProfileV1,
+  HostRouteReceiptV1,
+  validateHostRouteReceipt,
+} from '../native/capability-profile';
 import { sha256 } from '../runtime/atomic';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, Snapshot, err, ok } from '../runtime/types';
 import { buildAgy115Argv } from './agy-argv';
-import { ProviderSelectionV1 } from './provider';
 import { TeamStateStore } from './state';
 import {
   ProcessMarkerV1,
@@ -14,7 +18,14 @@ import {
 
 export interface PrepareWorkerControlInputV1 {
   envelope: WorkerEnvelopeV1;
-  selection: ProviderSelectionV1;
+  profile: HostCapabilityProfileV1;
+  receipt: HostRouteReceiptV1;
+  validation: {
+    now: string;
+    contextDigest: string;
+    identityDigest: string;
+    fallbackPreconditionsSatisfied: boolean;
+  };
   claimToken: string;
   boundAtMs: number;
   process?: ProcessMarkerV1;
@@ -27,7 +38,7 @@ export interface PreparedWorkerControlV1 {
   envelope: WorkerEnvelopeV1;
   binding: WorkerAuthorityBindingV1;
   launch?: {
-    executable: 'agy';
+    executable: string;
     argv: readonly string[];
     shell: false;
   };
@@ -42,10 +53,27 @@ export function prepareWorkerControl(
       cause: error instanceof Error ? error.message : String(error),
     }));
   }
-  if (input.selection.provider !== envelope.provider
-    || input.selection.generation !== envelope.generation
+  let receipt: HostRouteReceiptV1;
+  try {
+    receipt = validateHostRouteReceipt(input.receipt, input.profile, {
+      ...input.validation,
+      generation: envelope.generation,
+    });
+  } catch (error) {
+    return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Worker control route receipt is invalid', {
+      cause: error instanceof Error ? error.message : String(error),
+    }));
+  }
+  if (receipt.provider !== envelope.provider
+    || receipt.profileDigest !== envelope.provider_profile_digest
+    || receipt.receiptDigest !== envelope.route_receipt_digest
     || !Number.isSafeInteger(input.boundAtMs) || input.boundAtMs < 0) {
-    return err(runtimeError('E_REVISION_CONFLICT', 'Worker provider selection does not match envelope generation'));
+    return err(runtimeError('E_REVISION_CONFLICT', 'Worker route receipt does not match envelope generation'));
+  }
+  if (receipt.provider === 'antigravity_native') {
+    return err(runtimeError('E_NATIVE_ADAPTER_UNAVAILABLE', 'Antigravity native worker adapter is unavailable', {
+      provider: 'antigravity_native', adapterImplemented: false,
+    }));
   }
 
   const binding: WorkerAuthorityBindingV1 = {
@@ -54,9 +82,8 @@ export function prepareWorkerControl(
     claimTokenDigest: sha256(input.claimToken),
     generation: envelope.generation,
     provider: envelope.provider,
-    providerReceiptHash: input.selection.evidenceHash,
-    ...(input.selection.conversationReceipt === undefined
-      ? {} : { conversation: input.selection.conversationReceipt }),
+    providerProfileDigest: receipt.profileDigest,
+    providerReceiptHash: receipt.receiptDigest,
     ...(input.process === undefined ? {} : { process: input.process }),
     ...(input.pane === undefined ? {} : { pane: input.pane }),
     state: 'claimed',
@@ -64,12 +91,6 @@ export function prepareWorkerControl(
     boundAtMs: input.boundAtMs,
   };
 
-  if (envelope.provider === 'antigravity_native') {
-    if (binding.conversation === undefined || binding.process !== undefined || binding.pane !== undefined) {
-      return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Native worker requires only a generation-fenced conversation receipt'));
-    }
-    return ok({ envelope, binding });
-  }
   if (envelope.provider === 'agy_headless') {
     if (binding.process === undefined || binding.pane !== undefined) {
       return err(runtimeError('E_PROCESS_IDENTITY_UNPROVEN', 'Headless worker requires an exact process receipt and no pane'));
@@ -88,7 +109,7 @@ export function prepareWorkerControl(
   return ok({
     envelope,
     binding,
-    launch: { executable: 'agy', argv: argv.value, shell: false },
+    launch: { executable: receipt.resolvedExecutable, argv: argv.value, shell: false },
   });
 }
 

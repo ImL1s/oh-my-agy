@@ -45,6 +45,13 @@
       "native_evidence_required": true
     },
     {
+      "canonical_name": "antigravity-host-capability-profile",
+      "classification": "faithful",
+      "claim_status": "contract_implemented",
+      "maximum_tier": "verified",
+      "native_evidence_required": true
+    },
+    {
       "canonical_name": "agy-headless-worker",
       "classification": "native_substitute",
       "claim_status": "planned",
@@ -96,6 +103,21 @@
       "native_evidence_required": false
     }
   ],
+  "native_capability_contract": {
+    "schema": "oma.host-capability-profile/v1",
+    "outcomes": [
+      "supported",
+      "unsupported",
+      "unknown"
+    ],
+    "routing_authority": "profile_and_router_only",
+    "passive_commands": [
+      "oma native capabilities",
+      "oma doctor --native"
+    ],
+    "live_command": "oma native probe --live",
+    "live_evidence_required": true
+  },
   "workflow_contract": {
     "contract": "repository-workflow/v1",
     "terminals": [

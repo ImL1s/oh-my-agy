@@ -1,0 +1,12 @@
+{
+  "name": "forward-structured",
+  "version": "1.1.9",
+  "versionOutput": "agy 1.1.9\n",
+  "helpOutput": "Usage: agy [flags]\n  -p, --print PROMPT\n  --output-format json|stream-json\n  --json-schema FILE\n  --conversation-id ID\n  --project ID\n  --model MODEL\n  --effort LEVEL\n",
+  "expected": {
+    "headless.print": "supported",
+    "headless.json": "supported",
+    "headless.stream_json": "supported",
+    "headless.json_schema": "supported"
+  }
+}

@@ -134,6 +134,7 @@ export async function verifyPluginActive(
     return err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'plugin is not present in registry readback', {
       stdoutSha256: sha256(listed.stdout),
       pluginName,
+      reason: 'registry_absent',
     }));
   }
   if (!parsed.enabled) {

@@ -20,6 +20,16 @@ describe('OMA W0 parity inventory', () => {
     expect(inventory.semantic_lsp_operation_count).toBe(0);
     expect(inventory.operations.find((row) => row.canonical_name === 'antigravity-native-subagent'))
       .toEqual(expect.objectContaining({ classification: 'optional_unclaimed' }));
+    expect(inventory.operations.find((row) => row.canonical_name === 'antigravity-host-capability-profile'))
+      .toEqual(expect.objectContaining({ claim_status: 'contract_implemented' }));
+    expect(inventory.native_capability_contract).toEqual({
+      schema: 'oma.host-capability-profile/v1',
+      outcomes: ['supported', 'unsupported', 'unknown'],
+      routing_authority: 'profile_and_router_only',
+      passive_commands: ['oma native capabilities', 'oma doctor --native'],
+      live_command: 'oma native probe --live',
+      live_evidence_required: true,
+    });
   });
 
   test('count, classification, and native workflow false-claim mutations fail', () => {
@@ -34,6 +44,13 @@ describe('OMA W0 parity inventory', () => {
       ...inventory,
       workflow_contract: { ...inventory.workflow_contract, antigravity_saved_prompt_ceiling: 'T5' },
     })).toThrow('Workflow');
+    expect(() => validateParityInventory({
+      ...inventory,
+      native_capability_contract: {
+        ...inventory.native_capability_contract,
+        routing_authority: 'version_string',
+      },
+    })).toThrow('Native');
   });
 
   test('capability fixture records every truth tier and redacted diagnostics', () => {

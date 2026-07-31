@@ -70,4 +70,20 @@ describe('CLI parser', () => {
       args,
     });
   });
+
+  test.each([
+    [['native', 'capabilities'], { kind: 'native', command: 'capabilities', args: [] }],
+    [['native', 'capabilities', '--json'], { kind: 'native', command: 'capabilities', args: ['--json'] }],
+    [['native', 'probe', '--live'], { kind: 'native', command: 'probe', args: ['--live'] }],
+  ])('reserves only recognized nested native form %j', (argv, expected) => {
+    expect(parseCliArguments(argv)).toEqual(expected);
+  });
+
+  test.each([
+    ['native'],
+    ['native', 'unknown'],
+    ['native', '--help'],
+  ])('preserves unrecognized native argv as agy passthrough: %j', (...argv: string[]) => {
+    expect(parseCliArguments(argv)).toEqual({ kind: 'passthrough', args: argv });
+  });
 });

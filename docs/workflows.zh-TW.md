@@ -40,9 +40,9 @@ oma workflow replay --run <run-id>
 
 目前打包 review 為唯讀。Worker 輸出為嚴格 JSON；OMA 將宣告的 artifact 持久化為 proposal 位元組，而不是授予儲存庫寫入權限。Production evidence 擷取規範 definition、input、plan、journal、artifact 與 verification transcript。Aggregate verification 重讀這些位元組、重算 digest、replay journal，並再次執行 keyed review；刪除或竄改會 fail closed。
 
-`oma production probe workflow` 是唯一支援的 production-evidence 入口。它從活躍 `PATH` 解析字面量 `agy` 可執行檔，要求其 realpath 為規範 owner 安裝的 `~/.local/bin/agy`，透過單一穩定檔案描述符對可執行位元組做 hash，驗證支援的 1.1.6 公開契約與精確安裝的 OMA plugin identity，從目前儲存庫衍生 candidate，並僅寫入 repository-external platform state root。它拒絕 `OMA_STATE_ROOT`、plugin-config root override 與 `OMA_PRODUCTION_RUN_ID`；呼叫方不能注入可執行檔、adapter、candidate、package identity 或 evidence root。內部 runner export 不暴露 product executor 或 dispatcher，product authority 不暴露 adapter factory，executor 保持 non-exported CLI closure。Package 迴歸測試鎖定每個發出的 workflow 模組的精確 allowlist，並阻止 package deep import。Production evidence 僅暴露由 process-private prepared-handle identity 支撐的 data preparation/recording 步驟；不接受 executor callback。可 import 的 generic runner 為 advisory，且始終執行零次 dispatch，因此磁碟 HMAC 保護 receipt integrity，但從不授予 in-process execution privilege。
+`oma production probe workflow` 是唯一支援的 production-evidence 入口。它從活躍 `PATH` 解析字面量 `agy` 可執行檔，要求其 realpath 為規範 owner 安裝的 `~/.local/bin/agy`，透過單一穩定檔案描述符對可執行位元組做 hash，將目前 host/plugin identity 綁定到 fresh live `HostCapabilityProfile` 與 route receipt，從目前儲存庫衍生 candidate，並僅寫入 repository-external platform state root。它拒絕 `OMA_STATE_ROOT`、plugin-config root override 與 `OMA_PRODUCTION_RUN_ID`；呼叫方不能注入可執行檔、adapter、candidate、package identity 或 evidence root。內部 runner export 不暴露 product executor 或 dispatcher，product authority 不暴露 adapter factory，executor 保持 non-exported CLI closure。Package 迴歸測試鎖定每個發出的 workflow 模組的精確 allowlist，並阻止 package deep import。Production evidence 僅暴露由 process-private prepared-handle identity 支撐的 data preparation/recording 步驟；不接受 executor callback。可 import 的 generic runner 為 advisory，且始終執行零次 dispatch，因此磁碟 HMAC 保護 receipt integrity，但從不授予 in-process execution privilege。
 
-## Live worker 契約（Antigravity 1.1.6）
+## Fallback worker argv 契約（1.1.6-compatible grammar）
 
 每個 workflow task 是一個全新的 headless `agy` session。Launch grammar 已凍結並驗證（`src/team/agy-argv.ts`）；以下細節為 load-bearing，且僅在真實 host 上顯現，mock CLI 不會：
 
@@ -52,7 +52,7 @@ oma workflow replay --run <run-id>
 - **Worker stdout 是最後一個平衡的頂層 JSON object。** Live session 會在最終答案前敘述進度，且從不輸出 byte-canonical JSON，因此 parser 擷取最後一個 object、拒絕重複 key，然後在 hash 前 canonical 重序列化。
 - **Stage 預算 300s**（headless print 上限 5m）並攜帶 retry budget，因此單次 transient agy error 不會讓整個 DAG 失敗。每個 task 的 proposal root 在每次嘗試前清理，使每次 dispatch 對當機或重複 run 的 stale proposal 具有冪等性。
 
-fresh-session plugin-discovery canary 同樣固定，並容忍 agy 1.1.6 的尾隨雙換行，canonical 化儲存的 evidence 位元組。
+這套凍結 grammar 只是既有 fallback adapter 的相容性 metadata，不是 provider 或 native-capability gate。fresh-session plugin-discovery canary 同樣容忍已觀察到的 agy 1.1.6 尾隨雙換行，並 canonical 化儲存的 evidence 位元組。
 
 ## Antigravity saved prompt
 

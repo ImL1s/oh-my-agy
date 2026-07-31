@@ -8,6 +8,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- **Identity-bound Antigravity capability negotiation:** `oma native
+  capabilities [--json]`, explicit `oma native probe --live`, and passive `oma
+  doctor --native` now share one tri-state `HostCapabilityProfile`. Evidence
+  tiers/sources have policy ceilings; timeouts and identity drift remain
+  unknown; caches and Team route receipts bind exact host/plugin identity.
+  The native Team worker adapter remains deliberately unavailable and fails
+  with `E_NATIVE_ADAPTER_UNAVAILABLE`; existing headless/tmux paths are explicit
+  profile-routed fallbacks.
 - **P0 OMX-shaped `oma team api <op> --input JSON [--json]`** over the existing
   TeamStateStore claim/mailbox aggregate (not full OMX 33-op parity). Shipped
   ops: `send-message`, `mailbox-list`, `mailbox-mark-delivered`, `create-task`,

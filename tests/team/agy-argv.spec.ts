@@ -5,7 +5,7 @@ import {
   validateAgy115Help,
 } from '../../src/team/agy-argv';
 
-describe('Antigravity 1.1.6 frozen worker argv', () => {
+describe('Antigravity frozen worker argv compatibility (non-routing)', () => {
   const prompt = 'Review the owned task safely';
 
   test.each([
@@ -40,7 +40,7 @@ describe('Antigravity 1.1.6 frozen worker argv', () => {
     }).ok).toBe(false);
   });
 
-  test('version/help table requires every documented 1.1.6 flag', () => {
+  test('compatibility metadata requires every documented 1.1.6 flag without selecting a provider', () => {
     const help = [
       '--add-dir', '--conversation', '--mode', '--model', '--print', '--print-timeout', '--prompt-interactive', '--sandbox',
     ].join('\n');

@@ -3,8 +3,10 @@
 English | [简体中文](./capabilities.zh.md) | [繁體中文](./capabilities.zh-TW.md)
 
 OMA separates product-owned capabilities from observations about Antigravity.
-`T0` means unavailable or unobserved; `T1` means a public surface or saved
-projection was observed. Neither tier implies a hidden native runtime.
+Host observations now use the versioned `HostCapabilityProfile` and evidence
+tiers `configured → installed → enabled → loadable → observed → healthy →
+verified`. Repository-workflow `T0…T5` remains a separate product contract; it
+must not be used as native-host evidence.
 
 | Surface | OMA implementation | Native claim | Command |
 |---|---|---|---|
@@ -13,10 +15,13 @@ projection was observed. Neither tier implies a hidden native runtime.
 | Team | tmux/worktree workers, mailbox, fencing, delivery | Product-owned | `oma team …` |
 | Repository workflows | Versioned DAG, exact verdict schema, exact parent verification, authenticated receipts, captured-evidence replay, enforced ship gate | Product-owned T4; product-authenticated, not host-signed | `oma workflow …` |
 | Saved workflow prompt | Thin CLI delegate in `.agents/workflows/` | T1 projection only | `oma workflow native-status` |
-| Public Antigravity CLI/plugins | Version and public help inspection | T1 when observed | `oma native-status` |
-| Native team/workflow runtime | No fresh public proof | T0, unclaimed | `oma native-status` |
-| Host semantic LSP | Registration readback only | T0 unless configured and observed | `oma lsp-status` |
-| Private memory sidecar | Intentionally not probed | T0, forbidden | `oma sidecar-status` |
+| Host capability negotiation | Identity-bound tri-state profile, policy ceilings, cache, route candidates/receipts | Product-owned truth/routing layer; each native claim is assessed separately | `oma native capabilities` |
+| Public Antigravity CLI/plugins | Passive help/config/plugin readback | At most the source-specific evidence ceiling; never verified from version/help alone | `oma native capabilities --json` |
+| Public hooks, custom agents, headless, sidecars, UI, conversations, projects, permissions, model/effort, MCP | Canonical profile keys with explicit fallbacks | `supported`, `unsupported`, or `unknown` at the recorded tier/source | `oma native capabilities` / `oma native probe --live` |
+| Native Team worker adapter | Profile-routed boundary exists; adapter is not implemented in Issue #3 | Fails closed with `E_NATIVE_ADAPTER_UNAVAILABLE` before bootstrap | `oma team …` |
+| Headless/tmux Team fallback | Existing OMA adapters selected through profile-bound routing receipts | Product-owned fallback, not proof of a native Team adapter | `oma team …` |
+| Host semantic LSP | Compatibility status projection only | Not a native/fallback routing authority | `oma lsp-status` |
+| Private memory sidecar/brain internals | Intentionally never probed | Forbidden | `oma sidecar-status` |
 | HUD | Redacted state/adapters projection | Product-owned | `oma hud --json` |
 | Wiki | Deterministic repository docs/provenance index | Product-owned | `oma wiki …` |
 | Notifications | Owner-fenced terminal/tmux/HTTPS adapters | Product-owned, opt-in | `oma notify …` |
@@ -40,8 +45,19 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
 ## Truth rules
 
 - A configured file is not fresh-session discovery.
+- Version strings are metadata and cache identity, not feature gates.
+- Timeout, parse failure, contradictory/stale evidence, or identity drift is
+  `unknown`; it is neither unsupported nor success.
+- `supported: true` is a compatibility projection. Routing additionally
+  requires the policy's minimum tier and a valid identity-bound candidate or
+  receipt.
 - UI labels and private files are not public capability evidence.
 - Optional adapters stay disabled or unclaimed until explicitly configured.
+- `oma native capabilities` and `oma doctor --native` are passive. Only
+  `oma native probe --live` opts in; v1 runs one bounded public headless canary
+  and leaves every other side-effect domain explicitly indeterminate.
+- Offline fixtures and tests prove implementation behavior, not live-host
+  parity. See [Native capability negotiation](./native-capabilities.md).
 - `oma production verify` is the authority for the `production_verified`
   claim; ordinary unit tests establish implementation evidence only.
 - Workflow production evidence is created only by

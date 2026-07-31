@@ -160,14 +160,14 @@ Release 字节在激活前经 checksum 验证。installer 写入 immutable recei
 | 并行 / 高吞吐 | `/oh-my-agy:ultrawork` 或 `oma ultrawork -- "…"` |
 | 只读 plan 风格启动 | `oma search -- "…"` |
 | Durable Autopilot FSM | `oma autopilot start / status / checkpoint / resume` |
-| 多 agent 首个 worker（v1） | `oma team start --manifest …` 然后 `status` / `stop` |
+| 多 agent 首个 worker（v1） | 先运行 `oma native probe --live`，再用 `oma team start --manifest … --worker-mode headless` |
 | Team mailbox / claim API（P0） | `oma team api <op> --input JSON`（OMX 子集，非 33-op 全量） |
 | Team fork 解析 | `oma team resolve-fork …` |
 | 版本化仓库审查 | `oma workflow install`，然后 `oma workflow run …` |
 | MCP 读/proposal 工具 | 配置 [`.mcp.json`](../../.mcp.json) 或运行 `oma mcp-server` |
 | 状态概览 | `oma hud --json`（可选 `--watch`） |
 | 文档索引 | `oma wiki index`，然后 `oma wiki search <query>` |
-| 诚实的 host 能力视图 | `oma native-status`、`lsp-status`、`sidecar-status` |
+| 诚实的 host 能力视图 | `oma native capabilities`（被动）/ `oma native probe --live`（显式 opt-in） |
 | 精确 continuation / 有界 recovery | `oma resume …` / `oma recovery …` |
 | 普通 `agy` | `oma <agy args…>`（pass-through；剥离 managed binding env） |
 
@@ -216,6 +216,8 @@ oma workflow status|replay --run <run-id>
 oma mcp-server
 oma wiki index|list|search <query> [--limit <1..50>]
 oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
+oma native capabilities [--json]
+oma native probe --live [--json]
 oma native-status | lsp-status | sidecar-status
 oma notify status|test …
 oma resume --session <id> --conversation <id> --expected-revision <n>
@@ -228,13 +230,19 @@ oma production probe <seam> [--run-id <id>]
 oma production capture <review|ultraqa> [--run-id <id>] -- <allowlisted-cli> …
 
 oma setup
-oma doctor [--json] [--no-strict-plugin]
+oma doctor [--json] [--no-strict-plugin] [--native]
 oma <agy args...>   # pass-through（剥离 managed binding env）
 ```
 
 Build 后二进制：`oma`、`omy` → `dist/bin/oma.js`。
 
-`oma doctor` 检查 Node ≥20、`dist` hooks、`package.json`/`plugin.json` 版本同步、`PATH` 上的 `agy`、state root，以及 plugin 已安装并启用（默认 fail-closed）。
+`oma doctor` 检查 Node ≥20、`dist` hooks、`package.json`/`plugin.json` 版本同步、`PATH` 上的 `agy`、state root，以及 plugin 已安装并启用（默认 fail-closed）。`oma doctor --native` 只增加被动、绑定 identity 的能力诊断，不会执行 live probe。
+
+### Native 能力证据
+
+`oma native capabilities` 输出 native/fallback routing 使用的版本化 `HostCapabilityProfile`。它区分 `supported`、`unsupported`、`unknown`，记录 evidence tier/source 和显式 fallback，并把 cache 绑定到精确的 `agy` 与已安装 plugin identity。版本字符串只是 metadata，不是 feature gate；timeout、parse error、过期证据或 identity drift 都保持 `unknown` 并 fail closed。
+
+`oma native probe --live` 是显式 opt-in；v1 只执行一个有界公开 headless canary，其他带副作用 domain 都明确记录为 unavailable/indeterminate。普通能力显示与 `oma doctor --native` 都是被动路径。离线 fixture、help、文档和通过的测试只证明 OMA 实现，**不证明 live host parity**。详见 [Native capability negotiation](../native-capabilities.md)。
 
 ### 双入口路径（请读）
 

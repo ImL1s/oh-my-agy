@@ -10,8 +10,46 @@ import { sha256 } from '../../src/runtime/atomic';
 import { AuthorityLeaseStore } from '../../src/team/authority-lease';
 import { GitFixture } from '../helpers/git-fixture';
 import { TmuxFixture } from '../helpers/tmux-fixture';
+import {
+  HostIdentityV1,
+  PluginIdentityV1,
+  assembleHostCapabilityProfile,
+} from '../../src/native/capability-profile';
+import { TeamOrchestratorOptions } from '../../src/team/orchestrator';
 
 const maybe = TmuxFixture.available() ? test : test.skip;
+
+function providerRouteOptions(
+  provider: 'agy_headless' | 'tmux_agy' | 'antigravity_native' = 'agy_headless',
+): Pick<TeamOrchestratorOptions, 'providerProfileFactory'> {
+  return {
+    providerProfileFactory: ({ selectedAt }) => {
+      const host: HostIdentityV1 = {
+        realpath: '/opt/agy', binarySha256: sha256('binary'), version: null,
+        versionOutputSha256: sha256('version'), helpOutputSha256: sha256('help'),
+        platform: 'darwin', arch: 'arm64',
+      };
+      const plugin: PluginIdentityV1 = {
+        status: 'present', realpath: '/opt/plugin', packageDigest: sha256('plugin'),
+        version: '1', readbackDigest: sha256('readback'), enabled: true,
+      };
+      const empty = assembleHostCapabilityProfile({ evaluationTimestamp: selectedAt, hostIdentityBefore: host, hostIdentityAfter: host, pluginIdentityBefore: plugin, pluginIdentityAfter: plugin, observations: [] });
+      const capabilities = provider === 'antigravity_native'
+        ? ['subagent.invoke', 'subagent.send_message', 'subagent.manage']
+        : ['headless.print', 'headless.json'];
+      const profile = assembleHostCapabilityProfile({
+        evaluationTimestamp: selectedAt, hostIdentityBefore: host, hostIdentityAfter: host,
+        pluginIdentityBefore: plugin, pluginIdentityAfter: plugin,
+        observations: capabilities
+          .map((key) => ({ capability: key, source: 'live_probe' as const, tier: provider === 'antigravity_native' ? 'verified' as const : 'healthy' as const, result: 'positive' as const, observedAt: selectedAt, identityDigest: empty.identityDigest, detailCode: 'TEST_OK', diagnostic: null })),
+      });
+      return ok({
+        profile,
+        resolvedExecutable: '/opt/agy',
+      });
+    },
+  };
+}
 
 describe('TeamOrchestrator v1 vertical slice', () => {
   let fixture: GitFixture;
@@ -36,6 +74,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     }));
 
     const initialOrch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -79,6 +118,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     tmux.session('orch-task-a-g1');
 
     const orch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -136,6 +176,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
       }],
     }));
     const orch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -146,6 +187,38 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     expect(started.ok).toBe(false);
     expect(fs.readdirSync(fixture.stateRoot, { recursive: true }).map(String)
       .some((entry) => entry.includes('bad'))).toBe(false);
+  });
+
+  test('native candidate stops before worktree, descriptor, control-plane, or bootstrap', async () => {
+    const leader = resolveGitWorktreeIdentity(fixture.repo);
+    const manifestPath = path.join(fixture.root, 'native-manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      schema: 'oma.team-manifest/v1', teamId: 'native-stop', revision: 1,
+      tasks: [{
+        id: 'task-a', dependencies: [], write_scope: [{ kind: 'file', path: 'native.txt' }],
+        mode: 'headless', verification: { version: 1, commands: [], requiredArtifacts: [] },
+      }],
+    }));
+    const orch = new TeamOrchestrator({
+      ...providerRouteOptions('antigravity_native'),
+      stateRoot: fixture.stateRoot,
+      workspaceRoot: fixture.repo,
+      repoKey: leader.repoKey,
+      workspaceKey: leader.workspaceKey,
+      managedWorktreesRoot: fixture.managedWorktreesRoot,
+      nowMs: () => 1_700_000_000_000,
+    });
+    const result = await orch.startFromManifest(manifestPath, 'headless');
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'E_NATIVE_ADAPTER_UNAVAILABLE',
+        message: 'Antigravity native worker adapter is unavailable',
+        details: { provider: 'antigravity_native', adapterImplemented: false },
+      },
+    });
+    expect(fs.readdirSync(fixture.managedWorktreesRoot)).toEqual([]);
+    expect(fs.readdirSync(fixture.repo).some((entry) => entry.includes('worker-descriptor'))).toBe(false);
   });
 
   maybe('claim-time launch failure rolls back state and allows the same team ID to retry', async () => {
@@ -164,6 +237,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
       return () => `retry-${++value}`;
     };
     const failedOrch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -193,6 +267,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     const sessionNamePrefix = tmux.session('retry');
     tmux.session('retry-task-a-g1');
     const retryOrch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -264,6 +339,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
       return () => `partial-${++sequence}`;
     })();
     const orch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -305,6 +381,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     ).stdout.trim()).toBe('');
 
     const retry = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,
@@ -378,6 +455,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
       }
       try {
         const failing = new TeamOrchestrator({
+      ...providerRouteOptions(),
           stateRoot: fixture.stateRoot,
           workspaceRoot: fixture.repo,
           repoKey: leader.repoKey,
@@ -420,6 +498,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
         }),
       };
       const retry = new TeamOrchestrator({
+      ...providerRouteOptions(),
         stateRoot: fixture.stateRoot,
         workspaceRoot: fixture.repo,
         repoKey: leader.repoKey,
@@ -479,6 +558,7 @@ describe('TeamOrchestrator v1 vertical slice', () => {
     expect(occupied.ok).toBe(true);
 
     const orch = new TeamOrchestrator({
+      ...providerRouteOptions(),
       stateRoot: fixture.stateRoot,
       workspaceRoot: fixture.repo,
       repoKey: leader.repoKey,

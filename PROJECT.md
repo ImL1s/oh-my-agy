@@ -8,7 +8,7 @@
 * **Team runtime (`src/team/*`)**：manifest DAG、tmux ownership、worktree、reclaim、recovery-fork、delivery、guarded publish。
 * **Repository workflow (`src/workflows/*`)**：versioned DAG、permission envelope、bounded dispatch、journal replay、skeptic/verifier 與 ship/no-ship gate。
 * **MCP / Wiki / HUD (`src/mcp/*`, `src/wiki/*`, `src/hud/*`)**：六個受限 read/proposal tools、deterministic 文件索引與 redacted 狀態投影。
-* **Native / Notify adapters (`src/native/*`, `src/notify/*`)**：只依 public evidence 回報 T0/T1；通知需 owner nonce + generation，預設停用。
+* **Native / Notify adapters (`src/native/*`, `src/notify/*`)**：`HostCapabilityProfile` 以 tri-state outcome、evidence tier/source、exact host/plugin identity 與 route receipt 統一 native/fallback truth；通知需 owner nonce + generation，預設停用。
 * **Resume / Recovery (`src/continuation/*`)**：exact conversation resume 與 immutable bounded partial recovery。
 * **Install lifecycle (`src/setup/*`)**：verified installer receipt、immutable update、ownership-aware uninstall、release-mode doctor。
 * **薛西弗斯延續器 (`src/enforcer.ts`)**：監聽 `.agy/todo.json`，未完成任務時倒數並注入 continuation prompt。

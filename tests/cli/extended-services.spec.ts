@@ -8,6 +8,325 @@ import { canonicalBytesV1, sha256Hex } from '../../src/contracts';
 describe('public composition CLI services', () => {
   const packageRoot = path.resolve(__dirname, '../..');
 
+  test('doctor rejects duplicate, unknown, and positional arguments deterministically', async () => {
+    for (const argv of [
+      ['--native', '--native'],
+      ['--unknown'],
+      ['positional'],
+    ]) {
+      let stdout = '';
+      let stderr = '';
+      const services = createDefaultServices({
+        packageRoot,
+        stdout: (value) => { stdout += value; },
+        stderr: (value) => { stderr += value; },
+      });
+      expect(await services.doctorCommand(argv)).toBe(2);
+      expect(stdout).toBe('');
+      expect(stderr).toContain('E_CLI_USAGE: doctor:');
+    }
+
+    let stdout = '';
+    let stderr = '';
+    const services = createDefaultServices({
+      packageRoot,
+      stdout: (value) => { stdout += value; },
+      stderr: (value) => { stderr += value; },
+    });
+    expect(await services.doctorCommand(['--json', '--native', '--native'])).toBe(2);
+    expect(stderr).toBe('');
+    expect(stdout.endsWith('\n')).toBe(true);
+    expect(JSON.parse(stdout)).toEqual({
+      command: 'doctor',
+      error: { code: 'E_CLI_USAGE', message: 'doctor: duplicate option --native' },
+      exitCode: 2,
+      ok: false,
+      outcome: 'usage_error',
+      schema: 'oma.cli-result/v1',
+    });
+  });
+
+  test('native capability display is canonical JSON and host absence remains honest success', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-missing-'));
+    let stdout = '';
+    let stderr = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: path.join(cwd, 'missing-agy'),
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: (value) => { stderr += value; },
+    });
+    try {
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      expect(stderr).toBe('');
+      expect(stdout.endsWith('\n')).toBe(true);
+      expect(JSON.parse(stdout)).toMatchObject({
+        schema: 'oma.native-command-result/v1',
+        command: 'native capabilities',
+        ok: true,
+        outcome: 'unknown',
+        exitCode: 0,
+        result: { host: 'absent' },
+      });
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('explicit native live probe fails closed when the host is absent', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-missing-'));
+    let stdout = '';
+    let stderr = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: path.join(cwd, 'missing-agy'),
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: (value) => { stderr += value; },
+    });
+    try {
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(1);
+      expect(stderr).toBe('');
+      expect(JSON.parse(stdout)).toMatchObject({
+        schema: 'oma.native-command-result/v1',
+        command: 'native probe',
+        ok: false,
+        outcome: 'live_probe_failed',
+        exitCode: 1,
+        error: { code: 'E_CAPABILITY_HOST_UNAVAILABLE' },
+      });
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('plugin readback failure remains unknown and non-cacheable instead of affirmative absence', async () => {
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-plugin-failure-')));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 9.0.0\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\n' '--print --output-format json'; exit 0; fi
+exit 2
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      pluginAdapter: { run: async (argv) => ({ argv: [...argv], code: 1, stdout: '', stderr: 'transient registry failure' }) },
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      const body = JSON.parse(stdout) as {
+        cacheStatus: string;
+        profile: { cacheable: boolean; pluginIdentity: { status: string } };
+      };
+      expect(body.profile).toMatchObject({
+        cacheable: false,
+        pluginIdentity: { status: 'unknown' },
+      });
+      expect(body.cacheStatus).toBe('non_cacheable');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('help output overflow remains unknown instead of masquerading as host absence', async () => {
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-help-overflow-')));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, `#!${process.execPath}
+if (process.argv[2] === '--version') { process.stdout.write('agy 9.0.0\\n'); process.exit(0); }
+if (process.argv[2] === '--help') { process.stdout.write('x'.repeat(70 * 1024)); process.exit(0); }
+process.exit(2);
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      pluginAdapter: { run: async (argv) => ({ argv: [...argv], code: 1, stdout: '', stderr: 'registry unavailable' }) },
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      const body = JSON.parse(stdout) as {
+        profile?: { cacheable: boolean; capabilities: Array<{ key: string; outcome: string }> };
+        result?: { host?: string };
+      };
+      expect(body.result?.host).not.toBe('absent');
+      expect(body.profile?.cacheable).toBe(false);
+      expect(body.profile?.capabilities.find(({ key }) => key === 'headless.print')?.outcome).toBe('unknown');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('alternating help bytes cannot pass an ABA identity fence', async () => {
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-help-aba-')));
+    const executable = path.join(cwd, 'agy');
+    const counter = path.join(cwd, 'help-counter');
+    fs.writeFileSync(executable, `#!${process.execPath}
+const fs = require('fs');
+const counter = ${JSON.stringify(counter)};
+if (process.argv[2] === '--version') { process.stdout.write('agy 9.0.0\\n'); process.exit(0); }
+if (process.argv[2] === '--help') {
+  const value = fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8')) + 1 : 1;
+  fs.writeFileSync(counter, String(value));
+  process.stdout.write(value % 2 === 1 ? '--print\\n' : '--print --output-format stream-json\\n');
+  process.exit(0);
+}
+process.exit(2);
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      pluginAdapter: { run: async (argv) => ({ argv: [...argv], code: 1, stdout: '', stderr: 'registry unavailable' }) },
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      const body = JSON.parse(stdout) as {
+        profile: { identityStatus: string; capabilities: Array<{ key: string; outcome: string }> };
+      };
+      expect(body.profile.identityStatus).toBe('drifted');
+      expect(body.profile.capabilities.find(({ key }) => key === 'headless.stream_json')?.outcome).toBe('unknown');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('native commands reject duplicate/unknown flags and require literal live opt-in', async () => {
+    for (const [command, argv] of ([
+      ['capabilities', ['--json', '--json']],
+      ['capabilities', ['--unknown']],
+      ['probe', ['--json']],
+      ['probe', ['--live', '--live']],
+    ] as Array<['capabilities' | 'probe', string[]]>)) {
+      let stdout = '';
+      let stderr = '';
+      const services = createDefaultServices({
+        packageRoot,
+        stdout: (value) => { stdout += value; },
+        stderr: (value) => { stderr += value; },
+      });
+      expect(await services.nativeCommand(command, argv)).toBe(2);
+      if (argv.includes('--json')) {
+        expect(stderr).toBe('');
+        expect(JSON.parse(stdout)).toMatchObject({ ok: false, outcome: 'usage_error', exitCode: 2 });
+      } else {
+        expect(stdout).toBe('');
+        expect(stderr).toContain('E_CLI_USAGE');
+      }
+    }
+  });
+
+  test('explicit native live command reaches the fixed bounded canary and returns a profile', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-'));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 1.1.6\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
+previous=''
+for arg in "$@"; do
+  if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  previous="$arg"
+done
+token="\${prompt##*: }"
+printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+exit 0
+`, { mode: 0o700 });
+    let stdout = '';
+    let stderr = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: (value) => { stderr += value; },
+    });
+    try {
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(0);
+      expect(stderr).toBe('');
+      const body = JSON.parse(stdout) as { ok: boolean; profile: { capabilities: Array<{ key: string; outcome: string }> } };
+      expect(body.ok).toBe(true);
+      expect(body.profile.capabilities.find(({ key }) => key === 'headless.print'))
+        .toEqual(expect.objectContaining({ outcome: 'supported' }));
+      expect(body.profile.capabilities.find(({ key }) => key === 'headless.json'))
+        .toEqual(expect.objectContaining({ outcome: 'supported' }));
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('failed live probe invalidates a prior success for the same host identity', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-invalidate-'));
+    const executable = path.join(cwd, 'agy');
+    const failMarker = path.join(cwd, 'fail-live');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 1.1.9\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
+if [ -f "${failMarker}" ]; then printf '%s\\n' '{"status":"ERROR"}'; exit 0; fi
+previous=''
+for arg in "$@"; do
+  if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  previous="$arg"
+done
+token="\${prompt##*: }"
+printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+`, { mode: 0o700 });
+    const stateRoot = path.join(cwd, 'state');
+    const output = { stdout: '', stderr: '' };
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot,
+      agyCommand: executable,
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { output.stdout += value; },
+      stderr: (value) => { output.stderr += value; },
+    });
+    try {
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(0);
+      fs.writeFileSync(failMarker, 'fail\n');
+      output.stdout = '';
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(1);
+      expect(JSON.parse(output.stdout)).toMatchObject({ ok: false, outcome: 'live_probe_failed' });
+
+      output.stdout = '';
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      const passive = JSON.parse(output.stdout) as {
+        cacheStatus: string;
+        profile: { capabilities: Array<{ key: string; tier: string | null; source: string | null }> };
+      };
+      expect(passive.cacheStatus).toBe('rebuilt');
+      expect(passive.profile.capabilities.find(({ key }) => key === 'headless.json')).toMatchObject({
+        tier: 'observed',
+        source: 'help',
+      });
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   test('workflow production CLI rejects custom state roots and an exact-output agy emulator', async () => {
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-workflow-production-cli-'));
     const stateRoot = path.join(cwd, 'injected-state');

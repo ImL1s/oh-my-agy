@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { SpawnSyncReturns, spawnSync } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -10,6 +10,30 @@ import {
 } from '../contracts/repository-workflow';
 import { AggregateEnvelopeV1, sha256Hex } from '../contracts/writer-chain';
 import { resolveCanonicalAgyIdentity } from '../native/antigravity-status';
+import {
+  HostCapabilityProfileV1,
+  HostRouteReceiptV1,
+  assembleHostCapabilityProfile,
+  createHostCapabilityCacheKey,
+  issueHostRouteReceipt,
+  routeHostCapability,
+  validateHostRouteReceipt,
+} from '../native/capability-profile';
+import {
+  HostCapabilityProfileCacheV1,
+  BoundedProbeOutcomeV1,
+  assemblePassiveHostCapabilityProfile,
+  absentPluginIdentity,
+  completeLiveCapabilityProbeCoverage,
+  completePassiveObservationCoverage,
+  inspectExecutableIdentity,
+  parseHookManifestReadback,
+  parsePluginReadback,
+  probeConfigObject,
+  probeDocumentedHelp,
+  runExplicitLiveProbe,
+  unknownPluginIdentity,
+} from '../native/probes';
 import {
   ManagedLaunchTransaction as RuntimeManagedLaunchTransaction,
   SessionLocator,
@@ -23,8 +47,9 @@ import {
   resolveWorkspaceIdentity,
 } from '../runtime/state-root';
 import { ProcessIdentity, Result, err, ok } from '../runtime/types';
-import { PluginCommandAdapter } from '../setup/plugin';
-import { buildAgy115Argv, validateAgy115Help } from '../team/agy-argv';
+import { PluginCommandAdapter, verifyPluginActive } from '../setup/plugin';
+import { AGY_WORKER_MODEL, buildAgy115Argv } from '../team/agy-argv';
+import { validateProviderRoutePreconditions } from '../team/provider';
 import {
   assertRepositoryExternalAuthorityRoot,
   workflowAuthorityDigest,
@@ -59,7 +84,7 @@ import {
   PreparedManagedInvocation,
   ordinaryEnvironment,
 } from './managed-invocation';
-import { ExtendedCliCommand } from './parser';
+import { ExtendedCliCommand, NativeCliCommand } from './parser';
 
 export interface RuntimeManagedTransactionOptions {
   readonly cwd?: string;
@@ -234,6 +259,445 @@ export interface ExtendedCommandContext {
 
 class ExtendedCliUsageError extends Error {}
 
+export interface NativeCapabilityInspectionV1 {
+  readonly kind: 'profile';
+  readonly profile: HostCapabilityProfileV1;
+  readonly cacheStatus: 'hit' | 'miss' | 'rebuilt' | 'non_cacheable';
+  readonly diagnostics: readonly { code: string; message: string }[];
+  readonly liveSucceeded: boolean | null;
+}
+
+export interface NativeCapabilityUnavailableV1 {
+  readonly kind: 'host_absent';
+  readonly diagnostics: readonly { code: string; message: string }[];
+}
+
+type NativeCapabilityInspectionResultV1 = NativeCapabilityInspectionV1 | NativeCapabilityUnavailableV1;
+
+export async function runNativeCommand(
+  command: NativeCliCommand,
+  argv: readonly string[],
+  context: Readonly<ExtendedCommandContext>,
+): Promise<number> {
+  const asJson = argv.includes('--json');
+  try {
+    validateNativeOptions(command, argv);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return writeNativeFailure(command, asJson, 2, 'usage_error', {
+      code: 'E_CLI_USAGE',
+      message,
+    }, context);
+  }
+
+  try {
+    const inspection = await inspectNativeCapabilities(context, command === 'probe');
+    if (inspection.kind === 'host_absent') {
+      if (command === 'probe') {
+        return writeNativeFailure(command, asJson, 1, 'live_probe_failed', {
+          code: inspection.diagnostics[0]?.code ?? 'E_CAPABILITY_HOST_UNAVAILABLE',
+          message: inspection.diagnostics[0]?.message ?? 'agy host is unavailable',
+        }, context);
+      }
+      const result = {
+        diagnostics: inspection.diagnostics,
+        host: 'absent',
+      };
+      writeNativeSuccess(command, asJson, 'unknown', result, context);
+      return 0;
+    }
+    const outcome = capabilityProfileOutcome(inspection.profile);
+    if (command === 'probe' && inspection.liveSucceeded !== true) {
+      return writeNativeFailure(command, asJson, 1, 'live_probe_failed', {
+        code: inspection.diagnostics[0]?.code ?? 'E_LIVE_PROBE_FAILED',
+        message: inspection.diagnostics[0]?.message ?? 'required live probe failed',
+      }, context, inspection.profile);
+    }
+    writeNativeSuccess(command, asJson, outcome, inspection.profile, context, inspection.cacheStatus);
+    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const live = command === 'probe';
+    return writeNativeFailure(command, asJson, live ? 1 : 2, live ? 'live_probe_failed' : 'invalid_state', {
+      code: live ? 'E_LIVE_PROBE_FAILED' : 'E_CAPABILITY_PROFILE_INVALID',
+      message,
+    }, context);
+  }
+}
+
+export async function inspectNativeCapabilities(
+  context: Pick<
+    ExtendedCommandContext,
+    'agyCommand' | 'stateRoot' | 'environment' | 'packageRoot' | 'pluginAdapter'
+  >,
+  live: boolean,
+): Promise<NativeCapabilityInspectionResultV1> {
+  const evaluationTimestamp = new Date().toISOString();
+  const first = readNativeHostSurface(context.agyCommand, context.environment);
+  if (first === null) {
+    return {
+      kind: 'host_absent',
+      diagnostics: [{ code: 'E_CAPABILITY_HOST_UNAVAILABLE', message: 'agy host is unavailable' }],
+    };
+  }
+  const hostIdentityBefore = inspectExecutableIdentity({
+    executable: context.agyCommand,
+    version: first.version,
+    versionOutput: first.versionOutput,
+    helpOutput: first.helpOutput,
+    pathEnvironment: context.environment.PATH,
+  });
+  const pluginBefore = await inspectNativePlugin(context);
+  const pluginIdentity = pluginBefore.identity;
+  const diagnostics: Array<{ code: string; message: string }> = [...pluginBefore.diagnostics];
+  const identityDigest = crypto.createHash('sha256').update(canonicalBytesV1({
+    hostIdentity: hostIdentityBefore,
+    pluginIdentity,
+  })).digest('hex');
+  const expectedCacheKey = createHostCapabilityCacheKey({
+    hostIdentity: hostIdentityBefore,
+    pluginIdentity,
+  });
+  const stateRoot = nativeStateRoot(context.stateRoot, context.environment);
+  const cache = stateRoot === null ? null : new HostCapabilityProfileCacheV1(stateRoot);
+  if (!live) {
+    const cached = cache?.read(expectedCacheKey, evaluationTimestamp);
+    if (cached !== null && cached !== undefined) {
+      return {
+        kind: 'profile', profile: cached, cacheStatus: 'hit', diagnostics: [], liveSucceeded: null,
+      };
+    }
+  }
+  const probeContext = {
+    mode: 'passive',
+    evaluationTimestamp,
+    identityDigest,
+    hostIdentity: hostIdentityBefore,
+    pluginIdentity,
+    runner: async () => first.helpOutcome,
+  } as const;
+  const passive = await probeDocumentedHelp(hostIdentityBefore.realpath, probeContext);
+  const observations = [...passive.observations];
+  const configReadback = probeConfigObject(pluginBefore.configProjection, probeContext);
+  observations.push(...configReadback.observations);
+  const pluginReadback = pluginIdentity.status === 'present'
+    ? parsePluginReadback(pluginBefore.readback, probeContext)
+    : pluginIdentity.status === 'absent'
+      ? { observations: [], cacheable: true, detailCode: 'PLUGIN_ABSENT' }
+      : { observations: [], cacheable: false, detailCode: 'PLUGIN_READBACK_UNKNOWN' };
+  observations.push(...pluginReadback.observations);
+  const hookReadback = parseHookManifestReadback(pluginBefore.hookManifestSource, probeContext);
+  observations.push(...hookReadback.observations);
+  let liveSucceeded: boolean | null = null;
+  if (live) {
+    const token = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
+    const prompt = `Reply with exactly this token and nothing else: ${token}`;
+    const liveContext = {
+      mode: 'live',
+      liveOptIn: true,
+      evaluationTimestamp,
+      identityDigest,
+      hostIdentity: hostIdentityBefore,
+      pluginIdentity,
+    } as const;
+    const jsonAdvertised = passive.observations.some(({ capability, result }) =>
+      capability === 'headless.json' && result === 'positive');
+    const liveResult = await runExplicitLiveProbe({
+      live: true,
+      executable: hostIdentityBefore.realpath,
+      argv: [
+        '--model', AGY_WORKER_MODEL,
+        ...(jsonAdvertised ? ['--output-format', 'json'] : []),
+        '--print', prompt,
+        '--print-timeout', '45s',
+        '--mode', 'plan',
+        '--sandbox',
+      ],
+      capability: jsonAdvertised ? 'headless.json' : 'headless.print',
+      expectedToken: token,
+      outputContract: jsonAdvertised ? 'agy_json' : 'exact_text',
+      environment: context.environment,
+      context: liveContext,
+    });
+    observations.push(...liveResult.observations);
+    if (jsonAdvertised && liveResult.detailCode === 'LIVE_VERIFIED') {
+      observations.push({
+        ...liveResult.observations[0],
+        capability: 'headless.print',
+        detailCode: 'LIVE_JSON_PRINT_VERIFIED',
+      });
+    }
+    liveSucceeded = liveResult.detailCode === 'LIVE_VERIFIED';
+    if (!liveSucceeded) diagnostics.push({ code: liveResult.detailCode, message: 'required live probe did not verify' });
+    observations.splice(
+      0,
+      observations.length,
+      ...completeLiveCapabilityProbeCoverage(observations, liveContext),
+    );
+  }
+  const second = readNativeHostSurface(hostIdentityBefore.realpath, context.environment);
+  if (second === null) throw new Error('agy host disappeared during capability inspection');
+  const hostIdentityAfter = inspectExecutableIdentity({
+    executable: hostIdentityBefore.realpath,
+    version: second.version,
+    versionOutput: second.versionOutput,
+    helpOutput: second.helpOutput,
+    pathEnvironment: context.environment.PATH,
+  });
+  const pluginAfter = await inspectNativePlugin(context);
+  diagnostics.push(...pluginAfter.diagnostics);
+  const profile = live
+    ? assembleHostCapabilityProfile({
+      evaluationTimestamp,
+      hostIdentityBefore,
+      hostIdentityAfter,
+      pluginIdentityBefore: pluginIdentity,
+      pluginIdentityAfter: pluginAfter.identity,
+      observations: completePassiveObservationCoverage(observations, evaluationTimestamp, identityDigest),
+      cacheable: passive.cacheable && configReadback.cacheable && pluginReadback.cacheable && hookReadback.cacheable
+        && liveSucceeded === true,
+    })
+    : assemblePassiveHostCapabilityProfile({
+      evaluationTimestamp,
+      hostIdentityBefore,
+      hostIdentityAfter,
+      pluginIdentityBefore: pluginIdentity,
+      pluginIdentityAfter: pluginAfter.identity,
+      probeResults: [passive, configReadback, pluginReadback, hookReadback],
+    });
+  let cacheStatus: NativeCapabilityInspectionV1['cacheStatus'] = 'non_cacheable';
+  if (live && liveSucceeded !== true && cache !== null) {
+    await cache.invalidate(expectedCacheKey);
+  } else if (cache !== null && passive.cacheable && configReadback.cacheable && pluginReadback.cacheable && hookReadback.cacheable
+    && profile.cacheable
+    && (!live || liveSucceeded === true)) {
+    const committed = await cache.commit(profile);
+    cacheStatus = committed === 'conflict' ? 'non_cacheable' : committed === 'unchanged' ? 'hit' : 'rebuilt';
+  } else if (!live && cache === null) {
+    cacheStatus = 'miss';
+  }
+  return { kind: 'profile', profile, cacheStatus, diagnostics, liveSucceeded };
+}
+
+async function inspectNativePlugin(
+  context: Pick<ExtendedCommandContext, 'packageRoot' | 'pluginAdapter' | 'environment'>,
+): Promise<{
+  identity: import('../native/capability-profile').PluginIdentityV1;
+  readback: string;
+  hookManifestSource: string | null;
+  configProjection: Record<string, unknown>;
+  diagnostics: Array<{ code: string; message: string }>;
+}> {
+  const active = await verifyPluginActive({
+    packageRoot: context.packageRoot,
+    adapter: context.pluginAdapter,
+    homeDir: context.environment.HOME,
+    antigravityConfigRoot: context.environment.OMA_ANTIGRAVITY_CONFIG_ROOT
+      ?? context.environment.ANTIGRAVITY_CONFIG_ROOT,
+  });
+  if (!active.ok) {
+    const affirmativelyAbsent = active.error.details?.reason === 'registry_absent';
+    return {
+      identity: affirmativelyAbsent ? absentPluginIdentity() : unknownPluginIdentity(),
+      readback: '{}',
+      hookManifestSource: null,
+      configProjection: {},
+      diagnostics: affirmativelyAbsent ? [] : [{ code: active.error.code, message: active.error.message }],
+    };
+  }
+  const inventory = active.value.identity.inventory.map(({ path: relative }) => relative);
+  const surface: Record<string, true> = {};
+  if (inventory.some((relative) => relative.startsWith('skills/'))) surface.skills = true;
+  if (inventory.some((relative) => relative.startsWith('rules/'))) surface.rules = true;
+  if (inventory.includes('.mcp.json') || inventory.includes('mcp_config.json')) surface.mcp_config = true;
+  if (inventory.includes('hooks.json')) surface['hooks.json'] = true;
+  if (inventory.some((relative) => relative.startsWith('sidecars/'))) surface.sidecars = true;
+  const agentMarkdown = inventory.filter((relative) => /^agents\/.+\.md$/u.test(relative));
+  if (agentMarkdown.length > 0) surface.agent_markdown = true;
+  if (agentMarkdown.some((relative) => /(?:^|\/)main\.md$/u.test(relative))) surface.main_agent = true;
+  if (agentMarkdown.some((relative) => /subagent/iu.test(relative))) surface.subagent_markdown = true;
+  if (agentMarkdown.some((relative) => /(?:^|\/)\.[^/]+\.md$/u.test(relative))) surface.hidden_agent_markdown = true;
+  if (active.value.components.includes('workspace')) surface.workspace = true;
+  if (active.value.components.includes('global')) surface.global = true;
+  const configProjection: Record<string, unknown> = {};
+  if (surface.skills) configProjection['plugin.skills'] = true;
+  if (surface.rules) configProjection['plugin.rules'] = true;
+  if (surface.mcp_config) {
+    configProjection['plugin.mcp_config'] = true;
+    configProjection['mcp.local_config'] = true;
+  }
+  if (surface['hooks.json']) configProjection['plugin.hooks_manifest'] = true;
+  if (surface.workspace) configProjection['plugin.layout.workspace'] = true;
+  if (surface.global) configProjection['plugin.layout.global'] = true;
+  if (surface.sidecars) configProjection['sidecar.layout.plugin'] = true;
+  if (surface.agent_markdown) {
+    configProjection['custom_agent.markdown'] = true;
+    configProjection['subagent.define'] = true;
+  }
+  if (surface.main_agent) configProjection['custom_agent.main_agent'] = true;
+  if (surface.subagent_markdown) configProjection['custom_agent.subagent'] = true;
+  if (surface.hidden_agent_markdown) configProjection['custom_agent.hidden'] = true;
+  return {
+    identity: {
+      status: 'present',
+      realpath: active.value.installPath,
+      packageDigest: active.value.installedDigest,
+      version: active.value.version,
+      readbackDigest: active.value.listStdoutSha256,
+      enabled: true,
+    },
+    readback: JSON.stringify(surface),
+    hookManifestSource: inventory.includes('hooks.json')
+      ? readInstalledHookManifest(active.value.installPath)
+      : null,
+    configProjection,
+    diagnostics: [],
+  };
+}
+
+function readInstalledHookManifest(pluginRoot: string): string {
+  try {
+    const root = fs.realpathSync(pluginRoot);
+    const target = path.join(root, 'hooks.json');
+    const stat = fs.lstatSync(target);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 1024) return '';
+    const realpath = fs.realpathSync(target);
+    if (!realpath.startsWith(`${root}${path.sep}`)) return '';
+    return fs.readFileSync(realpath, 'utf8');
+  } catch (_) {
+    return '';
+  }
+}
+
+function validateNativeOptions(command: NativeCliCommand, argv: readonly string[]): void {
+  const allowed = command === 'capabilities' ? new Set(['--json']) : new Set(['--live', '--json']);
+  const seen = new Set<string>();
+  for (const arg of argv) {
+    if (!allowed.has(arg)) throw new ExtendedCliUsageError(`native ${command}: unexpected argument ${JSON.stringify(arg)}`);
+    if (seen.has(arg)) throw new ExtendedCliUsageError(`native ${command}: duplicate option ${arg}`);
+    seen.add(arg);
+  }
+  if (command === 'probe' && !seen.has('--live')) {
+    throw new ExtendedCliUsageError('native probe requires literal --live');
+  }
+}
+
+function readNativeHostSurface(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+): {
+  version: string | null;
+  versionOutput: string;
+  helpOutput: string;
+  helpOutcome: BoundedProbeOutcomeV1;
+} | null {
+  const options = { encoding: 'utf8' as const, timeout: 5_000, maxBuffer: 64 * 1024, env: environment, shell: false };
+  const version = spawnSync(executable, ['--version'], options);
+  const help = spawnSync(executable, ['--help'], options);
+  if (isExecutableMissing(version) || isExecutableMissing(help)) return null;
+  const versionOutcome = boundedOutcomeFromSpawnSync(version);
+  const helpOutcome = boundedOutcomeFromSpawnSync(help);
+  const versionOutput = `${version.stdout ?? ''}${version.stderr ?? ''}`;
+  const helpOutput = `${help.stdout ?? ''}${help.stderr ?? ''}`;
+  const parsed = versionOutcome.status === 0 && !versionOutcome.timedOut
+    && !versionOutcome.outputOverflow && versionOutcome.error === undefined
+    ? versionOutput.match(/(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)/u)?.[1] ?? null
+    : null;
+  return { version: parsed, versionOutput, helpOutput, helpOutcome };
+}
+
+function boundedOutcomeFromSpawnSync(result: SpawnSyncReturns<string>): BoundedProbeOutcomeV1 {
+  const stdout = result.stdout ?? '';
+  const stderr = result.stderr ?? '';
+  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
+  // spawnSync may silently return exactly maxBuffer bytes with status 0 after
+  // truncating a larger stream, so equality is conservatively non-cacheable.
+  const outputOverflow = code === 'ENOBUFS' || Buffer.byteLength(stdout) + Buffer.byteLength(stderr) >= 64 * 1024;
+  return {
+    status: result.status,
+    signal: result.signal,
+    stdout,
+    stderr,
+    timedOut: code === 'ETIMEDOUT',
+    outputOverflow,
+    ...(result.error === undefined ? {} : { error: result.error.message }),
+  };
+}
+
+function isExecutableMissing(result: SpawnSyncReturns<string>): boolean {
+  return (result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
+function nativeStateRoot(configured: string | undefined, environment: NodeJS.ProcessEnv): string | null {
+  const resolved = resolveStateRoot({
+    create: true,
+    env: { ...environment, ...(configured === undefined ? {} : { OMA_STATE_ROOT: configured }) },
+    homeDirectory: environment.HOME ?? os.homedir(),
+  });
+  return resolved.ok ? resolved.value.path : null;
+}
+
+function capabilityProfileOutcome(profile: HostCapabilityProfileV1): 'supported' | 'unsupported' | 'unknown' | 'mixed' {
+  const outcomes = new Set(profile.capabilities.map(({ outcome }) => outcome));
+  return outcomes.size === 1 ? [...outcomes][0]! : 'mixed';
+}
+
+function writeNativeSuccess(
+  command: NativeCliCommand,
+  asJson: boolean,
+  outcome: 'supported' | 'unsupported' | 'unknown' | 'mixed',
+  result: unknown,
+  context: Pick<ExtendedCommandContext, 'stdout'>,
+  cacheStatus?: NativeCapabilityInspectionV1['cacheStatus'],
+): void {
+  if (asJson) {
+    context.stdout(`${canonicalBytesV1({
+      command: `native ${command}`,
+      exitCode: 0,
+      ok: true,
+      outcome,
+      ...(result !== null && typeof result === 'object' && 'schema' in result ? { profile: result } : { result }),
+      ...(cacheStatus === undefined ? {} : { cacheStatus }),
+      schema: 'oma.native-command-result/v1',
+    }).toString('utf8')}\n`);
+    return;
+  }
+  if (result !== null && typeof result === 'object' && 'capabilities' in result) {
+    const profile = result as HostCapabilityProfileV1;
+    context.stdout(`native ${command}: ${outcome} (${profile.profileDigest})\n`);
+    for (const capability of profile.capabilities) {
+      context.stdout(`${capability.key}: ${capability.outcome}; tier=${capability.tier ?? 'null'}; source=${capability.source ?? 'null'}; fallback=${capability.fallback}\n`);
+    }
+  } else {
+    context.stdout(`native ${command}: ${outcome}\n`);
+  }
+}
+
+function writeNativeFailure(
+  command: NativeCliCommand,
+  asJson: boolean,
+  exitCode: 1 | 2,
+  outcome: 'usage_error' | 'invalid_state' | 'live_probe_failed',
+  error: { code: string; message: string },
+  context: Pick<ExtendedCommandContext, 'stdout' | 'stderr'>,
+  profile?: HostCapabilityProfileV1,
+): number {
+  if (asJson) {
+    context.stdout(`${canonicalBytesV1({
+      command: `native ${command}`,
+      error,
+      exitCode,
+      ok: false,
+      outcome,
+      ...(profile === undefined ? {} : { profile }),
+      schema: 'oma.native-command-result/v1',
+    }).toString('utf8')}\n`);
+  } else {
+    context.stderr(`${error.code}: ${error.message}\n`);
+  }
+  return exitCode;
+}
+
 export async function runExtendedCommand(
   command: ExtendedCliCommand,
   argv: readonly string[],
@@ -250,11 +714,11 @@ export async function runExtendedCommand(
       case 'hud':
         return await runHudCommand(argv, context);
       case 'native-status':
-        return runNativeStatusCommand(argv, context);
+        return await runNativeStatusCommand(argv, context);
       case 'lsp-status':
-        return runLspStatusCommand(argv, context);
+        return await runLspStatusCommand(argv, context);
       case 'sidecar-status':
-        return runSidecarStatusCommand(argv, context);
+        return await runSidecarStatusCommand(argv, context);
       case 'notify':
         return await runNotifyCommand(argv, context);
       case 'resume':
@@ -394,7 +858,7 @@ async function workflowRun(
     journal_path: journalPath,
     workflow_input: input,
     mode: 'cli',
-  });
+  }, context);
   context.stdout(`${JSON.stringify({
     ok: snapshot.terminal === 'ship',
     code: snapshot.terminal === 'no_ship'
@@ -424,6 +888,13 @@ interface ProductWorkflowExecutionContextV1 {
   readonly environment: NodeJS.ProcessEnv;
   readonly workflow_input: Readonly<Record<string, unknown>>;
   readonly state_root: string;
+  readonly capability_profile: HostCapabilityProfileV1;
+  readonly route_authorities: Map<string, ProductWorkflowRouteAuthorityV1>;
+}
+
+interface ProductWorkflowRouteAuthorityV1 {
+  readonly contextDigest: string;
+  readonly receipt: HostRouteReceiptV1;
 }
 
 interface ProductWorkflowVerdictV1 {
@@ -433,17 +904,24 @@ interface ProductWorkflowVerdictV1 {
 
 async function executeCanonicalProductWorkflow(
   input: Readonly<CanonicalProductWorkflowExecutionInputV1>,
+  nativeContext: Pick<
+    ExtendedCommandContext,
+    'agyCommand' | 'stateRoot' | 'environment' | 'packageRoot' | 'pluginAdapter'
+  >,
 ): Promise<WorkflowRunSnapshotV1> {
   const repositoryRoot = fs.realpathSync(process.cwd());
   validateCanonicalProductRun(input, repositoryRoot);
   const agy = resolveCanonicalAgyIdentity();
-  const versionProbe = spawnSync(agy.realpath, ['--version'], canonicalProductProbeOptions(repositoryRoot));
-  const helpProbe = spawnSync(agy.realpath, ['--help'], canonicalProductProbeOptions(repositoryRoot));
-  const host = validateAgy115Help(
-    `${versionProbe.stdout ?? ''}`.trim(),
-    `${helpProbe.stdout ?? ''}\n${helpProbe.stderr ?? ''}`,
-  );
-  if (!host.ok) throw new Error(`${host.error.code}: ${host.error.message}`);
+  const native = await inspectNativeCapabilities({
+    ...nativeContext,
+    agyCommand: agy.realpath,
+    environment: process.env,
+  }, false);
+  if (native.kind !== 'profile'
+    || native.profile.hostIdentity.realpath !== agy.realpath
+    || native.profile.hostIdentity.binarySha256 !== agy.sha256) {
+    throw new Error('E_CAPABILITY_UNPROVEN: workflow host identity lacks an exact capability profile');
+  }
   const resolved = resolveStateRoot({
     env: process.env,
     homeDirectory: os.homedir(),
@@ -460,6 +938,8 @@ async function executeCanonicalProductWorkflow(
     environment: process.env,
     workflow_input: input.workflow_input,
     state_root: stateRoot,
+    capability_profile: native.profile,
+    route_authorities: new Map(),
   };
   const adapter: WorkflowDispatchAdapterV1 = {
     dispatch: (dispatchInput) => dispatchProductWorkflowTask(dispatchInput, context),
@@ -471,21 +951,87 @@ async function executeCanonicalProductWorkflow(
     adapter,
     authority_state_root: stateRoot,
     repository_root: repositoryRoot,
-    permission_context: (taskId, attempt) => ({
-      run_id: input.plan.run_id,
-      team_id: `workflow-${input.plan.run_id}`,
-      claim_id: `${taskId}:${attempt}`,
-      state_endpoint: canonicalProductStateEndpoint(repositoryRoot, input),
-      cancellation_token_hash: sha256Hex(canonicalBytesV1([
-        'workflow-cancel',
+    permission_context: (taskId, attempt) => {
+      const task = input.plan.tasks.find((entry) => entry.task_id === taskId);
+      if (task === undefined) throw new Error('E_CAPABILITY_UNPROVEN: workflow task route is unbound');
+      const authority = issueProductWorkflowRoute(
+        context,
         input.plan.run_id,
-        input.plan.generation,
-      ])),
-      provider: 'agy_headless',
-      mailbox_cursor: 0,
-      contributor_guidance_hashes: productContributorGuidanceHashes(repositoryRoot),
-    }),
+        taskId,
+        attempt,
+        task.generation,
+      );
+      return {
+        run_id: input.plan.run_id,
+        team_id: `workflow-${input.plan.run_id}`,
+        claim_id: `${taskId}:${attempt}`,
+        state_endpoint: canonicalProductStateEndpoint(repositoryRoot, input),
+        cancellation_token_hash: sha256Hex(canonicalBytesV1([
+          'workflow-cancel',
+          input.plan.run_id,
+          input.plan.generation,
+        ])),
+        provider: authority.receipt.provider as 'agy_headless',
+        provider_profile_digest: authority.receipt.profileDigest,
+        route_receipt_digest: authority.receipt.receiptDigest,
+        mailbox_cursor: 0,
+        contributor_guidance_hashes: productContributorGuidanceHashes(repositoryRoot),
+      };
+    },
   });
+}
+
+function issueProductWorkflowRoute(
+  context: ProductWorkflowExecutionContextV1,
+  runId: string,
+  taskId: string,
+  attempt: number,
+  generation: number,
+): ProductWorkflowRouteAuthorityV1 {
+  const selectedAt = new Date().toISOString();
+  const preconditions = validateProviderRoutePreconditions(
+    context.capability_profile,
+    'headless',
+    selectedAt,
+  );
+  if (!preconditions.ok) {
+    throw new Error(`${preconditions.error.code}: ${preconditions.error.message}`);
+  }
+  const contextDigest = sha256Hex(canonicalBytesV1([
+    'oma-product-workflow-route/v1',
+    runId,
+    taskId,
+    attempt,
+    generation,
+    context.capability_profile.profileDigest,
+  ]));
+  const candidate = routeHostCapability(context.capability_profile, {
+    capability: 'headless.print',
+    provider: 'agy_headless',
+    requestMode: 'headless',
+    generation,
+    contextDigest,
+    selectedAt,
+    ttlMs: 30_000,
+    fallbackPreconditionsSatisfied: preconditions.value,
+  });
+  const receipt = issueHostRouteReceipt(candidate, context.agy_command, 'agy_headless_v1');
+  validateHostRouteReceipt(receipt, context.capability_profile, {
+    now: selectedAt,
+    generation,
+    contextDigest,
+    identityDigest: context.capability_profile.identityDigest,
+    fallbackPreconditionsSatisfied: preconditions.value,
+    provider: 'agy_headless',
+    requestMode: 'headless',
+  });
+  const authority = { contextDigest, receipt };
+  context.route_authorities.set(productWorkflowRouteKey(taskId, attempt), authority);
+  return authority;
+}
+
+function productWorkflowRouteKey(taskId: string, attempt: number): string {
+  return `${taskId}\0${attempt}`;
 }
 
 interface PrivateProductRepositoryWorkflowInputV1 {
@@ -873,18 +1419,6 @@ function validateCanonicalProductRun(
   }
 }
 
-function canonicalProductProbeOptions(repositoryRoot: string) {
-  return {
-    encoding: 'utf8' as const,
-    env: process.env,
-    cwd: repositoryRoot,
-    timeout: 15_000,
-    maxBuffer: 262_144,
-    shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'] as ['ignore', 'pipe', 'pipe'],
-  };
-}
-
 function canonicalProductStateEndpoint(
   repositoryRoot: string,
   input: Readonly<CanonicalProductWorkflowExecutionInputV1>,
@@ -935,6 +1469,27 @@ async function dispatchProductWorkflowTask(
   context: Readonly<ProductWorkflowExecutionContextV1>,
 ): Promise<WorkflowTaskReceiptV1> {
   assertRepositoryExternalAuthorityRoot(context.state_root, context.repository_root);
+  const route = context.route_authorities.get(productWorkflowRouteKey(input.task.task_id, input.attempt));
+  if (route === undefined
+    || input.permission.envelope.provider !== 'agy_headless'
+    || input.permission.envelope.provider_profile_digest !== route.receipt.profileDigest
+    || input.permission.envelope.route_receipt_digest !== route.receipt.receiptDigest
+    || context.agy_command !== route.receipt.resolvedExecutable) {
+    return productFailure(input, 'blocked', true);
+  }
+  try {
+    validateHostRouteReceipt(route.receipt, context.capability_profile, {
+      now: new Date().toISOString(),
+      generation: input.task.generation,
+      contextDigest: route.contextDigest,
+      identityDigest: context.capability_profile.identityDigest,
+      fallbackPreconditionsSatisfied: route.receipt.fallbackPreconditionsSatisfied,
+      provider: 'agy_headless',
+      requestMode: 'headless',
+    });
+  } catch (_) {
+    return productFailure(input, 'blocked', true);
+  }
   const runner = new ProcessRunner();
   if (input.stage.external_effect_types.length > 0) {
     return productFailure(input, 'effect_unknown');
@@ -1668,38 +2223,107 @@ async function runHudCommand(
   return 0;
 }
 
-function runNativeStatusCommand(
+async function runNativeStatusCommand(
   argv: readonly string[],
   context: Readonly<ExtendedCommandContext>,
-): number {
+): Promise<number> {
   if (argv.length > 0) throw new ExtendedCliUsageError('native-status accepts no arguments');
-  const { inspectAntigravityPublicStatus } = require('../native/antigravity-status') as typeof import('../native/antigravity-status');
-  context.stdout(`${JSON.stringify(inspectAntigravityPublicStatus({
-    executable: context.agyCommand,
-  }), null, 2)}\n`);
+  const inspected = await inspectNativeCapabilities(context, false);
+  if (inspected.kind === 'host_absent') {
+    context.stdout(`${JSON.stringify({
+      store_kind: 'oma_antigravity_public_status',
+      schema_version: 1,
+      repository_id: 'OMA',
+      status: 'unavailable',
+      executable: context.agyCommand,
+      version: null,
+      version_sha256: null,
+      public_subcommands: [],
+      capabilities: [
+        legacyNativeCapability('public_cli', false),
+        legacyNativeCapability('plugins', false),
+        legacyNativeCapability('plugin_fresh_session_discovery', false),
+        legacyNativeCapability('native_status', false),
+        legacyNativeCapability('native_lsp', false),
+        legacyNativeCapability('native_team', false),
+        legacyNativeCapability('native_workflows', false),
+      ],
+      detail_code: 'PROFILE_HOST_ABSENT',
+      diagnostic: inspected.diagnostics[0]?.message ?? 'agy host unavailable',
+      profile_digest: null,
+    }, null, 2)}\n`);
+    return 0;
+  }
+  const profile = inspected.profile;
+  const projected = (key: string) => profile.capabilities.find((entry) => entry.key === key)?.outcome === 'supported';
+  context.stdout(`${JSON.stringify({
+    store_kind: 'oma_antigravity_public_status',
+    schema_version: 1,
+    repository_id: 'OMA',
+    status: 'public_cli_observed',
+    executable: profile.hostIdentity.realpath,
+    version: profile.hostIdentity.version,
+    version_sha256: profile.hostIdentity.version === null
+      ? null : sha256Hex(profile.hostIdentity.version),
+    public_subcommands: [],
+    capabilities: [
+      legacyNativeCapability('public_cli', true),
+      legacyNativeCapability('plugins', projected('plugin.skills')),
+      legacyNativeCapability('plugin_fresh_session_discovery', false),
+      legacyNativeCapability('native_status', projected('ui.statusline')),
+      legacyNativeCapability('native_lsp', projected('mcp.local_config')),
+      legacyNativeCapability('native_team', projected('subagent.manage')),
+      legacyNativeCapability('native_workflows', projected('custom_agent.markdown')),
+    ],
+    detail_code: 'HOST_CAPABILITY_PROFILE_PROJECTION',
+    diagnostic: null,
+    profile_digest: profile.profileDigest,
+  }, null, 2)}\n`);
   return 0;
 }
 
-function runLspStatusCommand(
+function legacyNativeCapability(capability: string, observed: boolean): {
+  capability: string; status: 'observed' | 'unobserved'; evidence_tier: 'T0' | 'T1';
+} {
+  return { capability, status: observed ? 'observed' : 'unobserved', evidence_tier: observed ? 'T1' : 'T0' };
+}
+
+async function runLspStatusCommand(
   argv: readonly string[],
   context: Readonly<ExtendedCommandContext>,
-): number {
+): Promise<number> {
   assertOnlyOptions(argv, ['--registration']);
   const { inspectHostLspStatus } = require('../native/lsp-status') as typeof import('../native/lsp-status');
-  context.stdout(`${JSON.stringify(inspectHostLspStatus({
+  const native = await inspectNativeCapabilities(context, false);
+  const status = inspectHostLspStatus({
     plugin_root: context.packageRoot,
     registration_relative_path: optionValue(argv, '--registration'),
-  }), null, 2)}\n`);
+  });
+  context.stdout(`${JSON.stringify({
+    ...status,
+    profile_digest: native.kind === 'profile' ? native.profile.profileDigest : null,
+    capability_outcome: native.kind === 'profile'
+      ? native.profile.capabilities.find(({ key }) => key === 'mcp.local_config')?.outcome ?? 'unknown'
+      : 'unknown',
+  }, null, 2)}\n`);
   return 0;
 }
 
-function runSidecarStatusCommand(
+async function runSidecarStatusCommand(
   argv: readonly string[],
   context: Readonly<ExtendedCommandContext>,
-): number {
+): Promise<number> {
   if (argv.length > 0) throw new ExtendedCliUsageError('sidecar-status accepts no arguments');
   const { inspectPrivateSidecarStatus } = require('../native/sidecar-status') as typeof import('../native/sidecar-status');
-  context.stdout(`${JSON.stringify(inspectPrivateSidecarStatus(), null, 2)}\n`);
+  const native = await inspectNativeCapabilities(context, false);
+  const status = inspectPrivateSidecarStatus();
+  context.stdout(`${JSON.stringify({
+    ...status,
+    profile_digest: native.kind === 'profile' ? native.profile.profileDigest : null,
+    capability_outcome: native.kind === 'profile'
+      ? native.profile.capabilities.find(({ key }) => key === 'sidecar.agentapi')?.outcome ?? 'unknown'
+      : 'unknown',
+  }, null, 2)}\n`);
   return 0;
 }
 
@@ -2115,7 +2739,7 @@ async function runProductionCommand(
       const prepared = await evidence.prepareWorkflowProductionProbeFromCli(
         optionValue(rest.slice(1), '--run-id'),
       );
-      const snapshot = await executeCanonicalProductWorkflow(prepared.execution);
+      const snapshot = await executeCanonicalProductWorkflow(prepared.execution, context);
       const result = evidence.recordPreparedWorkflowProductionProbe(prepared, snapshot);
       context.stdout(`${JSON.stringify({
         ok: true,
