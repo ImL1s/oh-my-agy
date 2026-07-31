@@ -41,8 +41,12 @@ class InstallingAdapter implements PluginCommandAdapter {
   readonly calls: string[][] = [];
   failCommand?: string;
   uncertainInstall = false;
+  leaveInstallPathOnUninstall = false;
+  private registered: boolean;
 
-  constructor(private readonly installedRoot: string) {}
+  constructor(private readonly installedRoot: string) {
+    this.registered = fs.existsSync(path.join(installedRoot, 'plugin.json'));
+  }
 
   async run(argv: readonly string[]): Promise<PluginCommandResult> {
     this.calls.push([...argv]);
@@ -50,7 +54,7 @@ class InstallingAdapter implements PluginCommandAdapter {
     if (command === 'plugin list') {
       return {
         argv: [...argv], code: 0,
-        stdout: fs.existsSync(path.join(this.installedRoot, 'plugin.json'))
+        stdout: this.registered
           ? JSON.stringify({ imports: [{ name: 'oh-my-agy', source: 'antigravity', components: ['hooks', 'skills'] }] })
           : JSON.stringify({ imports: [] }),
         stderr: '',
@@ -59,12 +63,14 @@ class InstallingAdapter implements PluginCommandAdapter {
     if (argv[0] === 'plugin' && argv[1] === 'install' && argv[2]) {
       // 真實 Antigravity 同名安裝會覆蓋既有目錄而不清除舊檔案。
       fs.cpSync(argv[2], this.installedRoot, { recursive: true, dereference: true });
+      this.registered = true;
       if (this.uncertainInstall) {
         return { argv: [...argv], code: 9, stdout: '', stderr: 'timeout: result unknown' };
       }
     }
     if (command.startsWith('plugin uninstall')) {
-      if (fs.existsSync(this.installedRoot)) {
+      this.registered = false;
+      if (!this.leaveInstallPathOnUninstall && fs.existsSync(this.installedRoot)) {
         writable(this.installedRoot);
         fs.rmSync(this.installedRoot, { recursive: true, force: true });
       }
@@ -189,6 +195,39 @@ describe('transactional immutable plugin setup', () => {
       'plugin enable',
       'plugin list',
     ]);
+  });
+
+  test('fails closed when uninstall clears the registry but leaves the install path', async () => {
+    surface(installedRoot, '0.9.0', 'previous');
+    const adapter = new InstallingAdapter(installedRoot);
+    adapter.leaveInstallPathOnUninstall = true;
+    const transaction = new PluginSetupTransaction({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      adapter,
+      idFactory: () => 'transaction-residual-path',
+    });
+
+    const result = await transaction.run();
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'E_PLUGIN_NOT_ACTIVE',
+        message: expect.stringContaining('left installed plugin bytes'),
+      }),
+    }));
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('0.9.0');
+    const record = JSON.parse(fs.readFileSync(
+      path.join(stateRoot, 'setup-transactions', 'transaction-residual-path.json'), 'utf8',
+    ));
+    expect(record).toEqual(expect.objectContaining({
+      status: 'rollback_failed',
+      recovery: expect.stringContaining('left installed plugin bytes'),
+    }));
+    expect(adapter.calls.some((argv) => argv[1] === 'install')).toBe(false);
   });
 
   test('an uncertain install result is adopted only after exact installed readback', async () => {

@@ -198,7 +198,12 @@ export class PluginSetupTransaction {
       if (previous !== undefined) {
         // disable/uninstall 之間任一步驟都可能已改變 host，從第一個 mutation 起即納入回滾。
         switched = true;
-        const removed = await this.removeInstalledPlugin(pluginName, commands);
+        const removed = await this.removeInstalledPlugin(
+          pluginName,
+          commands,
+          'upgrade',
+          previous.identity.installPath,
+        );
         if (!removed.ok) {
           return await this.failAfterSwitch(
             transactionId, pluginName, staged.value, steps, commands, removed.error, previous,
@@ -459,6 +464,7 @@ export class PluginSetupTransaction {
     pluginName: string,
     commands: InstallCommandReceiptV1[],
     context = 'upgrade',
+    installPath = path.join(this.configRoot, 'plugins', pluginName),
   ): Promise<Result<void, RuntimeError>> {
     const disabled = await this.runStep(['plugin', 'disable', pluginName], commands);
     if (disabled.code !== 0 && !/already disabled|not (?:installed|enabled)|not found/i.test(
@@ -476,6 +482,13 @@ export class PluginSetupTransaction {
       return err(runtimeError(
         'E_PLUGIN_NOT_ACTIVE',
         `${context} could not prove prior install absent`,
+      ));
+    }
+    if (pathExistsIncludingBrokenSymlink(installPath)) {
+      return err(runtimeError(
+        'E_PLUGIN_NOT_ACTIVE',
+        `${context} left installed plugin bytes after registry removal`,
+        { installPath },
       ));
     }
     return ok(undefined);
@@ -542,4 +555,13 @@ function isUncertainResult(result: PluginCommandResult): boolean {
   return /timeout|timed out|unknown|disconnect|connection|temporar/i.test(
     `${result.stdout}\n${result.stderr}`,
   );
+}
+
+function pathExistsIncludingBrokenSymlink(target: string): boolean {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
 }
