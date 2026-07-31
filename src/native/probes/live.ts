@@ -20,6 +20,7 @@ export const LIVE_CAPABILITY_PROBE_PLAN_V1 = Object.freeze(
       sideEffect,
       timeoutMs: limits.timeoutMs,
       maximumOutputBytes: limits.maximumOutputBytes,
+      maximumProcesses: limits.maximumProcesses,
     })),
 );
 
@@ -60,15 +61,19 @@ export async function runExplicitLiveProbe(request: Readonly<LiveProbeRequestV1>
       environment,
       timeoutMs,
       maximumOutputBytes: policy.limits.maximumOutputBytes,
+      maximumProcesses: policy.limits.maximumProcesses,
     });
-    const exact = outcome.status === 0 && !outcome.timedOut && !outcome.outputOverflow && outcome.error === undefined
+    const exact = outcome.status === 0 && !outcome.timedOut && !outcome.outputOverflow
+      && !outcome.processCountOverflow && outcome.error === undefined
       && outcome.stderr === '' && liveOutputMatches(
         outcome.stdout,
         request.expectedToken,
         request.outputContract ?? 'exact_text',
       );
     const detailCode = outcome.timedOut ? 'LIVE_TIMEOUT' : outcome.outputOverflow ? 'LIVE_OVERFLOW'
-      : exact ? 'LIVE_VERIFIED' : 'LIVE_MALFORMED';
+      : outcome.processCountOverflow ? 'LIVE_PROCESS_OVERFLOW'
+        : outcome.error === 'E_PROBE_PROCESS_COUNT_UNAVAILABLE' ? 'LIVE_PROCESS_LIMIT_UNAVAILABLE'
+          : exact ? 'LIVE_VERIFIED' : 'LIVE_MALFORMED';
     const observation: CapabilityObservationV1 = {
       capability: request.capability,
       source: 'live_probe',

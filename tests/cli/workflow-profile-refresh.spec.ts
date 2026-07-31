@@ -35,7 +35,7 @@ describe('product workflow capability refresh', () => {
     const selected = await refreshProductWorkflowCapabilityProfile({
       expected_realpath: HOST.realpath,
       expected_binary_sha256: HOST.binarySha256,
-      now: NOW,
+      now: () => NOW,
       inspect: async (live) => {
         calls.push(live);
         return inspection(fresh, live);
@@ -52,7 +52,7 @@ describe('product workflow capability refresh', () => {
     const selected = await refreshProductWorkflowCapabilityProfile({
       expected_realpath: HOST.realpath,
       expected_binary_sha256: HOST.binarySha256,
-      now: NOW,
+      now: () => NOW,
       inspect: async (live) => {
         calls.push(live);
         return inspection(live ? refreshed : startup, live);
@@ -62,12 +62,35 @@ describe('product workflow capability refresh', () => {
     expect(calls).toEqual([false, true]);
   });
 
+  it('samples route time after a slow live refresh produces newer evidence', async () => {
+    const startup = routableProfile('2026-07-31T12:00:00.000Z');
+    const refreshedAt = '2026-07-31T12:01:00.000Z';
+    const refreshed = routableProfile(refreshedAt);
+    let clock = NOW;
+    const events: string[] = [];
+    const selected = await refreshProductWorkflowCapabilityProfile({
+      expected_realpath: HOST.realpath,
+      expected_binary_sha256: HOST.binarySha256,
+      now: () => {
+        events.push('clock');
+        return clock;
+      },
+      inspect: async (live) => {
+        events.push(live ? 'live' : 'passive');
+        if (live) clock = '2026-07-31T12:01:01.000Z';
+        return inspection(live ? refreshed : startup, live);
+      },
+    });
+    expect(selected.profileDigest).toBe(refreshed.profileDigest);
+    expect(events).toEqual(['passive', 'clock', 'live', 'clock']);
+  });
+
   it('rejects refreshed evidence from a different executable identity', async () => {
     const foreign = routableProfile(NOW, { ...HOST, binarySha256: 'f'.repeat(64) });
     await expect(refreshProductWorkflowCapabilityProfile({
       expected_realpath: HOST.realpath,
       expected_binary_sha256: HOST.binarySha256,
-      now: NOW,
+      now: () => NOW,
       inspect: async (live) => inspection(foreign, live),
     })).rejects.toThrow(/exact capability profile/);
   });

@@ -145,8 +145,8 @@ exit 2
     const executable = path.join(cwd, 'agy');
     fs.writeFileSync(executable, `#!${process.execPath}
 if (process.argv[2] === '--version') { process.stdout.write('agy 9.0.0\\n'); process.exit(0); }
-if (process.argv[2] === '--help') { process.stdout.write('x'.repeat(70 * 1024)); process.exit(0); }
-process.exit(2);
+if (process.argv[2] === '--help') { process.stdout.write('x'.repeat(70 * 1024)); }
+else { process.exit(2); }
 `, { mode: 0o700 });
     let stdout = '';
     const services = createDefaultServices({

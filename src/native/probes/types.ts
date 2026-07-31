@@ -9,6 +9,7 @@ export interface BoundedProbeRequestV1 {
   environment?: NodeJS.ProcessEnv;
   timeoutMs: number;
   maximumOutputBytes: number;
+  maximumProcesses: number;
 }
 
 export interface BoundedProbeOutcomeV1 {
@@ -18,6 +19,7 @@ export interface BoundedProbeOutcomeV1 {
   stderr: string;
   timedOut: boolean;
   outputOverflow: boolean;
+  processCountOverflow: boolean;
   error?: string;
 }
 
@@ -48,5 +50,6 @@ export interface ProbeResultV1 {
 export const PASSIVE_PROBE_LIMITS_V1 = Object.freeze({
   timeoutMs: 5_000,
   maximumOutputBytes: 64 * 1024,
+  maximumProcesses: 8,
   maximumJsonBytes: 256 * 1024,
 });

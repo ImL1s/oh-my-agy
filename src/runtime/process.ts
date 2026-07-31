@@ -300,7 +300,7 @@ export class ProcessRunner {
       if (maxProcessCount !== undefined && maxProcessCount > 0 && child.pid !== undefined) {
         processCountTimer = setInterval(() => {
           if (settled || processCountOverflow) return;
-          const count = countProcessGroup(child.pid!);
+          const count = countProcessGroup(child.pid!, maxProcessCount);
           if (count !== null && count > maxProcessCount) {
             triggerKill('processCount');
           }
@@ -389,8 +389,11 @@ function redactedArgvEvidence(value: string): string {
   return `<arg:${digest}>`;
 }
 
-/** 計算 pid 及其子孫數量；darwin/linux 用 pgrep -P 遞迴。失敗回 null。 */
-function countProcessGroup(rootPid: number): number | null {
+/** 計算 pid 及其子孫數量；超過 policy 上限後立即停止列舉。失敗回 null。 */
+export function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_INTEGER): number | null {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0
+    || !Number.isSafeInteger(stopAfter) || stopAfter <= 0) return null;
+  if (process.platform === 'win32') return countWindowsProcessTree(rootPid, stopAfter);
   try {
     const seen = new Set<number>();
     const queue = [rootPid];
@@ -398,8 +401,14 @@ function countProcessGroup(rootPid: number): number | null {
       const pid = queue.pop()!;
       if (seen.has(pid)) continue;
       seen.add(pid);
-      const listed = spawnSync('pgrep', ['-P', String(pid)], { encoding: 'utf8' });
-      if (listed.status !== 0 && listed.status !== 1) continue;
+      if (seen.size > stopAfter) return seen.size;
+      const listed = spawnSync('pgrep', ['-P', String(pid)], {
+        encoding: 'utf8',
+        timeout: 1_000,
+        maxBuffer: 64 * 1024,
+      });
+      if (listed.error !== undefined) return null;
+      if (listed.status !== 0 && listed.status !== 1) return null;
       const children = listed.stdout.trim() === ''
         ? []
         : listed.stdout.trim().split('\n').map((line) => Number(line)).filter((n) => Number.isFinite(n));
@@ -409,6 +418,34 @@ function countProcessGroup(rootPid: number): number | null {
   } catch (_) {
     return null;
   }
+}
+
+function countWindowsProcessTree(rootPid: number, stopAfter: number): number | null {
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    '$rows = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId',
+    '$seen = New-Object "System.Collections.Generic.HashSet[int]"',
+    '$queue = New-Object "System.Collections.Generic.Queue[int]"',
+    `$queue.Enqueue(${rootPid})`,
+    `while ($queue.Count -gt 0 -and $seen.Count -le ${stopAfter}) {`,
+    '  $pidValue = $queue.Dequeue()',
+    '  if (-not $seen.Add($pidValue)) { continue }',
+    '  foreach ($row in $rows) { if ($row.ParentProcessId -eq $pidValue) { $queue.Enqueue([int]$row.ProcessId) } }',
+    '}',
+    '[Console]::Out.Write($seen.Count)',
+  ].join('; ');
+  for (const command of ['powershell.exe', 'pwsh.exe']) {
+    const result = spawnSync(command, ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      maxBuffer: 64 * 1024,
+      windowsHide: true,
+    });
+    if (result.error !== undefined || result.status !== 0) continue;
+    const count = Number(result.stdout.trim());
+    if (Number.isSafeInteger(count) && count > 0) return count;
+  }
+  return null;
 }
 
 function invokeSpawnCallback(

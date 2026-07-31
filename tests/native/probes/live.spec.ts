@@ -19,7 +19,8 @@ describe('explicit live probe', () => {
     expect(new Set(LIVE_CAPABILITY_PROBE_PLAN_V1.map(({ sideEffect }) => sideEffect))).toEqual(
       new Set(['agent', 'artifact_review', 'conversation', 'hook', 'mcp', 'model', 'sidecar']),
     );
-    expect(LIVE_CAPABILITY_PROBE_PLAN_V1.every(({ timeoutMs, maximumOutputBytes }) => timeoutMs > 0 && maximumOutputBytes > 0)).toBe(true);
+    expect(LIVE_CAPABILITY_PROBE_PLAN_V1.every(({ timeoutMs, maximumOutputBytes, maximumProcesses }) =>
+      timeoutMs > 0 && maximumOutputBytes > 0 && maximumProcesses > 0)).toBe(true);
     const coverage = completeLiveCapabilityProbeCoverage([], context);
     expect(new Set(coverage.map(({ capability }) => capability))).toEqual(
       new Set(LIVE_CAPABILITY_PROBE_PLAN_V1.map(({ capability }) => capability)),
@@ -48,10 +49,12 @@ describe('explicit live probe', () => {
   });
   it('requires explicit opt-in and preserves malformed/timeout as indeterminate', async () => {
     await expect(runExplicitLiveProbe({ live: false, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context })).rejects.toThrow(/OPT_IN/);
-    const malformed = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: 0, signal: null, stdout: 'deceptive', stderr: '', timedOut: false, outputOverflow: false }) });
+    const malformed = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: 0, signal: null, stdout: 'deceptive', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: false }) });
     expect(malformed.observations[0]).toMatchObject({ result: 'indeterminate', detailCode: 'LIVE_MALFORMED' });
-    const timeout = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, outputOverflow: false }) });
+    const timeout = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, outputOverflow: false, processCountOverflow: false }) });
     expect(timeout).toMatchObject({ cacheable: false, detailCode: 'LIVE_TIMEOUT' });
+    const processOverflow = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: 'ok', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: true }) });
+    expect(processOverflow).toMatchObject({ cacheable: false, detailCode: 'LIVE_PROCESS_OVERFLOW' });
   });
 
   it('allows the advertised model timeout plus bounded startup overhead', async () => {
@@ -67,7 +70,8 @@ describe('explicit live probe', () => {
       context,
       runner: async (request) => {
         observedTimeoutMs = request.timeoutMs;
-        return { status: 0, signal: null, stdout: 'ok\n', stderr: '', timedOut: false, outputOverflow: false };
+        expect(request.maximumProcesses).toBe(8);
+        return { status: 0, signal: null, stdout: 'ok\n', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: false };
       },
     });
     expect(observedTimeoutMs).toBe(LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS);
@@ -107,6 +111,7 @@ describe('explicit live probe', () => {
         stderr: '',
         timedOut: false,
         outputOverflow: false,
+        processCountOverflow: false,
       }),
     });
     expect(verified).toMatchObject({ cacheable: true, detailCode: 'LIVE_VERIFIED' });
@@ -124,6 +129,7 @@ describe('explicit live probe', () => {
           stderr: '',
           timedOut: false,
           outputOverflow: false,
+          processCountOverflow: false,
         }),
       });
       expect(rejected).toMatchObject({ cacheable: false, detailCode: 'LIVE_MALFORMED' });

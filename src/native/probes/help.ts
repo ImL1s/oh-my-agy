@@ -33,15 +33,19 @@ export async function probeDocumentedHelp(
     argv: ['--help'],
     timeoutMs: PASSIVE_PROBE_LIMITS_V1.timeoutMs,
     maximumOutputBytes: PASSIVE_PROBE_LIMITS_V1.maximumOutputBytes,
+    maximumProcesses: PASSIVE_PROBE_LIMITS_V1.maximumProcesses,
   });
-  if (outcome.timedOut || outcome.outputOverflow || outcome.error !== undefined || outcome.status !== 0) {
+  if (outcome.timedOut || outcome.outputOverflow || outcome.processCountOverflow
+    || outcome.error !== undefined || outcome.status !== 0) {
+    const detailCode = outcome.timedOut ? 'HELP_TIMEOUT' : outcome.outputOverflow ? 'HELP_OVERFLOW'
+      : outcome.processCountOverflow ? 'HELP_PROCESS_OVERFLOW' : 'HELP_UNAVAILABLE';
     return {
       observations: Object.keys(HELP_TOKENS).map((capability) => observation(
-        capability, 'indeterminate', context, outcome.timedOut ? 'HELP_TIMEOUT' : outcome.outputOverflow ? 'HELP_OVERFLOW' : 'HELP_UNAVAILABLE',
+        capability, 'indeterminate', context, detailCode,
         `${outcome.stderr}\n${outcome.error ?? ''}`,
       )),
       cacheable: false,
-      detailCode: outcome.timedOut ? 'HELP_TIMEOUT' : outcome.outputOverflow ? 'HELP_OVERFLOW' : 'HELP_UNAVAILABLE',
+      detailCode,
     };
   }
   const help = `${outcome.stdout}\n${outcome.stderr}`;

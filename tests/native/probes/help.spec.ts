@@ -8,7 +8,7 @@ const base: PassiveProbeContextV1 = { mode: 'passive', evaluationTimestamp: '202
 
 describe('documented help probe', () => {
   it('requires JSON on the output-format line and never promotes help above observed', async () => {
-    const result = await probeDocumentedHelp('/agy', { ...base, runner: async () => ({ status: 0, signal: null, stdout: '', stderr: '  --output-format stream-json\n  --json-schema FILE\n  -p PROMPT', timedOut: false, outputOverflow: false }) });
+    const result = await probeDocumentedHelp('/agy', { ...base, runner: async () => ({ status: 0, signal: null, stdout: '', stderr: '  --output-format stream-json\n  --json-schema FILE\n  -p PROMPT', timedOut: false, outputOverflow: false, processCountOverflow: false }) });
     expect(result.observations.find(({ capability }) => capability === 'headless.stream_json')).toMatchObject({ result: 'positive', tier: 'observed' });
     expect(result.observations.find(({ capability }) => capability === 'headless.json')).toMatchObject({ result: 'negative', tier: 'observed' });
 
@@ -19,6 +19,7 @@ describe('documented help probe', () => {
       stderr: '',
       timedOut: false,
       outputOverflow: false,
+      processCountOverflow: false,
     }) });
     expect(exact.observations.find(({ capability }) => capability === 'headless.json')).toMatchObject({
       result: 'positive',
@@ -29,8 +30,9 @@ describe('documented help probe', () => {
   it.each([
     ['timeout', { timedOut: true, outputOverflow: false }, 'HELP_TIMEOUT'],
     ['overflow', { timedOut: false, outputOverflow: true }, 'HELP_OVERFLOW'],
+    ['process overflow', { timedOut: false, outputOverflow: false, processCountOverflow: true }, 'HELP_PROCESS_OVERFLOW'],
   ])('keeps %s unknown', async (_label, flags, code) => {
-    const result = await probeDocumentedHelp('/agy', { ...base, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', ...flags }) });
+    const result = await probeDocumentedHelp('/agy', { ...base, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', processCountOverflow: false, ...flags }) });
     expect(result).toMatchObject({ cacheable: false, detailCode: code });
     expect(result.observations.every(({ result: outcome }) => outcome === 'indeterminate')).toBe(true);
   });

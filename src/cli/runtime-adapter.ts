@@ -1,4 +1,4 @@
-import { SpawnSyncReturns, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -24,6 +24,7 @@ import {
   LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
   LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS,
   BoundedProbeOutcomeV1,
+  PASSIVE_PROBE_LIMITS_V1,
   assemblePassiveHostCapabilityProfile,
   absentPluginIdentity,
   completeLiveCapabilityProbeCoverage,
@@ -33,6 +34,7 @@ import {
   parsePluginReadback,
   probeConfigObject,
   probeDocumentedHelp,
+  runBoundedProbe,
   runExplicitLiveProbe,
   unknownPluginIdentity,
 } from '../native/probes';
@@ -335,7 +337,7 @@ export async function inspectNativeCapabilities(
   live: boolean,
 ): Promise<NativeCapabilityInspectionResultV1> {
   const evaluationTimestamp = new Date().toISOString();
-  const first = readNativeHostSurface(context.agyCommand, context.environment);
+  const first = await readNativeHostSurface(context.agyCommand, context.environment);
   if (first === null) {
     return {
       kind: 'host_absent',
@@ -438,7 +440,7 @@ export async function inspectNativeCapabilities(
       ...completeLiveCapabilityProbeCoverage(observations, liveContext),
     );
   }
-  const second = readNativeHostSurface(hostIdentityBefore.realpath, context.environment);
+  const second = await readNativeHostSurface(hostIdentityBefore.realpath, context.environment);
   if (second === null) throw new Error('agy host disappeared during capability inspection');
   const hostIdentityAfter = inspectExecutableIdentity({
     executable: hostIdentityBefore.realpath,
@@ -585,50 +587,45 @@ function validateNativeOptions(command: NativeCliCommand, argv: readonly string[
   }
 }
 
-function readNativeHostSurface(
+async function readNativeHostSurface(
   executable: string,
   environment: NodeJS.ProcessEnv,
-): {
+): Promise<{
   version: string | null;
   versionOutput: string;
   helpOutput: string;
   helpOutcome: BoundedProbeOutcomeV1;
-} | null {
-  const options = { encoding: 'utf8' as const, timeout: 5_000, maxBuffer: 64 * 1024, env: environment, shell: false };
-  const version = spawnSync(executable, ['--version'], options);
-  const help = spawnSync(executable, ['--help'], options);
-  if (isExecutableMissing(version) || isExecutableMissing(help)) return null;
-  const versionOutcome = boundedOutcomeFromSpawnSync(version);
-  const helpOutcome = boundedOutcomeFromSpawnSync(help);
-  const versionOutput = `${version.stdout ?? ''}${version.stderr ?? ''}`;
-  const helpOutput = `${help.stdout ?? ''}${help.stderr ?? ''}`;
+} | null> {
+  const limits = {
+    timeoutMs: PASSIVE_PROBE_LIMITS_V1.timeoutMs,
+    maximumOutputBytes: PASSIVE_PROBE_LIMITS_V1.maximumOutputBytes,
+    maximumProcesses: PASSIVE_PROBE_LIMITS_V1.maximumProcesses,
+  } as const;
+  const versionOutcome = await runBoundedProbe({
+    command: executable,
+    argv: ['--version'],
+    environment,
+    ...limits,
+  });
+  const helpOutcome = await runBoundedProbe({
+    command: executable,
+    argv: ['--help'],
+    environment,
+    ...limits,
+  });
+  if (isExecutableMissing(versionOutcome) || isExecutableMissing(helpOutcome)) return null;
+  const versionOutput = `${versionOutcome.stdout}${versionOutcome.stderr}`;
+  const helpOutput = `${helpOutcome.stdout}${helpOutcome.stderr}`;
   const parsed = versionOutcome.status === 0 && !versionOutcome.timedOut
-    && !versionOutcome.outputOverflow && versionOutcome.error === undefined
+    && !versionOutcome.outputOverflow && !versionOutcome.processCountOverflow
+    && versionOutcome.error === undefined
     ? versionOutput.match(/(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)/u)?.[1] ?? null
     : null;
   return { version: parsed, versionOutput, helpOutput, helpOutcome };
 }
 
-function boundedOutcomeFromSpawnSync(result: SpawnSyncReturns<string>): BoundedProbeOutcomeV1 {
-  const stdout = result.stdout ?? '';
-  const stderr = result.stderr ?? '';
-  const code = (result.error as NodeJS.ErrnoException | undefined)?.code;
-  // spawnSync may silently return exactly maxBuffer bytes with status 0 after
-  // truncating a larger stream, so equality is conservatively non-cacheable.
-  const outputOverflow = code === 'ENOBUFS' || Buffer.byteLength(stdout) + Buffer.byteLength(stderr) >= 64 * 1024;
-  return {
-    status: result.status,
-    signal: result.signal,
-    stdout,
-    stderr,
-    timedOut: code === 'ETIMEDOUT',
-    outputOverflow,
-    ...(result.error === undefined ? {} : { error: result.error.message }),
-  };
-}
-
-function isExecutableMissing(result: SpawnSyncReturns<string>): boolean {
-  return (result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+function isExecutableMissing(result: Readonly<BoundedProbeOutcomeV1>): boolean {
+  return result.status === null && /\b(?:ENOENT|EACCES)\b/u.test(result.error ?? '');
 }
 
 function nativeStateRoot(configured: string | undefined, environment: NodeJS.ProcessEnv): string | null {
@@ -911,7 +908,7 @@ const PRODUCT_WORKFLOW_ROUTE_REFRESH_HEADROOM_MS = 5_000;
 export interface ProductWorkflowCapabilityRefreshInputV1 {
   readonly expected_realpath: string;
   readonly expected_binary_sha256: string;
-  readonly now: string;
+  readonly now: () => string;
   inspect(live: boolean): Promise<NativeCapabilityInspectionResultV1>;
 }
 
@@ -921,12 +918,12 @@ export async function refreshProductWorkflowCapabilityProfile(
 ): Promise<HostCapabilityProfileV1> {
   const passive = await input.inspect(false);
   const passiveProfile = exactProductWorkflowHostProfile(passive, input);
-  if (productWorkflowProfileCanRoute(passiveProfile, input.now)) return passiveProfile;
+  if (productWorkflowProfileCanRoute(passiveProfile, input.now())) return passiveProfile;
 
   const live = await input.inspect(true);
   const liveProfile = exactProductWorkflowHostProfile(live, input);
   if (live.kind !== 'profile' || live.liveSucceeded !== true
-    || !productWorkflowProfileCanRoute(liveProfile, input.now)) {
+    || !productWorkflowProfileCanRoute(liveProfile, input.now())) {
     throw new Error('E_CAPABILITY_UNPROVEN: workflow host profile could not be refreshed');
   }
   return liveProfile;
@@ -988,7 +985,7 @@ async function executeCanonicalProductWorkflow(
   const refreshCapabilityProfile = async () => refreshProductWorkflowCapabilityProfile({
     expected_realpath: agy.realpath,
     expected_binary_sha256: agy.sha256,
-    now: new Date().toISOString(),
+    now: () => new Date().toISOString(),
     inspect: async (live) => inspectNativeCapabilities(capabilityContext, live),
   });
   const initialProfile = await refreshCapabilityProfile();

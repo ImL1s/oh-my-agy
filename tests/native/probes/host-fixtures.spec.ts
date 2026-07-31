@@ -53,6 +53,7 @@ describe('version-independent host capability fixtures', () => {
         stderr: '',
         timedOut: false,
         outputOverflow: false,
+        processCountOverflow: false,
       }),
     });
     const profile = assembleHostCapabilityProfile({
