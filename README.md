@@ -253,9 +253,11 @@ cache to the exact `agy` and installed-plugin identities. Version strings are
 metadata, not feature gates. Timeouts, parse errors, stale evidence, or identity
 drift stay `unknown` and fail closed.
 
-`oma native probe --live` is an explicit opt-in; v1 runs one bounded public
-headless canary and records every other side-effect domain as explicitly
-unavailable/indeterminate.
+`oma native probe --live` is an explicit opt-in; v1 runs bounded public
+headless JSON/read-write/read-only canaries and records every other side-effect
+domain as explicitly unavailable/indeterminate. Live model canaries use a fixed
+32-process cumulative lineage budget for Antigravity's MCP startup fan-out;
+passive help/version inspection remains capped at 8.
 Ordinary capability display and `oma doctor --native` are passive. Offline
 fixtures, help text, docs, and green tests prove implementation behavior; this
 does not prove live host parity. See

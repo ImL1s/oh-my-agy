@@ -7,6 +7,7 @@ import {
 } from '../../../src/native/probes/live';
 import { LiveProbeContextV1 } from '../../../src/native/probes/types';
 import { absentPluginIdentity } from '../../../src/native/probes/identity';
+import { LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1 } from '../../../src/native/capability-profile';
 
 const context: LiveProbeContextV1 = {
   mode: 'live', liveOptIn: true, evaluationTimestamp: '2026-07-31T12:00:00.000Z', identityDigest: 'd'.repeat(64),
@@ -53,8 +54,36 @@ describe('explicit live probe', () => {
     expect(malformed.observations[0]).toMatchObject({ result: 'indeterminate', detailCode: 'LIVE_MALFORMED' });
     const timeout = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: '', stderr: '', timedOut: true, outputOverflow: false, processCountOverflow: false }) });
     expect(timeout).toMatchObject({ cacheable: false, detailCode: 'LIVE_TIMEOUT' });
-    const processOverflow = await runExplicitLiveProbe({ live: true, executable: '/agy', argv: [], capability: 'headless.print', expectedToken: 'ok', context, runner: async () => ({ status: null, signal: 'SIGKILL', stdout: 'ok', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: true }) });
-    expect(processOverflow).toMatchObject({ cacheable: false, detailCode: 'LIVE_PROCESS_OVERFLOW' });
+  });
+
+  it('keeps the live model lineage budget at 32 and rejects overflow', async () => {
+    expect.assertions(3);
+    expect(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1).toBe(32);
+    const processOverflow = await runExplicitLiveProbe({
+      live: true,
+      executable: '/agy',
+      argv: [],
+      capability: 'headless.print',
+      expectedToken: 'ok',
+      context,
+      runner: async (request) => {
+        expect(request.maximumProcesses).toBe(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1);
+        return {
+          status: null,
+          signal: 'SIGKILL',
+          stdout: 'ok',
+          stderr: '',
+          timedOut: false,
+          outputOverflow: false,
+          processCountOverflow: true,
+        };
+      },
+    });
+    expect(processOverflow).toMatchObject({
+      cacheable: false,
+      detailCode: 'LIVE_PROCESS_OVERFLOW',
+      observations: [expect.objectContaining({ result: 'indeterminate' })],
+    });
   });
 
   it('allows the advertised model timeout plus bounded startup overhead', async () => {
@@ -70,7 +99,7 @@ describe('explicit live probe', () => {
       context,
       runner: async (request) => {
         observedTimeoutMs = request.timeoutMs;
-        expect(request.maximumProcesses).toBe(8);
+        expect(request.maximumProcesses).toBe(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1);
         return { status: 0, signal: null, stdout: 'ok\n', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: false };
       },
     });
