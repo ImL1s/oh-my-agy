@@ -164,7 +164,10 @@ async function main() {
   if (shouldUseStructuredCli(args)) {
     const { createDefaultServices } = await import('../src/cli/services');
     const { runCli } = await import('../src/cli/application');
-    const code = await runCli(args, createDefaultServices({}));
+    const configuredAgy = process.env.OMA_AGY_BIN?.trim();
+    const code = await runCli(args, createDefaultServices(
+      configuredAgy ? { agyCommand: configuredAgy } : {},
+    ));
     process.exit(code);
   }
 

@@ -238,6 +238,24 @@ describe('HostCapabilityProfileV1', () => {
       capability: 'headless.print', provider: 'agy_headless', requestMode: 'headless', generation: 2,
       contextDigest: CONTEXT, selectedAt: NOW, ttlMs: 5_000, fallbackPreconditionsSatisfied: true,
     })).toThrow(/evidence expires/);
+
+    const afterSlowCanary = '2026-07-31T12:00:45.000Z';
+    const refreshedAfterSlowCanary = assembleHostCapabilityProfile({
+      evaluationTimestamp: afterSlowCanary,
+      hostIdentityBefore: host,
+      hostIdentityAfter: host,
+      pluginIdentityBefore: plugin,
+      pluginIdentityAfter: plugin,
+      observations: [
+        observation('positive'),
+        { ...observation('positive', 'live_probe'), observedAt: afterSlowCanary },
+      ],
+    });
+    expect(routeHostCapability(refreshedAfterSlowCanary, {
+      capability: 'headless.print', provider: 'agy_headless', requestMode: 'headless', generation: 3,
+      contextDigest: CONTEXT, selectedAt: afterSlowCanary, ttlMs: 35_000,
+      fallbackPreconditionsSatisfied: true,
+    })).toMatchObject({ selectedAt: afterSlowCanary, expiresAt: '2026-07-31T12:01:20.000Z' });
   });
 
   it('invalidates cache identity when policy version alone changes', () => {

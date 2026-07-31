@@ -2,7 +2,7 @@
  * 結構化 CLI e2e（Q1）：assert exit code + JSON kinds / help 文字，
  * 禁止 mock-theatre 字串當唯一功能證明。
  */
-import { runOma, runW5Probe } from './helper';
+import { MOCK_AGY_DIR, runOma, runW5Probe } from './helper';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -79,6 +79,31 @@ describe('Structured CLI e2e baseline', () => {
       expect(unknown.code).toBe(7);
     } finally {
       fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+  }, 30000);
+
+  test('HCP-E-002: structured native commands honor OMA_AGY_BIN', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-e2e-native-bin-'));
+    const configuredAgy = path.join(root, 'configured-agy');
+    try {
+      fs.copyFileSync(path.join(MOCK_AGY_DIR, 'agy'), configuredAgy);
+      fs.chmodSync(configuredAgy, 0o755);
+      const capabilities = await runOma(
+        ['native', 'capabilities', '--json'],
+        {
+          MOCK_AGY_PUBLIC_STATUS: 'true',
+          OMA_AGY_BIN: configuredAgy,
+          OMA_STATE_ROOT: path.join(root, 'state'),
+        },
+      );
+      expect(capabilities.code).toBe(0);
+      expect(capabilities.stderr).toBe('');
+      expect(JSON.parse(capabilities.stdout)).toMatchObject({
+        ok: true,
+        profile: { hostIdentity: { realpath: fs.realpathSync(configuredAgy) } },
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   }, 30000);
 

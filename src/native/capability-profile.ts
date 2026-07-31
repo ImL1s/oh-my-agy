@@ -454,7 +454,12 @@ export function routeHostCapability(
     throw violation('E_CAPABILITY_UNPROVEN', 'Host capability profile is stale for routing');
   }
   const expiresAtMs = selectedAtMs + request.ttlMs;
-  if (!assessment.observations.every(({ observedAt }) => {
+  const routeEvidence = assessment.observations.filter((observation) => {
+    const ceiling = policy.sourceCeilings[observation.source];
+    return observation.result === 'positive' && ceiling !== undefined
+      && tierRank(minTier(observation.tier, ceiling)) >= tierRank(policy.routeTier);
+  });
+  if (!routeEvidence.some(({ observedAt }) => {
     const observedAtMs = Date.parse(observedAt);
     return selectedAtMs >= observedAtMs && expiresAtMs - observedAtMs <= policy.freshnessMs;
   }) || expiresAtMs - Date.parse(profile.generatedAt) > policy.freshnessMs) {
