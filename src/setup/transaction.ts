@@ -71,8 +71,10 @@ interface PreviousInstallSnapshot {
 }
 
 /**
- * 安裝交易固定為 stage → host switch → exact readback；任何明確失敗或 fault
- * 都用安裝前的 immutable bytes 回滾，不以 `uninstall` 破壞既有版本。
+ * 安裝交易固定為 stage → snapshot → remove old → host switch → exact readback；
+ * Antigravity 的同名 install 是覆蓋寫入，因此切換前必須先移除 registry-owned
+ * 舊版本，避免殘留檔案污染 exact identity。任何明確失敗或 fault 都用安裝前的
+ * immutable bytes 回滾。
  */
 export class PluginSetupTransaction {
   private readonly packageRoot: string;
@@ -193,6 +195,22 @@ export class PluginSetupTransaction {
       steps.push('plugin validate');
 
       this.faultInjector('before_plugin_switch');
+      if (previous !== undefined) {
+        // disable/uninstall 之間任一步驟都可能已改變 host，從第一個 mutation 起即納入回滾。
+        switched = true;
+        const removed = await this.removeInstalledPlugin(
+          pluginName,
+          commands,
+          'upgrade',
+          previous.identity.installPath,
+        );
+        if (!removed.ok) {
+          return await this.failAfterSwitch(
+            transactionId, pluginName, staged.value, steps, commands, removed.error, previous,
+          );
+        }
+        steps.push('previous install removed');
+      }
       const installed = await this.runStep(
         ['plugin', 'install', staged.value.stagePath], commands,
       );
@@ -425,21 +443,9 @@ export class PluginSetupTransaction {
     previous: PreviousInstallSnapshot | undefined,
     commands: InstallCommandReceiptV1[],
   ): Promise<Result<void, RuntimeError>> {
-    if (previous === undefined) {
-      const disabled = await this.runStep(['plugin', 'disable', pluginName], commands);
-      if (disabled.code !== 0 && !/not (?:installed|enabled)|not found/i.test(
-        `${disabled.stdout}\n${disabled.stderr}`,
-      )) return err(commandError('rollback disable failed', disabled));
-      const removed = await this.runStep(['plugin', 'uninstall', pluginName], commands);
-      if (removed.code !== 0 && !/not installed|not found/i.test(`${removed.stdout}\n${removed.stderr}`)) {
-        return err(commandError('rollback uninstall failed', removed));
-      }
-      const listed = await this.runStep(['plugin', 'list'], commands);
-      if (listed.code !== 0 || parsePluginListLine(listed.stdout, pluginName) !== undefined) {
-        return err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'rollback could not prove new install absent'));
-      }
-      return ok(undefined);
-    }
+    const cleared = await this.removeInstalledPlugin(pluginName, commands, 'rollback');
+    if (!cleared.ok) return cleared;
+    if (previous === undefined) return ok(undefined);
     const validated = await this.runStep(['plugin', 'validate', previous.snapshotPath], commands);
     if (validated.code !== 0) return err(commandError('rollback snapshot validate failed', validated));
     const installed = await this.runStep(['plugin', 'install', previous.snapshotPath], commands);
@@ -452,6 +458,40 @@ export class PluginSetupTransaction {
     }
     const exact = await this.readback(previous.snapshotPath, pluginName, commands);
     return exact.ok ? ok(undefined) : exact;
+  }
+
+  private async removeInstalledPlugin(
+    pluginName: string,
+    commands: InstallCommandReceiptV1[],
+    context = 'upgrade',
+    installPath = path.join(this.configRoot, 'plugins', pluginName),
+  ): Promise<Result<void, RuntimeError>> {
+    const disabled = await this.runStep(['plugin', 'disable', pluginName], commands);
+    if (disabled.code !== 0 && !/already disabled|not (?:installed|enabled)|not found/i.test(
+      `${disabled.stdout}\n${disabled.stderr}`,
+    )) return err(commandError(`${context} disable failed`, disabled));
+
+    const removed = await this.runStep(['plugin', 'uninstall', pluginName], commands);
+    if (removed.code !== 0 && !/not installed|not found/i.test(
+      `${removed.stdout}\n${removed.stderr}`,
+    )) return err(commandError(`${context} uninstall failed`, removed));
+
+    const listed = await this.runStep(['plugin', 'list'], commands);
+    if (listed.code !== 0) return err(commandError(`${context} plugin list failed`, listed));
+    if (parsePluginListLine(listed.stdout, pluginName) !== undefined) {
+      return err(runtimeError(
+        'E_PLUGIN_NOT_ACTIVE',
+        `${context} could not prove prior install absent`,
+      ));
+    }
+    if (pathExistsIncludingBrokenSymlink(installPath)) {
+      return err(runtimeError(
+        'E_PLUGIN_NOT_ACTIVE',
+        `${context} left installed plugin bytes after registry removal`,
+        { installPath },
+      ));
+    }
+    return ok(undefined);
   }
 
   private recordPath(transactionId: string): string {
@@ -515,4 +555,13 @@ function isUncertainResult(result: PluginCommandResult): boolean {
   return /timeout|timed out|unknown|disconnect|connection|temporar/i.test(
     `${result.stdout}\n${result.stderr}`,
   );
+}
+
+function pathExistsIncludingBrokenSymlink(target: string): boolean {
+  try {
+    fs.lstatSync(target);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ENOENT';
+  }
 }

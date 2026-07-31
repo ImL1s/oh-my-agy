@@ -31,6 +31,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Fixed
 
+- Immutable Antigravity upgrades now remove the registry-owned previous plugin
+  before installing the staged candidate, preventing same-name overlay installs
+  from retaining stale files. Rollback clears partial candidate bytes before
+  restoring the exact snapshot.
 - Capability-authorized workflow routes now refresh exact host identity before
   every dependent batch, sample route time only after each probe finishes, and
   renew live evidence when a 30-second route receipt lacks five seconds of
