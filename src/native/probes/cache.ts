@@ -3,8 +3,12 @@ import * as path from 'path';
 import { ContractStateStore } from '../../runtime/state-store';
 import { acquireOwnerLock, releaseOwnerLock } from '../../runtime/lock';
 import {
+  CapabilityAssessmentV1,
+  CapabilityPolicyV1,
+  EVIDENCE_TIERS,
   HOST_CAPABILITY_POLICY_REGISTRY_V1,
   HostCapabilityProfileV1,
+  positiveCapabilityEvidenceExpiryMs,
   validateHostCapabilityProfile,
 } from '../capability-profile';
 
@@ -43,13 +47,25 @@ export class HostCapabilityProfileCacheV1 {
   async commit(profile: HostCapabilityProfileV1): Promise<'created' | 'updated' | 'unchanged' | 'conflict'> {
     validateHostCapabilityProfile(profile);
     if (!profile.cacheable || profile.identityStatus !== 'matched') return 'conflict';
-    const current = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
+    const exactCachePath = path.join(this.store.root, `${HOST_CAPABILITY_CACHE_KEY_V1}.json`);
+    let current = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
+    if (!current.ok && current.error.code === 'E_CORRUPT_STATE') {
+      const lock = await acquireOwnerLock(`${exactCachePath}.lock`, { timeoutMs: 5_000 });
+      if (!lock.ok) return 'conflict';
+      try {
+        current = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
+        if (!current.ok && current.error.code === 'E_CORRUPT_STATE') {
+          fs.rmSync(exactCachePath, { force: true });
+          current = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
+        }
+      } finally {
+        releaseOwnerLock(lock.value);
+      }
+      if (!current.ok && current.error.code === 'E_CORRUPT_STATE') return 'conflict';
+    }
     if (!current.ok) {
       if (current.error.code === 'E_FUTURE_SCHEMA') return 'conflict';
-      if (current.error.code === 'E_CORRUPT_STATE') {
-        const exactCachePath = path.join(this.store.root, `${HOST_CAPABILITY_CACHE_KEY_V1}.json`);
-        fs.rmSync(exactCachePath, { force: true });
-      }
+      if (current.error.code !== 'E_NOT_FOUND') return 'conflict';
       const created = await this.store.create(HOST_CAPABILITY_CACHE_KEY_V1, profile);
       return created.ok ? 'created' : 'conflict';
     }
@@ -98,10 +114,29 @@ export function isHostCapabilityProfileFresh(profileValue: unknown, now: string)
     || nowMs - generatedAtMs > profile.freshness.maximumAgeMs) return false;
   return profile.capabilities.every((assessment) => {
     const policy = HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === assessment.key);
-    return policy !== undefined && assessment.observations.every((observation) => {
-      const ageMs = nowMs - Date.parse(observation.observedAt);
-      return ageMs >= 0 && ageMs <= policy.freshnessMs;
-    });
+    return policy !== undefined && isCapabilityAssessmentProjectionFresh(assessment, policy, nowMs);
+  });
+}
+
+function isCapabilityAssessmentProjectionFresh(
+  assessment: Readonly<CapabilityAssessmentV1>,
+  policy: Readonly<CapabilityPolicyV1>,
+  nowMs: number,
+): boolean {
+  if (assessment.outcome === 'unknown') return true;
+  if (assessment.tier === null) return false;
+  if (assessment.outcome === 'supported') {
+    return positiveCapabilityEvidenceExpiryMs(assessment, policy, assessment.tier, nowMs) !== null;
+  }
+  const requiredTierRank = EVIDENCE_TIERS.indexOf(assessment.tier);
+  return assessment.observations.some((observation) => {
+    const ceiling = policy.sourceCeilings[observation.source];
+    const observedAtMs = Date.parse(observation.observedAt);
+    return observation.result === 'negative' && ceiling !== undefined
+      && Math.min(EVIDENCE_TIERS.indexOf(observation.tier), EVIDENCE_TIERS.indexOf(ceiling))
+        >= requiredTierRank
+      && Number.isFinite(observedAtMs) && nowMs >= observedAtMs
+      && nowMs - observedAtMs <= policy.freshnessMs;
   });
 }
 

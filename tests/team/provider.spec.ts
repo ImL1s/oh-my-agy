@@ -150,6 +150,47 @@ describe('profile-backed fail-closed worker provider selection', () => {
     expect(selected.ok && selected.value.provider).toBe('agy_headless');
   });
 
+  test('routes on fresh live authority after superseded help evidence expires', () => {
+    const liveObservedAt = '2026-07-31T12:00:45.000Z';
+    const base = assembleHostCapabilityProfile({
+      evaluationTimestamp: liveObservedAt,
+      hostIdentityBefore: host,
+      hostIdentityAfter: host,
+      pluginIdentityBefore: plugin,
+      pluginIdentityAfter: plugin,
+      observations: [],
+    });
+    const value = assembleHostCapabilityProfile({
+      evaluationTimestamp: liveObservedAt,
+      hostIdentityBefore: host,
+      hostIdentityAfter: host,
+      pluginIdentityBefore: plugin,
+      pluginIdentityAfter: plugin,
+      observations: [
+        {
+          capability: 'headless.print', source: 'help', tier: 'observed', result: 'positive',
+          observedAt: selectedAt, identityDigest: base.identityDigest,
+          detailCode: 'HELP_OBSERVED', diagnostic: null,
+        },
+        {
+          capability: 'headless.print', source: 'live_probe', tier: 'verified', result: 'positive',
+          observedAt: liveObservedAt, identityDigest: base.identityDigest,
+          detailCode: 'LIVE_VERIFIED', diagnostic: null,
+        },
+      ],
+    });
+    const routed = routeTeamWorkerProvider({
+      profile: value,
+      launchMode: 'headless',
+      now: '2026-07-31T12:01:05.000Z',
+      generation: 3,
+      contextDigest,
+      resolvedExecutable: host.realpath,
+    });
+    expect(routed.ok && routed.value.provider).toBe('agy_headless');
+    if (routed.ok) expect(routed.value.expiresAt).toBe('2026-07-31T12:01:35.000Z');
+  });
+
   test('routes a profile bound to a native Windows executable path', () => {
     const windowsHost: HostIdentityV1 = {
       ...host,

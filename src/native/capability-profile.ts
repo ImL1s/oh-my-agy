@@ -543,13 +543,33 @@ function routeAuthorizingEvidenceCovers(
   selectedAtMs: number,
   expiresAtMs: number,
 ): boolean {
-  return assessment.observations.some((observation) => {
+  const evidenceExpiryMs = positiveCapabilityEvidenceExpiryMs(
+    assessment,
+    policy,
+    policy.routeTier,
+    selectedAtMs,
+  );
+  return evidenceExpiryMs !== null && evidenceExpiryMs >= expiresAtMs;
+}
+
+export function positiveCapabilityEvidenceExpiryMs(
+  assessment: Readonly<CapabilityAssessmentV1>,
+  policy: Readonly<CapabilityPolicyV1>,
+  requiredTier: EvidenceTier,
+  selectedAtMs: number,
+): number | null {
+  if (assessment.key !== policy.key || !Number.isFinite(selectedAtMs)) return null;
+  const expiries = assessment.observations.flatMap((observation) => {
     const ceiling = policy.sourceCeilings[observation.source];
     if (observation.result !== 'positive' || ceiling === undefined
-      || tierRank(minTier(observation.tier, ceiling)) < tierRank(policy.routeTier)) return false;
+      || tierRank(minTier(observation.tier, ceiling)) < tierRank(requiredTier)) return [];
     const observedAtMs = Date.parse(observation.observedAt);
-    return selectedAtMs >= observedAtMs && expiresAtMs - observedAtMs <= policy.freshnessMs;
+    return Number.isFinite(observedAtMs) && selectedAtMs >= observedAtMs
+      && selectedAtMs - observedAtMs <= policy.freshnessMs
+      ? [observedAtMs + policy.freshnessMs]
+      : [];
   });
+  return expiries.length === 0 ? null : Math.max(...expiries);
 }
 
 export function issueHostRouteReceipt(

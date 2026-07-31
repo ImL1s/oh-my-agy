@@ -7,8 +7,10 @@ import {
   HOST_CAPABILITY_CACHE_KEY_V1,
   HOST_CAPABILITY_CACHE_STORE_V1,
   HostCapabilityProfileCacheV1,
+  isHostCapabilityProfileFresh,
 } from '../../../src/native/probes/cache';
 import { absentPluginIdentity } from '../../../src/native/probes/identity';
+import { acquireOwnerLock, releaseOwnerLock } from '../../../src/runtime/lock';
 
 const host: HostIdentityV1 = { realpath: '/agy', binarySha256: 'a'.repeat(64), version: '1.0.0', versionOutputSha256: 'b'.repeat(64), helpOutputSha256: 'c'.repeat(64), platform: 'darwin', arch: 'arm64' };
 const FRESH_NOW = '2026-07-31T12:00:01.000Z';
@@ -37,6 +39,41 @@ function makeLiveProfile(identity: HostIdentityV1, evaluationTimestamp: string) 
       detailCode: 'LIVE_VERIFIED',
       diagnostic: null,
     }],
+  });
+}
+
+function makeSlowLiveProfile(identity: HostIdentityV1) {
+  const evaluationTimestamp = '2026-07-31T12:00:45.000Z';
+  const base = makeProfile(identity, evaluationTimestamp);
+  const plugin = absentPluginIdentity();
+  return assembleHostCapabilityProfile({
+    evaluationTimestamp,
+    hostIdentityBefore: identity,
+    hostIdentityAfter: identity,
+    pluginIdentityBefore: plugin,
+    pluginIdentityAfter: plugin,
+    observations: [
+      {
+        capability: 'headless.print',
+        source: 'help',
+        tier: 'observed',
+        result: 'positive',
+        observedAt: '2026-07-31T12:00:00.000Z',
+        identityDigest: base.identityDigest,
+        detailCode: 'HELP_OBSERVED',
+        diagnostic: null,
+      },
+      {
+        capability: 'headless.print',
+        source: 'live_probe',
+        tier: 'verified',
+        result: 'positive',
+        observedAt: evaluationTimestamp,
+        identityDigest: base.identityDigest,
+        detailCode: 'LIVE_VERIFIED',
+        diagnostic: null,
+      },
+    ],
   });
 }
 
@@ -70,6 +107,39 @@ describe('host capability cache', () => {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
+  it('re-reads corrupt state under the cache owner lock before deleting it', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-cap-cache-corrupt-race-'));
+    const target = path.join(root, 'native', 'host-capability-profile-v1.json');
+    const lock = await acquireOwnerLock(`${target}.lock`, { timeoutMs: 5_000 });
+    expect(lock.ok).toBe(true);
+    let released = false;
+    try {
+      if (!lock.ok) return;
+      const cache = new HostCapabilityProfileCacheV1(root);
+      const verified = makeLiveProfile(host, '2026-07-31T12:00:01.000Z');
+      const passive = makeProfile(host, '2026-07-31T12:00:02.000Z');
+      fs.writeFileSync(target, '{malformed', { mode: 0o600 });
+
+      const pending = cache.commit(passive);
+      await Promise.resolve();
+      fs.writeFileSync(target, canonicalBytesV1({
+        store_kind: HOST_CAPABILITY_CACHE_STORE_V1,
+        schema_version: 1,
+        revision: 7,
+        value: verified,
+      }), { mode: 0o600 });
+      expect(releaseOwnerLock(lock.value).ok).toBe(true);
+      released = true;
+
+      expect(await pending).toBe('unchanged');
+      expect(cache.read(verified.cacheKey, '2026-07-31T12:00:03.000Z')?.profileDigest)
+        .toBe(verified.profileDigest);
+    } finally {
+      if (lock.ok && !released) releaseOwnerLock(lock.value);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not let a passive commit downgrade a fresh verified profile', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-cap-cache-authority-'));
     try {
@@ -81,6 +151,24 @@ describe('host capability cache', () => {
       expect(await cache.commit(passiveFinishingLater)).toBe('unchanged');
       expect(cache.read(live.cacheKey, '2026-07-31T12:00:03.000Z')?.profileDigest)
         .toBe(live.profileDigest);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('keeps fresh route authority after superseded help evidence expires', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-cap-cache-route-fresh-'));
+    try {
+      const cache = new HostCapabilityProfileCacheV1(root);
+      const profile = makeSlowLiveProfile(host);
+      expect(await cache.commit(profile)).toBe('created');
+
+      expect(isHostCapabilityProfileFresh(profile, '2026-07-31T12:01:05.000Z')).toBe(true);
+      expect(cache.read(profile.cacheKey, '2026-07-31T12:01:05.000Z')?.profileDigest)
+        .toBe(profile.profileDigest);
+      expect(await cache.commit(makeProfile(host, '2026-07-31T12:01:05.000Z')))
+        .toBe('unchanged');
+      expect(cache.read(profile.cacheKey, '2026-07-31T12:01:05.000Z')?.profileDigest)
+        .toBe(profile.profileDigest);
+      expect(isHostCapabilityProfileFresh(profile, '2026-07-31T12:01:45.001Z')).toBe(false);
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 

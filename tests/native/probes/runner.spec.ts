@@ -13,7 +13,10 @@ describe('bounded probe runner', () => {
   });
 
   it('terminates a timed-out process group', async () => {
-    const outcome = await runBoundedProbe({ command: process.execPath, argv: ['-e', 'setInterval(() => {}, 1000)'], timeoutMs: 20, maximumOutputBytes: 64, maximumProcesses: 8 });
+    const outcome = await runBoundedProbe(
+      { command: process.execPath, argv: ['-e', 'setInterval(() => {}, 1000)'], timeoutMs: 100, maximumOutputBytes: 64, maximumProcesses: 8 },
+      { countProcesses: async () => 1 },
+    );
     expect(outcome).toMatchObject({ timedOut: true, signal: 'SIGKILL' });
   });
 

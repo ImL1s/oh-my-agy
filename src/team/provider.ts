@@ -10,6 +10,7 @@ import {
   TEAM_PROVIDER_POLICY_V1,
   issueHostRouteReceipt,
   isAbsoluteHostPath,
+  positiveCapabilityEvidenceExpiryMs,
   routeHostCapability,
   validateHostCapabilityProfile,
   validateHostRouteCandidate,
@@ -302,9 +303,16 @@ function remainingRouteReceiptTtlMs(
   const nowMs = Date.parse(now);
   if (policy === undefined || assessment === undefined || assessment.observations.length === 0
     || !Number.isFinite(nowMs)) return null;
+  const routeEvidenceExpiryMs = positiveCapabilityEvidenceExpiryMs(
+    assessment,
+    policy,
+    policy.routeTier,
+    nowMs,
+  );
+  if (routeEvidenceExpiryMs === null) return null;
   const evidenceExpiryMs = Math.min(
     Date.parse(profile.generatedAt) + policy.freshnessMs,
-    ...assessment.observations.map(({ observedAt }) => Date.parse(observedAt) + policy.freshnessMs),
+    routeEvidenceExpiryMs,
   );
   const ttlMs = Math.min(TEAM_ROUTE_RECEIPT_MAX_TTL_MS, evidenceExpiryMs - nowMs);
   return Number.isSafeInteger(ttlMs) && ttlMs >= TEAM_ROUTE_RECEIPT_MIN_TTL_MS ? ttlMs : null;
@@ -366,10 +374,12 @@ function capabilityProvenAtTier(
     && EVIDENCE_TIERS.indexOf(assessment.tier) >= EVIDENCE_TIERS.indexOf(requiredTier)
     && ageMs >= 0
     && ageMs <= policy.freshnessMs
-    && assessment.observations.every(({ observedAt }) => {
-      const observationAgeMs = Date.parse(now) - Date.parse(observedAt);
-      return observationAgeMs >= 0 && observationAgeMs <= policy.freshnessMs;
-    });
+    && positiveCapabilityEvidenceExpiryMs(
+      assessment,
+      policy,
+      requiredTier,
+      Date.parse(now),
+    ) !== null;
 }
 
 function capabilityError(message: string, cause: unknown): RuntimeError {

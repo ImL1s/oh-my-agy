@@ -78,11 +78,14 @@ Profiles bind:
 
 Any identity change invalidates the cache. Identity sampled before and after a
 probe must match; otherwise the profile is non-cacheable and routing fails
-closed. Cache reads additionally enforce each capability policy's freshness
-window; a structurally valid but stale profile is not returned. Passive
-commands may write only OMA's owner-safe capability cache, not host or user
-configuration. A failed opt-in live probe invalidates an older cached success
-for the same identity instead of leaving stale execution authority behind.
+closed. Cache reads additionally enforce each affirmative capability
+assessment's effective evidence and policy freshness window. Superseded
+lower-tier observations do not expire a newer route-authorizing proof, while a
+structurally valid profile whose effective evidence is stale is not returned.
+Passive commands may write only OMA's owner-safe capability cache, not host or
+user configuration. A failed opt-in live probe invalidates an older cached
+success for the same identity instead of leaving stale execution authority
+behind.
 
 ## Routing contract
 
