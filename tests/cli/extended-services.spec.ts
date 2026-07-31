@@ -261,6 +261,7 @@ exit 0
       cwd,
       stateRoot: path.join(cwd, 'state'),
       agyCommand: executable,
+      pluginAdapter: { run: async (argv) => ({ argv: [...argv], code: 1, stdout: '', stderr: 'registry unavailable' }) },
       environment: { PATH: cwd, HOME: cwd },
       stdout: (value) => { stdout += value; },
       stderr: (value) => { stderr += value; },
