@@ -90,9 +90,10 @@ an emulator that merely reproduces version/help output is insufficient.
   contained configuration. One identity-bound `HostCapabilityProfile` records
   tri-state outcomes, evidence tiers/sources, fallbacks, and route receipts;
   version strings remain metadata rather than feature gates. Passive host
-  inspection keeps an 8-process ceiling; model-bearing canaries and production
-  workflow workers remain independently bounded, while live model canaries use
-  a 32-process cumulative lineage ceiling for bounded MCP startup fan-out.
+  inspection keeps an 8-process cumulative lineage ceiling; model-bearing
+  canaries and production workflow workers remain independently bounded, while
+  live model canaries use a 32-process cumulative lineage ceiling for bounded
+  MCP startup fan-out.
 - `src/notify/*` provides owner-fenced terminal, tmux, and allowlisted HTTPS
   notifications; all are disabled until configured.
 

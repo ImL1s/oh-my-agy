@@ -3,6 +3,7 @@ import { canonicalBytesV1 } from '../../src/contracts/state-schemas';
 import {
   HOST_CAPABILITY_POLICY_VERSION_V1,
   HOST_CAPABILITY_POLICY_REGISTRY_V1,
+  LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1,
   TEAM_PROVIDER_POLICY_V1,
   HostCapabilityProfileV1,
   HostIdentityV1,
@@ -82,6 +83,11 @@ describe('HostCapabilityProfileV1', () => {
     expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'headless.print')?.limits.timeoutMs).toBe(60_000);
     expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'headless.json')?.limits.timeoutMs).toBe(60_000);
     expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'hook.stop')?.limits.timeoutMs).toBe(5_000);
+    for (const policy of HOST_CAPABILITY_POLICY_REGISTRY_V1) {
+      expect(policy.limits.maximumProcesses).toBe(
+        policy.sideEffect === 'model' ? LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1 : 8,
+      );
+    }
     expect(TEAM_PROVIDER_POLICY_V1.antigravity_native).toMatchObject({ adapterImplemented: false });
     expect(TEAM_PROVIDER_POLICY_V1.agy_headless).not.toHaveProperty('oneOf');
   });

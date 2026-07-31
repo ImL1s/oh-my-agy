@@ -204,7 +204,7 @@ export const HOST_CAPABILITY_POLICY_REGISTRY_V1: readonly CapabilityPolicyV1[] =
     evidencePredicates: EVIDENCE_PREDICATES,
     aggregation: 'indeterminate_or_contradiction_unknown' as const,
     freshnessMs: sideEffect === 'passive-cache-only' ? 300_000 : 60_000,
-    limits: key === 'headless.print' || key === 'headless.json'
+    limits: sideEffect === 'model'
       ? LIVE_MODEL_CANARY_LIMITS
       : DEFAULT_LIMITS,
   })).sort((left, right) => compareUtf8(left.key, right.key)),

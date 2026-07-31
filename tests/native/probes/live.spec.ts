@@ -57,6 +57,7 @@ describe('explicit live probe', () => {
   });
 
   it('keeps the live model lineage budget at 32 and rejects overflow', async () => {
+    expect.assertions(3);
     expect(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1).toBe(32);
     const processOverflow = await runExplicitLiveProbe({
       live: true,
