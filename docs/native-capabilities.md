@@ -22,7 +22,12 @@ oma doctor --native
 - `native probe --live` is the only command that opts into a live probe. The v1
   executor runs one bounded public headless print canary, using structured JSON
   when the passive profile advertises it and exact text otherwise. It parses
-  only documented terminal fields and retains no response text. Every other
+  only documented terminal fields and retains no response text. The policy's
+  wall-clock, combined-output, and process-count ceilings are all enforced;
+  process-tree overflow or an unavailable process counter leaves evidence
+  indeterminate. Timeout/overflow termination includes the Windows descendant
+  tree, and a fixed force-settle backstop prevents inherited pipes from hanging
+  beyond the outer bound. Every other
   side-effect domain receives an explicit `live_probe`/`indeterminate`
   observation with a domain-specific unavailable code until a bounded public
   executor exists. It never inspects private sidecar/brain internals.
@@ -101,6 +106,13 @@ strings in the worktree descriptor are not authority by themselves.
 Team and production-workflow execution require a fresh cached live profile and
 a valid route receipt. Passive observations can describe capabilities, but they
 cannot authorize those product execution paths.
+
+Production workflows re-read the exact executable identity before every ready
+batch. A profile is reused only while it can cover the 30-second route receipt
+plus five seconds of headroom; otherwise OMA performs a bounded live refresh.
+The route timestamp is sampled after that inspection completes, so newly
+generated evidence is never rejected as future-dated merely because the probe
+was slow.
 
 The public Team CLI therefore defaults `team start` to `--worker-mode
 headless`. The interactive tmux route is explicit and fails closed unless the

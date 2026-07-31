@@ -48,6 +48,9 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
 - Version strings are metadata and cache identity, not feature gates.
 - Timeout, parse failure, contradictory/stale evidence, or identity drift is
   `unknown`; it is neither unsupported nor success.
+- Native probe policy enforces wall-clock, combined-output, and process-count
+  limits. A process-tree overflow or unavailable counter cannot yield verified
+  evidence, and timeout cleanup has a bounded force-settle backstop.
 - `supported: true` is a compatibility projection. Routing additionally
   requires the policy's minimum tier and a valid identity-bound candidate or
   receipt.

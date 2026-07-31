@@ -6,6 +6,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-31
+
 ### Added
 
 - **Identity-bound Antigravity capability negotiation:** `oma native
@@ -26,6 +28,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   list; subject/description persisted on create-task. No leader/actor proof
   (documented). P1 backlog: broadcast, events, shutdown ack, cleanup, monitor
   snapshots, etc.
+
+### Fixed
+
+- Capability-authorized workflow routes now refresh exact host identity before
+  every dependent batch, sample route time only after each probe finishes, and
+  renew live evidence when a 30-second route receipt lacks five seconds of
+  headroom.
+- Bounded native probes now enforce the policy process-count ceiling as well as
+  combined output and wall-clock limits. Timeout/overflow termination covers
+  the whole Windows process tree, and a fixed force-settle backstop prevents a
+  detached descendant from holding inherited pipes open indefinitely.
+- Windows host identity lookup resolves `.exe` commands from a semicolon PATH
+  and does not apply POSIX execute/ownership mode bits. Host, plugin, and route
+  paths use the profile platform's absolute-path rules.
 
 ## [0.4.1] — 2026-07-24
 
@@ -190,6 +206,9 @@ Antigravity 1.1.5 host for this release.
 
 ---
 
+[0.5.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.0
+[0.4.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.1
+[0.4.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.3.0
 [0.2.3]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.3
 [0.2.2]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.2.2

@@ -40,6 +40,7 @@ OMA 將產品擁有的能力與對 Antigravity 的觀測分開。Host 觀測改�
 - 已設定檔案不等於 fresh-session discovery。
 - 版本字串只是 metadata 與 cache identity，不是 feature gate。
 - Timeout、parse failure、矛盾/過期證據或 identity drift 都是 `unknown`，既不是 unsupported 也不是 success。
+- Native probe policy 會實際限制牆鐘時間、合併輸出與程序樹數量。程序數超限或無法量測時不能產生 verified 證據，timeout cleanup 另有有界 force-settle backstop。
 - `supported: true` 只是 compatibility projection；routing 還必須滿足 policy 最低 tier，並持有有效、綁定 identity 的 candidate/receipt。
 - UI 標籤與私有檔案不是公開能力證據。
 - 可選 adapter 保持 disabled 或 unclaimed，直到明確設定。
