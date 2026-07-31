@@ -48,8 +48,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   and share the probe deadline. POSIX probes bind a pre-spawn PID baseline to
   a persistent parent-tree/process-group lineage keyed by PID plus process start
   marker, so observed detached descendants remain counted after the root exits
-  without charging unrelated, reused, or zombie PIDs. A root that exits before
-  its first observation still fails closed against the baseline delta.
+  without charging unrelated, reused, or zombie PIDs. The first snapshot also
+  retains new PID-1-reparented baseline-delta candidates even while the root is
+  alive, so rapid double-forks cannot escape before lineage is established;
+  later unrelated processes are not adopted.
   Timeout/overflow termination covers
   the whole Windows process tree, and a fixed force-settle backstop
   prevents a detached descendant from holding inherited pipes open indefinitely.

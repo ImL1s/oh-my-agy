@@ -54,8 +54,11 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
   probes bind a pre-spawn PID/start-marker baseline to a persistent
   parent-tree/process-group lineage. Observed detached descendants remain
   counted after the root exits, while unrelated, reused, and zombie PIDs are
-  excluded. A root that exits before its first observation fails closed against
-  the baseline delta. Timeout cleanup has a bounded force-settle backstop.
+  excluded. The first snapshot conservatively retains new PID-1-reparented
+  baseline-delta candidates even if the root remains alive, so a rapid
+  double-fork cannot escape before lineage is established; later snapshots do
+  not adopt unrelated new processes. Timeout cleanup has a bounded force-settle
+  backstop.
 - `supported: true` is a compatibility projection. Routing additionally
   requires the policy's minimum tier and a valid identity-bound candidate or
   receipt.
