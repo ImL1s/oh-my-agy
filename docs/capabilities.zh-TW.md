@@ -40,7 +40,7 @@ OMA 將產品擁有的能力與對 Antigravity 的觀測分開。Host 觀測改�
 - 已設定檔案不等於 fresh-session discovery。
 - 版本字串只是 metadata 與 cache identity，不是 feature gate。
 - Timeout、parse failure、矛盾/過期證據或 identity drift 都是 `unknown`，既不是 unsupported 也不是 success。
-- Native probe policy 會實際限制牆鐘時間、合併輸出與程序樹數量。程序樹量測採非阻塞且共用剩餘 deadline；POSIX probe 會在 spawn 前綁定 PID baseline，再以 parent-tree/process-group snapshot 保守計入 baseline 後仍存活的所有新 PID，因此 detached descendant 不會在 root 退出後消失。程序數超限或無法量測時不能產生 verified 證據，timeout cleanup 另有有界 force-settle backstop。
+- Native probe policy 會實際限制牆鐘時間、合併輸出與程序樹數量。程序樹量測採非阻塞且共用剩餘 deadline；POSIX probe 會在 spawn 前綁定 PID baseline，再跨 snapshot 保留由 parent-tree/process-group 關係證實的 lineage。已觀測的 detached descendant 在 root 退出後仍會計數，已建立 lineage 後則不會誤計無關的新程序；若 root 在首次觀測前即退出，baseline delta 會 fail closed。程序數超限或無法量測時不能產生 verified 證據，timeout cleanup 另有有界 force-settle backstop。
 - `supported: true` 只是 compatibility projection；routing 還必須滿足 policy 最低 tier，並持有有效、綁定 identity 的 candidate/receipt。
 - UI 標籤與私有檔案不是公開能力證據。
 - 可選 adapter 保持 disabled 或 unclaimed，直到明確設定。

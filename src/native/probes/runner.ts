@@ -1,5 +1,9 @@
 import { spawn } from 'child_process';
-import { capturePosixProcessBaselineAsync, countProcessGroupAsync } from '../../runtime/process';
+import {
+  capturePosixProcessBaselineAsync,
+  countProcessGroupAsync,
+  createPosixProcessLineageTracker,
+} from '../../runtime/process';
 import { BoundedProbeOutcomeV1, BoundedProbeRequestV1 } from './types';
 
 const PROCESS_COUNT_INTERVAL_MS = 100;
@@ -30,10 +34,13 @@ export async function runBoundedProbe(
   if (Date.now() >= deadlineAt) {
     return { ...failedProcessCountOutcome(), timedOut: true };
   }
+  const processLineage = processBaseline === undefined || processBaseline === null
+    ? undefined
+    : createPosixProcessLineageTracker(processBaseline);
   return new Promise((resolve) => {
     const detached = process.platform !== 'win32';
     const countProcesses = dependencies.countProcesses ?? ((rootPid, stopAfter, timeoutMs) =>
-      countProcessGroupAsync(rootPid, stopAfter, timeoutMs, processBaseline ?? undefined));
+      countProcessGroupAsync(rootPid, stopAfter, timeoutMs, processLineage));
     const child = spawn(request.command, [...request.argv], {
       cwd: request.cwd,
       env: request.environment ?? process.env,

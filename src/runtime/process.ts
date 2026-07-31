@@ -395,7 +395,7 @@ function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_INTEGER)
     || !Number.isSafeInteger(stopAfter) || stopAfter <= 0) return null;
   if (process.platform === 'win32') return null;
   try {
-    const listed = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid='], {
+    const listed = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat='], {
       encoding: 'utf8',
       timeout: 1_000,
       maxBuffer: 64 * 1024,
@@ -415,7 +415,7 @@ export async function countProcessGroupAsync(
   rootPid: number,
   stopAfter = Number.MAX_SAFE_INTEGER,
   timeoutMs = 1_000,
-  baselinePids?: ReadonlySet<number>,
+  lineage?: PosixProcessLineageTracker,
 ): Promise<number | null> {
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0
     || !Number.isSafeInteger(stopAfter) || stopAfter <= 0
@@ -426,11 +426,11 @@ export async function countProcessGroupAsync(
   }
   const listed = await runProcessInspection(
     'ps',
-    ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid='],
+    ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid=', '-o', 'stat='],
     deadlineAt,
   );
   if (listed === null || listed.status !== 0) return null;
-  return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter, baselinePids, listed.pid);
+  return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter, lineage, listed.pid);
 }
 
 /** 在 probe spawn 前非阻塞擷取 POSIX PID baseline，供 root 退出後保守追蹤新程序。 */
@@ -449,34 +449,58 @@ export async function capturePosixProcessBaselineAsync(timeoutMs = 1_000): Promi
   return pids;
 }
 
+export interface PosixProcessLineageTracker {
+  readonly baselinePids: ReadonlySet<number>;
+  readonly observedPids: Set<number>;
+  rootObserved: boolean;
+}
+
+/** 跨 snapshot 保留已證實的 probe lineage，避免把無關的新 PID 誤算成子程序。 */
+export function createPosixProcessLineageTracker(
+  baselinePids: ReadonlySet<number>,
+): PosixProcessLineageTracker {
+  return {
+    baselinePids,
+    observedPids: new Set<number>(),
+    rootObserved: false,
+  };
+}
+
 interface PosixProcessSnapshotRow {
   pid: number;
   ppid: number;
   pgid: number;
+  stat: string;
 }
 
 /**
  * 以單一 ps snapshot 同時計算 parent tree 與 root process group。
- * 有 pre-spawn baseline 時，root 已退出後仍保守計入所有新 PID，避免 setsid 子孫被 reparent 後消失。
- * 無 baseline 的 legacy caller 若失去 root，只能在已觀察 group 超限時下結論，否則回 null。
+ * Stateful lineage 只保留由 parent/group 關係證實的 PID；root 在首次 snapshot 前退出時，
+ * 才以 baseline delta fail closed，避免正常監測期間把其他測試或 host 程序誤算進來。
  */
 function countPosixProbeSnapshot(
   output: string,
   rootPid: number,
   stopAfter: number,
-  baselinePids?: ReadonlySet<number>,
+  lineage?: PosixProcessLineageTracker,
   inspectorPid?: number | null,
 ): number | null {
   const rows: PosixProcessSnapshotRow[] = [];
   for (const line of output.split('\n')) {
     if (line.trim() === '') continue;
-    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/u.exec(line);
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s*$/u.exec(line);
     if (match === null) return null;
-    const row = { pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]) };
+    const row = {
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      pgid: Number(match[3]),
+      stat: match[4],
+    };
     if (!Number.isSafeInteger(row.pid) || row.pid <= 0
       || !Number.isSafeInteger(row.ppid) || row.ppid < 0
-      || !Number.isSafeInteger(row.pgid) || row.pgid < 0) return null;
-    rows.push(row);
+      || !Number.isSafeInteger(row.pgid) || row.pgid < 0
+      || row.stat.length === 0) return null;
+    if (!row.stat.startsWith('Z')) rows.push(row);
   }
   const eligibleRows = inspectorPid === undefined || inspectorPid === null
     ? rows
@@ -484,18 +508,24 @@ function countPosixProbeSnapshot(
   const root = eligibleRows.find(({ pid }) => pid === rootPid);
   const rootGroup = eligibleRows.filter(({ pid, pgid }) => pid !== rootPid && pgid === rootPid);
   if (root === undefined) {
-    if (baselinePids === undefined) {
+    if (lineage === undefined) {
       const historicalCount = 1 + rootGroup.length;
       return historicalCount > stopAfter ? historicalCount : null;
     }
-    const possiblyOwned = new Set<number>([rootPid]);
-    for (const row of eligibleRows) {
-      if (row.pgid === rootPid || !baselinePids.has(row.pid)) possiblyOwned.add(row.pid);
-      if (possiblyOwned.size > stopAfter) return possiblyOwned.size;
+    if (!lineage.rootObserved) {
+      const possiblyOwned = new Set<number>([rootPid]);
+      for (const row of eligibleRows) {
+        if (row.pgid === rootPid || !lineage.baselinePids.has(row.pid)) possiblyOwned.add(row.pid);
+        if (possiblyOwned.size > stopAfter) return possiblyOwned.size;
+      }
+      return possiblyOwned.size;
     }
-    return possiblyOwned.size;
   }
-  if (root.pgid !== rootPid) return null;
+  if (root !== undefined) {
+    if (root.pgid !== rootPid) return null;
+    lineage?.observedPids.add(rootPid);
+    if (lineage !== undefined) lineage.rootObserved = true;
+  }
 
   const children = new Map<number, PosixProcessSnapshotRow[]>();
   for (const row of eligibleRows) {
@@ -504,17 +534,24 @@ function countPosixProbeSnapshot(
     children.set(row.ppid, entries);
   }
   const seen = new Set<number>();
-  const newlyStarted = baselinePids === undefined
+  const previouslyObserved = lineage === undefined
     ? []
-    : eligibleRows.filter(({ pid }) => pid !== rootPid && !baselinePids.has(pid));
-  const queue = [root, ...rootGroup, ...newlyStarted];
+    : eligibleRows.filter(({ pid }) => lineage.observedPids.has(pid));
+  const queue = [
+    ...(root === undefined ? [] : [root]),
+    ...rootGroup,
+    ...previouslyObserved,
+  ];
   while (queue.length > 0) {
     const row = queue.pop()!;
     if (seen.has(row.pid)) continue;
     seen.add(row.pid);
-    if (seen.size > stopAfter) return seen.size;
+    lineage?.observedPids.add(row.pid);
+    const ownedCount = lineage?.observedPids.size ?? seen.size;
+    if (ownedCount > stopAfter) return ownedCount;
     queue.push(...(children.get(row.pid) ?? []));
   }
+  if (lineage !== undefined) return Math.max(1, lineage.observedPids.size);
   return seen.size;
 }
 

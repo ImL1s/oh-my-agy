@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import { runBoundedProbe } from '../../../src/native/probes/runner';
 
 describe('bounded probe runner', () => {
@@ -95,7 +96,7 @@ describe('bounded probe runner', () => {
       expect(outcome).toMatchObject({ timedOut: true, signal: 'SIGKILL' });
       expect(Date.now() - started).toBeLessThan(4_000);
     } finally {
-      try { process.kill(Number(fs.readFileSync(pidPath, 'utf8')), 'SIGKILL'); } catch (_) { /* 已結束 */ }
+      try { await killAndWait([Number(fs.readFileSync(pidPath, 'utf8'))]); } catch (_) { /* 已結束 */ }
       fs.rmSync(root, { recursive: true, force: true });
     }
   }, 10_000);
@@ -120,6 +121,49 @@ describe('bounded probe runner', () => {
     });
   }, 10_000);
 
+  it('does not count unrelated post-baseline processes outside the probe lineage', async () => {
+    if (process.platform === 'win32') return;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-probe-lineage-scope-'));
+    const markerPath = path.join(root, 'started');
+    const unrelatedPids: number[] = [];
+    const script = [
+      "const fs=require('fs');",
+      `fs.writeFileSync(${JSON.stringify(markerPath)},'started');`,
+      "setTimeout(()=>process.stdout.write('ok'),750);",
+    ].join('');
+    try {
+      const outcomePromise = runBoundedProbe({
+        command: process.execPath,
+        argv: ['-e', script],
+        timeoutMs: 5_000,
+        maximumOutputBytes: 64,
+        maximumProcesses: 1,
+      });
+      const markerDeadline = Date.now() + 2_000;
+      while (!fs.existsSync(markerPath) && Date.now() < markerDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(fs.existsSync(markerPath)).toBe(true);
+      for (let index = 0; index < 9; index += 1) {
+        const unrelated = spawn(
+          process.execPath,
+          ['-e', 'setInterval(()=>{},60000)'],
+          { detached: true, stdio: 'ignore' },
+        );
+        if (unrelated.pid !== undefined) unrelatedPids.push(unrelated.pid);
+        unrelated.unref();
+      }
+      await expect(outcomePromise).resolves.toMatchObject({
+        status: 0,
+        timedOut: false,
+        processCountOverflow: false,
+      });
+    } finally {
+      await killAndWait(unrelatedPids);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   it('never accepts success after detached descendants escape a dead root parent', async () => {
     if (process.platform === 'win32') return;
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-probe-detached-count-'));
@@ -133,6 +177,7 @@ describe('bounded probe runner', () => {
       'pids.push(child.pid);child.unref();',
       '}',
       `fs.writeFileSync(${JSON.stringify(pidPath)},JSON.stringify(pids));`,
+      'setTimeout(()=>{},750);',
     ].join('');
     try {
       const outcome = await runBoundedProbe({
@@ -147,11 +192,25 @@ describe('bounded probe runner', () => {
     } finally {
       try {
         const pids = JSON.parse(fs.readFileSync(pidPath, 'utf8')) as number[];
-        for (const pid of pids) {
-          try { process.kill(pid, 'SIGKILL'); } catch (_) { /* 已結束 */ }
-        }
+        await killAndWait(pids);
       } catch (_) { /* root 未完成 pid 紀錄 */ }
       fs.rmSync(root, { recursive: true, force: true });
     }
   }, 10_000);
 });
+
+async function killAndWait(pids: readonly number[]): Promise<void> {
+  for (const pid of pids) {
+    if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    try { process.kill(pid, 'SIGKILL'); } catch (_) { /* 已結束 */ }
+  }
+  const cleanupDeadline = Date.now() + 2_000;
+  while (Date.now() < cleanupDeadline) {
+    const remaining = pids.some((pid) => {
+      if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+      try { process.kill(pid, 0); return true; } catch (_) { return false; }
+    });
+    if (!remaining) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

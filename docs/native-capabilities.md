@@ -33,11 +33,13 @@ oma doctor --native
   process-tree overflow or an unavailable process counter leaves evidence
   indeterminate. A successful child exit is not accepted until the active or
   final process-tree scan completes. POSIX inspection captures a PID baseline
-  before spawn, then combines one parent-tree/process-group snapshot with every
-  still-live PID created after that baseline. Detached children therefore
-  remain conservatively counted after their root exits. Enumeration is
-  asynchronous and shares the probe's remaining deadline, so a slow Windows
-  CIM query cannot block the wall-clock timer. Timeout/overflow termination
+  before spawn, then retains a cross-snapshot lineage proven by parent-tree or
+  process-group relationships. Observed detached children therefore remain
+  counted after their root exits, while unrelated processes created during the
+  probe are excluded. If the root exits before any snapshot can establish its
+  lineage, the baseline delta fails closed. Enumeration is asynchronous and
+  shares the probe's remaining deadline, so a slow Windows CIM query cannot
+  block the wall-clock timer. Timeout/overflow termination
   includes the Windows
   descendant tree, and a fixed force-settle backstop prevents inherited pipes
   from hanging beyond the outer bound. Every other

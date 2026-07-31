@@ -51,10 +51,12 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
 - Native probe policy enforces wall-clock, combined-output, and process-count
   limits. A process-tree overflow or unavailable counter cannot yield verified
   evidence. Process-tree inspection is non-blocking and deadline-bound. POSIX
-  probes bind a pre-spawn PID baseline to a parent-tree/process-group snapshot
-  and conservatively count every still-live PID created after that baseline, so
-  detached descendants cannot disappear when the root exits. Timeout cleanup
-  has a bounded force-settle backstop.
+  probes bind a pre-spawn PID baseline to a persistent parent-tree/process-group
+  lineage. Observed detached descendants remain counted after the root exits,
+  while unrelated post-baseline processes are excluded once lineage is
+  established. A root that exits before its first observation fails closed
+  against the baseline delta. Timeout cleanup has a bounded force-settle
+  backstop.
 - `supported: true` is a compatibility projection. Routing additionally
   requires the policy's minimum tier and a valid identity-bound candidate or
   receipt.

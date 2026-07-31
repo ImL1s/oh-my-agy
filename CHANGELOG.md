@@ -45,9 +45,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 - Bounded native probes now enforce the policy process-count ceiling as well as
   combined output and wall-clock limits. Process-tree scans are asynchronous
   and share the probe deadline. POSIX probes bind a pre-spawn PID baseline to
-  parent-tree/process-group snapshots so reparented detached descendants remain
-  conservatively counted after the root exits. Timeout/overflow termination
-  covers the whole Windows process tree, and a fixed force-settle backstop
+  a persistent parent-tree/process-group lineage, so observed detached
+  descendants remain counted after the root exits without charging unrelated
+  post-baseline processes. A root that exits before its first observation still
+  fails closed against the baseline delta. Timeout/overflow termination covers
+  the whole Windows process tree, and a fixed force-settle backstop
   prevents a detached descendant from holding inherited pipes open indefinitely.
 - Windows host identity lookup resolves `.exe` commands from a semicolon PATH
   and does not apply POSIX execute/ownership mode bits. Host, plugin, and route
