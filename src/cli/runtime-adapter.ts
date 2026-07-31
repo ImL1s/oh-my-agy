@@ -336,7 +336,7 @@ export async function inspectNativeCapabilities(
   >,
   live: boolean,
 ): Promise<NativeCapabilityInspectionResultV1> {
-  const evaluationTimestamp = new Date().toISOString();
+  const inspectionStartedAt = new Date().toISOString();
   const first = await readNativeHostSurface(context.agyCommand, context.environment);
   if (first === null) {
     return {
@@ -365,7 +365,7 @@ export async function inspectNativeCapabilities(
   const stateRoot = nativeStateRoot(context.stateRoot, context.environment);
   const cache = stateRoot === null ? null : new HostCapabilityProfileCacheV1(stateRoot);
   if (!live) {
-    const cached = cache?.read(expectedCacheKey, evaluationTimestamp);
+    const cached = cache?.read(expectedCacheKey, inspectionStartedAt);
     if (cached !== null && cached !== undefined) {
       return {
         kind: 'profile', profile: cached, cacheStatus: 'hit', diagnostics: [], liveSucceeded: null,
@@ -374,7 +374,7 @@ export async function inspectNativeCapabilities(
   }
   const probeContext = {
     mode: 'passive',
-    evaluationTimestamp,
+    evaluationTimestamp: inspectionStartedAt,
     identityDigest,
     hostIdentity: hostIdentityBefore,
     pluginIdentity,
@@ -399,7 +399,7 @@ export async function inspectNativeCapabilities(
     const liveContext = {
       mode: 'live',
       liveOptIn: true,
-      evaluationTimestamp,
+      evaluationTimestamp: inspectionStartedAt,
       identityDigest,
       hostIdentity: hostIdentityBefore,
       pluginIdentity,
@@ -425,6 +425,9 @@ export async function inspectNativeCapabilities(
       context: liveContext,
     });
     observations.push(...liveResult.observations);
+    const liveObservedAt = liveResult.observations[0]?.observedAt;
+    if (liveObservedAt === undefined) throw new Error('live probe returned no capability observation');
+    const completedLiveContext = { ...liveContext, evaluationTimestamp: liveObservedAt } as const;
     if (jsonAdvertised && liveResult.detailCode === 'LIVE_VERIFIED') {
       observations.push({
         ...liveResult.observations[0],
@@ -437,7 +440,7 @@ export async function inspectNativeCapabilities(
     observations.splice(
       0,
       observations.length,
-      ...completeLiveCapabilityProbeCoverage(observations, liveContext),
+      ...completeLiveCapabilityProbeCoverage(observations, completedLiveContext),
     );
   }
   const second = await readNativeHostSurface(hostIdentityBefore.realpath, context.environment);
@@ -451,6 +454,7 @@ export async function inspectNativeCapabilities(
   });
   const pluginAfter = await inspectNativePlugin(context);
   diagnostics.push(...pluginAfter.diagnostics);
+  const evaluationTimestamp = new Date().toISOString();
   const profile = live
     ? assembleHostCapabilityProfile({
       evaluationTimestamp,

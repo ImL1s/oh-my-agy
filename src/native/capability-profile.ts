@@ -242,7 +242,6 @@ export const TEAM_PROVIDER_POLICY_V1 = Object.freeze({
     required: Object.freeze([
       Object.freeze({ capability: 'headless.print', tier: 'healthy' as const }),
     ]),
-    oneOf: Object.freeze(['headless.stream_json', 'headless.json']),
     adapterImplemented: true,
   }),
   tmux_agy: Object.freeze({

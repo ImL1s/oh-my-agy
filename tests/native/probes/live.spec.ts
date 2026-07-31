@@ -87,6 +87,28 @@ describe('explicit live probe', () => {
     })).rejects.toThrow(/E_LIVE_PROBE_LIMIT/);
   });
 
+  it('timestamps live evidence only after the canary finishes', async () => {
+    const events: string[] = [];
+    const result = await runExplicitLiveProbe({
+      live: true,
+      executable: '/agy',
+      argv: [],
+      capability: 'headless.print',
+      expectedToken: 'ok',
+      context,
+      runner: async () => {
+        events.push('canary-complete');
+        return { status: 0, signal: null, stdout: 'ok\n', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: false };
+      },
+      now: () => {
+        events.push('clock');
+        return '2026-07-31T12:00:45.000Z';
+      },
+    });
+    expect(events).toEqual(['canary-complete', 'clock']);
+    expect(result.observations[0].observedAt).toBe('2026-07-31T12:00:45.000Z');
+  });
+
   it('accepts only an exact successful Antigravity JSON terminal response', async () => {
     const request = {
       live: true,

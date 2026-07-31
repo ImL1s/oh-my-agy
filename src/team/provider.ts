@@ -107,9 +107,7 @@ export function validateProviderRoutePreconditions(
     return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Headless print capability is not healthy'));
   }
   if (launchMode === 'headless') {
-    return healthy('headless.stream_json') || healthy('headless.json')
-      ? ok(true)
-      : err(runtimeError('E_CAPABILITY_UNPROVEN', 'Headless structured output capability is not healthy'));
+    return ok(true);
   }
   if (tmuxReadiness === undefined) {
     return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Interactive tmux requires an explicit bounded readiness canary'));
@@ -272,10 +270,7 @@ function evaluateTeamWorkerProviderRoute(
   const fallbackPolicy = TEAM_PROVIDER_POLICY_V1[provider];
   const requiredProven = fallbackPolicy.required.every(({ capability, tier }) =>
     capabilityProvenAtTier(profile, capability, tier, input.now));
-  const oneOfProven = 'oneOf' in fallbackPolicy
-    ? fallbackPolicy.oneOf.some((capability) => capabilityProvenAtTier(profile, capability, 'healthy', input.now))
-    : true;
-  if (!requiredProven || !oneOfProven) {
+  if (!requiredProven) {
     return err(runtimeError('E_CAPABILITY_UNPROVEN', 'Team fallback provider requirements are unproven'));
   }
   const preconditions = validateProviderRoutePreconditions(

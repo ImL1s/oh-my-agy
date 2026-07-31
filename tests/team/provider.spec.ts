@@ -144,6 +144,12 @@ describe('profile-backed fail-closed worker provider selection', () => {
     expect(tmux.ok && tmux.value.provider).toBe('tmux_agy');
   });
 
+  test('routes the supported text-only 1.1.6 headless adapter without structured output', () => {
+    const value = profile('headless.print', 'healthy');
+    const selected = select(value, 'headless');
+    expect(selected.ok && selected.value.provider).toBe('agy_headless');
+  });
+
   test('routes a profile bound to a native Windows executable path', () => {
     const windowsHost: HostIdentityV1 = {
       ...host,
@@ -202,8 +208,9 @@ describe('profile-backed fail-closed worker provider selection', () => {
     }).ok).toBe(false);
   });
 
-  test('fallback predicates require structured headless truth and explicit fresh tmux canary', () => {
-    expect(validateProviderRoutePreconditions(profile('headless.print', 'healthy'), 'headless', now).ok).toBe(false);
+  test('fallback predicates require healthy print truth and an explicit fresh tmux canary', () => {
+    expect(validateProviderRoutePreconditions(profile('headless.print', 'observed'), 'headless', now).ok).toBe(false);
+    expect(validateProviderRoutePreconditions(profile('headless.print', 'healthy'), 'headless', now)).toEqual({ ok: true, value: true });
     const value = headlessProfile();
     expect(validateProviderRoutePreconditions(value, 'headless', now)).toEqual({ ok: true, value: true });
     expect(validateProviderRoutePreconditions(value, 'interactive', now).ok).toBe(false);

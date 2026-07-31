@@ -35,6 +35,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   every dependent batch, sample route time only after each probe finishes, and
   renew live evidence when a 30-second route receipt lacks five seconds of
   headroom.
+- Live canary observations are stamped after completion, and the existing
+  text-only 1.1.6 headless adapter no longer requires unused JSON output.
 - Bounded native probes now enforce the policy process-count ceiling as well as
   combined output and wall-clock limits. Process-tree scans are asynchronous
   and share the probe deadline; timeout/overflow termination covers the whole

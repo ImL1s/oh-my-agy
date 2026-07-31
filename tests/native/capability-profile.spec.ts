@@ -82,7 +82,7 @@ describe('HostCapabilityProfileV1', () => {
     expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'headless.json')?.limits.timeoutMs).toBe(60_000);
     expect(HOST_CAPABILITY_POLICY_REGISTRY_V1.find(({ key }) => key === 'hook.stop')?.limits.timeoutMs).toBe(5_000);
     expect(TEAM_PROVIDER_POLICY_V1.antigravity_native).toMatchObject({ adapterImplemented: false });
-    expect(TEAM_PROVIDER_POLICY_V1.agy_headless.oneOf).toEqual(['headless.stream_json', 'headless.json']);
+    expect(TEAM_PROVIDER_POLICY_V1.agy_headless).not.toHaveProperty('oneOf');
   });
 
   it('is deterministic for observation permutations at the injected time', () => {

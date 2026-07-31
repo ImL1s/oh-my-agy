@@ -107,14 +107,17 @@ strings in the worktree descriptor are not authority by themselves.
 
 Team and production-workflow execution require a fresh cached live profile and
 a valid route receipt. Passive observations can describe capabilities, but they
-cannot authorize those product execution paths.
+cannot authorize those product execution paths. The implemented headless
+fallback consumes the verified `--print` contract directly, so frozen 1.1.6
+text output is routable without inventing a structured-output requirement.
 
 Production workflows re-read the exact executable identity before every ready
 batch. A profile is reused only while it can cover the 30-second route receipt
 plus five seconds of headroom; otherwise OMA performs a bounded live refresh.
 The route timestamp is sampled after that inspection completes, so newly
 generated evidence is never rejected as future-dated merely because the probe
-was slow.
+was slow. Live observations are likewise timestamped only after the canary
+returns, and the completed profile is generated after final identity readback.
 
 The public Team CLI therefore defaults `team start` to `--worker-mode
 headless`. The interactive tmux route is explicit and fails closed unless the

@@ -19,7 +19,7 @@ must not be used as native-host evidence.
 | Public Antigravity CLI/plugins | Passive help/config/plugin readback | At most the source-specific evidence ceiling; never verified from version/help alone | `oma native capabilities --json` |
 | Public hooks, custom agents, headless, sidecars, UI, conversations, projects, permissions, model/effort, MCP | Canonical profile keys with explicit fallbacks | `supported`, `unsupported`, or `unknown` at the recorded tier/source | `oma native capabilities` / `oma native probe --live` |
 | Native Team worker adapter | Profile-routed boundary exists; adapter is not implemented in Issue #3 | Fails closed with `E_NATIVE_ADAPTER_UNAVAILABLE` before bootstrap | `oma team …` |
-| Headless/tmux Team fallback | Existing OMA adapters selected through profile-bound routing receipts | Product-owned fallback, not proof of a native Team adapter | `oma team …` |
+| Headless/tmux Team fallback | Existing OMA adapters selected through profile-bound routing receipts; headless consumes verified text `--print` directly | Product-owned fallback, not proof of a native Team adapter | `oma team …` |
 | Host semantic LSP | Compatibility status projection only | Not a native/fallback routing authority | `oma lsp-status` |
 | Private memory sidecar/brain internals | Intentionally never probed | Forbidden | `oma sidecar-status` |
 | HUD | Redacted state/adapters projection | Product-owned | `oma hud --json` |

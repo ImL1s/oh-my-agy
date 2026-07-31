@@ -241,6 +241,7 @@ process.exit(2);
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-'));
     const executable = path.join(cwd, 'agy');
     const argvLog = path.join(cwd, 'live-argv.log');
+    const completionMarker = path.join(cwd, 'live-complete');
     fs.writeFileSync(executable, `#!/bin/sh
 if [ "$1" = "--version" ]; then printf 'agy 1.1.6\\n'; exit 0; fi
 if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
@@ -251,6 +252,8 @@ for arg in "$@"; do
   previous="$arg"
 done
 token="\${prompt##*: }"
+/bin/sleep 0.05
+: > ${JSON.stringify(completionMarker)}
 printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
 exit 0
 `, { mode: 0o700 });
@@ -269,12 +272,30 @@ exit 0
     try {
       expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(0);
       expect(stderr).toBe('');
-      const body = JSON.parse(stdout) as { ok: boolean; profile: { capabilities: Array<{ key: string; outcome: string }> } };
+      const body = JSON.parse(stdout) as {
+        ok: boolean;
+        profile: {
+          generatedAt: string;
+          capabilities: Array<{
+            key: string;
+            outcome: string;
+            observations: Array<{ source: string; observedAt: string }>;
+          }>;
+        };
+      };
       expect(body.ok).toBe(true);
       expect(body.profile.capabilities.find(({ key }) => key === 'headless.print'))
         .toEqual(expect.objectContaining({ outcome: 'supported' }));
       expect(body.profile.capabilities.find(({ key }) => key === 'headless.json'))
         .toEqual(expect.objectContaining({ outcome: 'supported' }));
+      const liveObservation = body.profile.capabilities
+        .find(({ key }) => key === 'headless.json')
+        ?.observations.find(({ source }) => source === 'live_probe');
+      expect(liveObservation).toBeDefined();
+      expect(Date.parse(liveObservation!.observedAt) + 1).toBeGreaterThanOrEqual(
+        fs.statSync(completionMarker).mtimeMs,
+      );
+      expect(Date.parse(body.profile.generatedAt)).toBeGreaterThanOrEqual(Date.parse(liveObservation!.observedAt));
       const liveArgv = fs.readFileSync(argvLog, 'utf8').trim().split('\n');
       const timeoutIndex = liveArgv.indexOf('--print-timeout');
       expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);

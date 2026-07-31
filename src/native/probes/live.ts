@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { assertCanonicalUtcTimestamp } from '../../contracts/state-schemas';
 import { redactDiagnostic } from '../../runtime/redaction';
 import { CapabilityObservationV1 } from '../capability-profile';
 import { HOST_CAPABILITY_POLICY_REGISTRY_V1 } from '../capability-profile';
@@ -35,6 +36,7 @@ export interface LiveProbeRequestV1 {
   environment?: NodeJS.ProcessEnv;
   context: LiveProbeContextV1;
   runner?: BoundedProbeRunnerV1;
+  now?: () => string;
 }
 
 export async function runExplicitLiveProbe(request: Readonly<LiveProbeRequestV1>): Promise<ProbeResultV1> {
@@ -63,6 +65,12 @@ export async function runExplicitLiveProbe(request: Readonly<LiveProbeRequestV1>
       maximumOutputBytes: policy.limits.maximumOutputBytes,
       maximumProcesses: policy.limits.maximumProcesses,
     });
+    const observedAt = (request.now ?? (() => new Date().toISOString()))();
+    assertCanonicalUtcTimestamp(observedAt, 'live probe observedAt');
+    const completedContext: LiveProbeContextV1 = {
+      ...request.context,
+      evaluationTimestamp: observedAt,
+    };
     const exact = outcome.status === 0 && !outcome.timedOut && !outcome.outputOverflow
       && !outcome.processCountOverflow && outcome.error === undefined
       && outcome.stderr === '' && liveOutputMatches(
@@ -79,13 +87,13 @@ export async function runExplicitLiveProbe(request: Readonly<LiveProbeRequestV1>
       source: 'live_probe',
       tier: 'verified',
       result: exact ? 'positive' : 'indeterminate',
-      observedAt: request.context.evaluationTimestamp,
+      observedAt,
       identityDigest: request.context.identityDigest,
       detailCode,
       diagnostic: exact ? null : redactDiagnostic(`${outcome.stderr}\n${outcome.error ?? ''}`, 4096),
     };
     const structured = exact && request.outputContract === 'agy_json'
-      ? probeStructuredInitOutput(outcome.stdout, request.context, new Set([request.capability]))
+      ? probeStructuredInitOutput(outcome.stdout, completedContext, new Set([request.capability]))
       : { observations: [], cacheable: exact, detailCode: 'STRUCTURED_INIT_NOT_APPLICABLE' };
     return {
       observations: [observation, ...structured.observations],

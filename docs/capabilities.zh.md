@@ -14,7 +14,7 @@ OMA 将产品拥有的能力与对 Antigravity 的观测分开。Host 观测改�
 | Public Antigravity CLI/plugins | 被动 help/config/plugin readback | 不超过 source ceiling；不能只凭 version/help 达到 verified | `oma native capabilities --json` |
 | 公开 hooks、custom agents、headless、sidecars、UI、conversation、project、permission、model/effort、MCP | 带显式 fallback 的规范 profile key | 在记录的 tier/source 上为 `supported`、`unsupported` 或 `unknown` | `oma native capabilities` / `oma native probe --live` |
 | Native Team worker adapter | Issue #3 建立 profile-routed 边界，但尚未实现 adapter | bootstrap 前以 `E_NATIVE_ADAPTER_UNAVAILABLE` fail closed | `oma team …` |
-| Headless/tmux Team fallback | 现有 OMA adapter 通过绑定 profile 的 routing receipt 选择 | 产品拥有的 fallback，不是 native Team adapter 证明 | `oma team …` |
+| Headless/tmux Team fallback | 现有 OMA adapter 通过绑定 profile 的 routing receipt 选择；headless 直接使用已验证的文本 `--print` | 产品拥有的 fallback，不是 native Team adapter 证明 | `oma team …` |
 | Host semantic LSP | 仅 compatibility status projection | 不是 native/fallback routing 权威 | `oma lsp-status` |
 | Private memory sidecar/brain internals | 永不探测 | Forbidden | `oma sidecar-status` |
 | HUD | 脱敏 state/adapters projection | Product-owned | `oma hud --json` |
