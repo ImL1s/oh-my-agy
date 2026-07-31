@@ -58,8 +58,9 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
 - UI labels and private files are not public capability evidence.
 - Optional adapters stay disabled or unclaimed until explicitly configured.
 - `oma native capabilities` and `oma doctor --native` are passive. Only
-  `oma native probe --live` opts in; v1 runs one bounded public headless canary
-  and leaves every other side-effect domain explicitly indeterminate.
+  `oma native probe --live` opts in; v1 verifies the exact-text worker route and
+  separately verifies structured JSON when advertised. Every other side-effect
+  domain remains explicitly indeterminate.
 - Offline fixtures and tests prove implementation behavior, not live-host
   parity. See [Native capability negotiation](./native-capabilities.md).
 - `oma production verify` is the authority for the `production_verified`

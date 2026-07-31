@@ -40,6 +40,7 @@ export function runBoundedProbe(
     let settled = false;
     let terminationRequested = false;
     let processInspectionInFlight = false;
+    let pendingSuccessfulClose: { status: number; signal: null } | null = null;
     let error: string | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
     let processCountTimer: NodeJS.Timeout | undefined;
@@ -101,6 +102,10 @@ export function runBoundedProbe(
       if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
       if (processCountTimer !== undefined) clearInterval(processCountTimer);
       terminate();
+      if (pendingSuccessfulClose !== null) {
+        settle(null, 'SIGKILL', true);
+        return;
+      }
       // 子孫可能仍持有 inherited pipes；到達此 backstop 後主動斷開 reader 並回傳。
       forceSettleTimer = setTimeout(
         () => settle(null, 'SIGKILL', true),
@@ -126,7 +131,11 @@ export function runBoundedProbe(
       processInspectionInFlight = true;
       try {
         const remainingMs = deadlineAt - Date.now();
-        if (remainingMs <= 0) return;
+        if (remainingMs <= 0) {
+          timedOut = true;
+          terminateAndBoundSettlement();
+          return;
+        }
         const count = await countProcesses(
           child.pid,
           request.maximumProcesses,
@@ -147,6 +156,11 @@ export function runBoundedProbe(
         }
       } finally {
         processInspectionInFlight = false;
+        if (pendingSuccessfulClose !== null && !settled && !terminationRequested) {
+          const completed = pendingSuccessfulClose;
+          pendingSuccessfulClose = null;
+          settle(completed.status, completed.signal);
+        }
       }
     };
 
@@ -156,7 +170,15 @@ export function runBoundedProbe(
       error = cause.message;
       settle(null, null, true);
     });
-    child.once('close', (status, signal) => settle(status, signal));
+    child.once('close', (status, signal) => {
+      if (status === 0 && signal === null && !terminationRequested) {
+        pendingSuccessfulClose = { status, signal };
+        if (processCountTimer !== undefined) clearInterval(processCountTimer);
+        if (!processInspectionInFlight) void inspectProcessCount();
+        return;
+      }
+      settle(status, signal);
+    });
     timeoutTimer = setTimeout(() => {
       timedOut = true;
       terminateAndBoundSettlement();

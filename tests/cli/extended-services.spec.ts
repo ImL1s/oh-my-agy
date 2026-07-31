@@ -281,16 +281,23 @@ process.exit(2);
     fs.writeFileSync(executable, `#!/bin/sh
 if [ "$1" = "--version" ]; then printf 'agy 1.1.6\\n'; exit 0; fi
 if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
+printf 'CALL\\n' >> ${JSON.stringify(argvLog)}
 printf '%s\\n' "$@" >> ${JSON.stringify(argvLog)}
 previous=''
+format='text'
 for arg in "$@"; do
   if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  if [ "$previous" = "--output-format" ]; then format="$arg"; fi
   previous="$arg"
 done
 token="\${prompt##*: }"
 /bin/sleep 0.05
 : > ${JSON.stringify(completionMarker)}
-printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+if [ "$format" = "json" ]; then
+  printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+else
+  printf '%s\\n' "$token"
+fi
 exit 0
 `, { mode: 0o700 });
     let stdout = '';
@@ -332,9 +339,62 @@ exit 0
         fs.statSync(completionMarker).mtimeMs,
       );
       expect(Date.parse(body.profile.generatedAt)).toBeGreaterThanOrEqual(Date.parse(liveObservation!.observedAt));
-      const liveArgv = fs.readFileSync(argvLog, 'utf8').trim().split('\n');
-      const timeoutIndex = liveArgv.indexOf('--print-timeout');
-      expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);
+      const liveCalls = fs.readFileSync(argvLog, 'utf8').split('CALL\n')
+        .filter((entry) => entry.trim() !== '')
+        .map((entry) => entry.trim().split('\n'));
+      expect(liveCalls).toHaveLength(2);
+      expect(liveCalls[0]).not.toContain('--output-format');
+      expect(liveCalls[1]).toEqual(expect.arrayContaining(['--output-format', 'json']));
+      for (const liveArgv of liveCalls) {
+        const timeoutIndex = liveArgv.indexOf('--print-timeout');
+        expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);
+      }
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('JSON success cannot authorize a broken exact-text worker route', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-mode-fence-'));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 1.1.9\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
+previous=''
+format='text'
+for arg in "$@"; do
+  if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  if [ "$previous" = "--output-format" ]; then format="$arg"; fi
+  previous="$arg"
+done
+token="\${prompt##*: }"
+if [ "$format" = "json" ]; then
+  printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+else
+  printf 'broken-default-print\\n'
+fi
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(1);
+      const body = JSON.parse(stdout) as {
+        outcome: string;
+        error: { code: string };
+        profile: { capabilities: Array<{ key: string; outcome: string }> };
+      };
+      expect(body.outcome).toBe('live_probe_failed');
+      expect(body.error.code).toBe('LIVE_MALFORMED');
+      expect(body.profile.capabilities.find(({ key }) => key === 'headless.print')?.outcome)
+        .not.toBe('supported');
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -396,12 +456,18 @@ if [ "$1" = "--version" ]; then printf 'agy 1.1.9\\n'; exit 0; fi
 if [ "$1" = "--help" ]; then printf '%s\\n' '--print --output-format json'; exit 0; fi
 if [ -f "${failMarker}" ]; then printf '%s\\n' '{"status":"ERROR"}'; exit 0; fi
 previous=''
+format='text'
 for arg in "$@"; do
   if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  if [ "$previous" = "--output-format" ]; then format="$arg"; fi
   previous="$arg"
 done
 token="\${prompt##*: }"
-printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+if [ "$format" = "json" ]; then
+  printf '{"conversation_id":"fixture","status":"SUCCESS","response":"%s","error":null}\\n' "$token"
+else
+  printf '%s\\n' "$token"
+fi
 `, { mode: 0o700 });
     const stateRoot = path.join(cwd, 'state');
     const output = { stdout: '', stderr: '' };

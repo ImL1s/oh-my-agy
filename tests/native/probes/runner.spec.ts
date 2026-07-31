@@ -36,6 +36,42 @@ describe('bounded probe runner', () => {
     expect(Date.now() - started).toBeLessThan(1_500);
   });
 
+  it('waits for the active process scan before accepting a successful exit', async () => {
+    let finishScan: ((count: number | null) => void) | undefined;
+    let markScanStarted: (() => void) | undefined;
+    const scanStarted = new Promise<void>((resolve) => { markScanStarted = resolve; });
+    const outcomePromise = runBoundedProbe(
+      {
+        command: process.execPath,
+        argv: ['-e', "process.stdout.write('ok')"],
+        timeoutMs: 2_000,
+        maximumOutputBytes: 64,
+        maximumProcesses: 1,
+      },
+      {
+        countProcesses: async () => {
+          markScanStarted?.();
+          return new Promise<number | null>((resolve) => { finishScan = resolve; });
+        },
+      },
+    );
+    await scanStarted;
+    const early = await Promise.race([
+      outcomePromise.then(() => 'settled' as const),
+      new Promise<'pending'>((resolve) => setTimeout(() => resolve('pending'), 250)),
+    ]);
+    expect(early).toBe('pending');
+    expect(finishScan).toBeDefined();
+    finishScan!(2);
+
+    await expect(outcomePromise).resolves.toMatchObject({
+      status: null,
+      signal: 'SIGKILL',
+      timedOut: false,
+      processCountOverflow: true,
+    });
+  });
+
   it('force-settles when a detached descendant keeps inherited pipes open', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-probe-force-settle-'));
     const pidPath = path.join(root, 'grandchild.pid');

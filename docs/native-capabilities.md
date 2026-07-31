@@ -20,14 +20,16 @@ oma doctor --native
   configuration. A failed plugin readback is `unknown`, not evidence that the
   plugin is absent.
 - `native probe --live` is the only command that opts into a live probe. The v1
-  executor runs one bounded public headless print canary, using structured JSON
-  when the passive profile advertises it and exact text otherwise. It parses
-  only documented terminal fields and retains no response text. The policy's
+  executor always runs the bounded exact-text print canary used by Team and
+  workflow workers. When the passive profile advertises structured JSON, it
+  runs a separate bounded JSON canary for that capability. It parses only
+  documented terminal fields and retains no response text. The policy's
   wall-clock, combined-output, and process-count ceilings are all enforced;
   process-tree overflow or an unavailable process counter leaves evidence
-  indeterminate. Process-tree enumeration is asynchronous and shares the
-  probe's remaining deadline, so a slow Windows CIM query cannot block the
-  wall-clock timer. Timeout/overflow termination includes the Windows
+  indeterminate. A successful child exit is not accepted until the active or
+  final process-tree scan completes. Process-tree enumeration is asynchronous
+  and shares the probe's remaining deadline, so a slow Windows CIM query cannot
+  block the wall-clock timer. Timeout/overflow termination includes the Windows
   descendant tree, and a fixed force-settle backstop prevents inherited pipes
   from hanging beyond the outer bound. Every other
   side-effect domain receives an explicit `live_probe`/`indeterminate`

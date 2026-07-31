@@ -406,8 +406,6 @@ export async function inspectNativeCapabilities(
   observations.push(...hookReadback.observations);
   let liveSucceeded: boolean | null = null;
   if (live) {
-    const token = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
-    const prompt = `Reply with exactly this token and nothing else: ${token}`;
     const liveContext = {
       mode: 'live',
       liveOptIn: true,
@@ -418,37 +416,60 @@ export async function inspectNativeCapabilities(
     } as const;
     const jsonAdvertised = passive.observations.some(({ capability, result }) =>
       capability === 'headless.json' && result === 'positive');
-    const liveResult = await runExplicitLiveProbe({
+    const textToken = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
+    const textResult = await runExplicitLiveProbe({
       live: true,
       executable: hostIdentityBefore.realpath,
       argv: [
         '--model', AGY_WORKER_MODEL,
-        ...(jsonAdvertised ? ['--output-format', 'json'] : []),
-        '--print', prompt,
+        '--print', `Reply with exactly this token and nothing else: ${textToken}`,
         '--print-timeout', `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
         '--mode', 'plan',
         '--sandbox',
       ],
-      capability: jsonAdvertised ? 'headless.json' : 'headless.print',
-      expectedToken: token,
-      outputContract: jsonAdvertised ? 'agy_json' : 'exact_text',
+      capability: 'headless.print',
+      expectedToken: textToken,
+      outputContract: 'exact_text',
       timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
       environment: context.environment,
       context: liveContext,
     });
-    observations.push(...liveResult.observations);
-    const liveObservedAt = liveResult.observations[0]?.observedAt;
-    if (liveObservedAt === undefined) throw new Error('live probe returned no capability observation');
-    const completedLiveContext = { ...liveContext, evaluationTimestamp: liveObservedAt } as const;
-    if (jsonAdvertised && liveResult.detailCode === 'LIVE_VERIFIED') {
-      observations.push({
-        ...liveResult.observations[0],
-        capability: 'headless.print',
-        detailCode: 'LIVE_JSON_PRINT_VERIFIED',
-      });
+    observations.push(...textResult.observations);
+    liveSucceeded = textResult.detailCode === 'LIVE_VERIFIED';
+    if (!liveSucceeded) {
+      diagnostics.push({ code: textResult.detailCode, message: 'required exact-text live probe did not verify' });
     }
-    liveSucceeded = liveResult.detailCode === 'LIVE_VERIFIED';
-    if (!liveSucceeded) diagnostics.push({ code: liveResult.detailCode, message: 'required live probe did not verify' });
+
+    let completedAt = textResult.observations[0]?.observedAt;
+    if (completedAt === undefined) throw new Error('exact-text live probe returned no capability observation');
+    if (jsonAdvertised) {
+      const jsonToken = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
+      const jsonResult = await runExplicitLiveProbe({
+        live: true,
+        executable: hostIdentityBefore.realpath,
+        argv: [
+          '--model', AGY_WORKER_MODEL,
+          '--output-format', 'json',
+          '--print', `Reply with exactly this token and nothing else: ${jsonToken}`,
+          '--print-timeout', `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
+          '--mode', 'plan',
+          '--sandbox',
+        ],
+        capability: 'headless.json',
+        expectedToken: jsonToken,
+        outputContract: 'agy_json',
+        timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
+        environment: context.environment,
+        context: { ...liveContext, evaluationTimestamp: completedAt },
+      });
+      observations.push(...jsonResult.observations);
+      completedAt = jsonResult.observations[0]?.observedAt;
+      if (completedAt === undefined) throw new Error('JSON live probe returned no capability observation');
+      if (jsonResult.detailCode !== 'LIVE_VERIFIED') {
+        diagnostics.push({ code: jsonResult.detailCode, message: 'optional JSON live probe did not verify' });
+      }
+    }
+    const completedLiveContext = { ...liveContext, evaluationTimestamp: completedAt } as const;
     observations.splice(
       0,
       observations.length,
