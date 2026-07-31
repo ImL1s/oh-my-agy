@@ -444,34 +444,75 @@ export async function inspectNativeCapabilities(
         diagnostics.push({ code: jsonResult.detailCode, message: 'optional JSON live probe did not verify' });
       }
     }
-    const textToken = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
-    const textPrompt = `Reply with exactly this token and nothing else: ${textToken}`;
-    const textArgv = buildAgy115Argv({
-      launchMode: 'headless',
-      capabilityMode: 'read-only',
-      prompt: textPrompt,
-      boundedDuration: `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
-      workspaceDirectories: [fs.realpathSync(context.cwd)],
-      model: AGY_WORKER_MODEL,
-    });
-    if (!textArgv.ok) throw new Error(`exact-text live probe argv is invalid: ${textArgv.error.message}`);
-    const textResult = await runExplicitLiveProbe({
-      live: true,
-      executable: hostIdentityBefore.realpath,
-      argv: textArgv.value,
-      capability: 'headless.print',
-      expectedToken: textToken,
-      outputContract: 'exact_text',
-      timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
-      environment: context.environment,
-      context: { ...liveContext, evaluationTimestamp: completedAt },
-    });
-    observations.push(...textResult.observations);
-    completedAt = textResult.observations[0]?.observedAt;
-    if (completedAt === undefined) throw new Error('exact-text live probe returned no capability observation');
-    liveSucceeded = textResult.detailCode === 'LIVE_VERIFIED';
-    if (!liveSucceeded) {
-      diagnostics.push({ code: textResult.detailCode, message: 'required exact-text live probe did not verify' });
+    const writeWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-write-'));
+    fs.chmodSync(writeWorkspace, 0o700);
+    const writeToken = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
+    let writeResult: Awaited<ReturnType<typeof runExplicitLiveProbe>>;
+    try {
+      const writeArgv = buildAgy115Argv({
+        launchMode: 'headless',
+        capabilityMode: 'read-write',
+        prompt: `Reply with exactly this token and nothing else: ${writeToken}`,
+        boundedDuration: `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
+        workspaceDirectories: [writeWorkspace],
+        model: AGY_WORKER_MODEL,
+      });
+      if (!writeArgv.ok) throw new Error(`read-write live probe argv is invalid: ${writeArgv.error.message}`);
+      writeResult = await runExplicitLiveProbe({
+        live: true,
+        executable: hostIdentityBefore.realpath,
+        argv: writeArgv.value,
+        capability: 'headless.print',
+        expectedToken: writeToken,
+        outputContract: 'exact_text',
+        timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
+        environment: context.environment,
+        context: { ...liveContext, evaluationTimestamp: completedAt },
+      });
+    } finally {
+      fs.rmSync(writeWorkspace, { recursive: true, force: true });
+    }
+    completedAt = writeResult.observations[0]?.observedAt;
+    if (completedAt === undefined) throw new Error('read-write live probe returned no capability observation');
+    if (writeResult.detailCode !== 'LIVE_VERIFIED') {
+      observations.push(...writeResult.observations);
+      liveSucceeded = false;
+      diagnostics.push({
+        code: writeResult.detailCode,
+        message: 'required read-write exact-text live probe did not verify',
+      });
+    } else {
+      const textToken = `oma-native-live-${crypto.randomBytes(12).toString('hex')}`;
+      const textArgv = buildAgy115Argv({
+        launchMode: 'headless',
+        capabilityMode: 'read-only',
+        prompt: `Reply with exactly this token and nothing else: ${textToken}`,
+        boundedDuration: `${LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS / 1_000}s`,
+        workspaceDirectories: [fs.realpathSync(context.cwd)],
+        model: AGY_WORKER_MODEL,
+      });
+      if (!textArgv.ok) throw new Error(`read-only live probe argv is invalid: ${textArgv.error.message}`);
+      const textResult = await runExplicitLiveProbe({
+        live: true,
+        executable: hostIdentityBefore.realpath,
+        argv: textArgv.value,
+        capability: 'headless.print',
+        expectedToken: textToken,
+        outputContract: 'exact_text',
+        timeoutMs: LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS,
+        environment: context.environment,
+        context: { ...liveContext, evaluationTimestamp: completedAt },
+      });
+      observations.push(...textResult.observations);
+      completedAt = textResult.observations[0]?.observedAt;
+      if (completedAt === undefined) throw new Error('read-only live probe returned no capability observation');
+      liveSucceeded = textResult.detailCode === 'LIVE_VERIFIED';
+      if (!liveSucceeded) {
+        diagnostics.push({
+          code: textResult.detailCode,
+          message: 'required read-only exact-text live probe did not verify',
+        });
+      }
     }
     const completedLiveContext = { ...liveContext, evaluationTimestamp: completedAt } as const;
     observations.splice(

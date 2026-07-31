@@ -176,6 +176,57 @@ exit 2
     }
   });
 
+  test('bounded plugin readback terminates descendants that retain inherited pipes', async () => {
+    if (process.platform === 'win32') return;
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-plugin-tree-')));
+    const executable = path.join(cwd, 'agy');
+    const descendantPidPath = path.join(cwd, 'plugin-descendant.pid');
+    const pluginScript = [
+      "const fs=require('fs');",
+      "const {spawn}=require('child_process');",
+      "const child=spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{stdio:['ignore','inherit','inherit']});",
+      `fs.writeFileSync(${JSON.stringify(descendantPidPath)},String(child.pid));`,
+      "process.stdout.write('x'.repeat(70*1024));",
+      'setInterval(()=>{},60000);',
+    ].join('');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 9.0.0\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\\n' '--print'; exit 0; fi
+if [ "$1" = "plugin" ] && [ "$2" = "list" ]; then
+  exec ${JSON.stringify(process.execPath)} -e ${JSON.stringify(pluginScript)}
+fi
+exit 2
+`, { mode: 0o700 });
+    let stdout = '';
+    let descendantPid: number | undefined;
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      environment: { PATH: process.env.PATH, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    const started = Date.now();
+    try {
+      expect(await services.nativeCommand('capabilities', ['--json'])).toBe(0);
+      expect(Date.now() - started).toBeLessThan(3_000);
+      expect(JSON.parse(stdout).profile.pluginIdentity.status).toBe('unknown');
+      descendantPid = Number(fs.readFileSync(descendantPidPath, 'utf8'));
+      await waitForProcessExit(descendantPid, 2_000);
+      expect(processIsAlive(descendantPid)).toBe(false);
+    } finally {
+      if (descendantPid === undefined && fs.existsSync(descendantPidPath)) {
+        descendantPid = Number(fs.readFileSync(descendantPidPath, 'utf8'));
+      }
+      if (descendantPid !== undefined && processIsAlive(descendantPid)) {
+        try { process.kill(descendantPid, 'SIGKILL'); } catch (_) { /* 已結束 */ }
+      }
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  }, 10_000);
+
   test('help output overflow remains unknown instead of masquerading as host absence', async () => {
     const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-help-overflow-')));
     const executable = path.join(cwd, 'agy');
@@ -342,15 +393,21 @@ exit 0
       const liveCalls = fs.readFileSync(argvLog, 'utf8').split('CALL\n')
         .filter((entry) => entry.trim() !== '')
         .map((entry) => entry.trim().split('\n'));
-      expect(liveCalls).toHaveLength(2);
+      expect(liveCalls).toHaveLength(3);
       expect(liveCalls[0]).toEqual(expect.arrayContaining(['--output-format', 'json']));
       expect(liveCalls[1]).not.toContain('--output-format');
+      expect(liveCalls[1]).toEqual(expect.arrayContaining(['--mode', 'accept-edits']));
+      expect(liveCalls[1]).not.toContain('--sandbox');
+      expect(liveCalls[2]).toEqual(expect.arrayContaining(['--mode', 'plan', '--sandbox']));
       for (const liveArgv of liveCalls) {
         const timeoutIndex = liveArgv.indexOf('--print-timeout');
         expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);
       }
-      const addDirIndex = liveCalls[1].indexOf('--add-dir');
-      expect(liveCalls[1].slice(addDirIndex, addDirIndex + 2)).toEqual(['--add-dir', fs.realpathSync(cwd)]);
+      const writeAddDirIndex = liveCalls[1].indexOf('--add-dir');
+      expect(path.basename(liveCalls[1][writeAddDirIndex + 1])).toMatch(/^oma-native-write-/u);
+      const readAddDirIndex = liveCalls[2].indexOf('--add-dir');
+      expect(liveCalls[2].slice(readAddDirIndex, readAddDirIndex + 2))
+        .toEqual(['--add-dir', fs.realpathSync(cwd)]);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }
@@ -394,6 +451,44 @@ fi
         profile: { capabilities: Array<{ key: string; outcome: string }> };
       };
       expect(body.outcome).toBe('live_probe_failed');
+      expect(body.error.code).toBe('LIVE_MALFORMED');
+      expect(body.profile.capabilities.find(({ key }) => key === 'headless.print')?.outcome)
+        .not.toBe('supported');
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('read-write route authority requires the accept-edits worker argv to execute', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-native-live-write-mode-fence-'));
+    const executable = path.join(cwd, 'agy');
+    fs.writeFileSync(executable, `#!/bin/sh
+if [ "$1" = "--version" ]; then printf 'agy 1.1.9\\n'; exit 0; fi
+if [ "$1" = "--help" ]; then printf '%s\\n' '--print'; exit 0; fi
+previous=''
+for arg in "$@"; do
+  if [ "$previous" = "--print" ]; then prompt="$arg"; fi
+  if [ "$previous" = "--mode" ] && [ "$arg" = "accept-edits" ]; then exit 2; fi
+  previous="$arg"
+done
+printf '%s\\n' "\${prompt##*: }"
+`, { mode: 0o700 });
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot,
+      cwd,
+      stateRoot: path.join(cwd, 'state'),
+      agyCommand: executable,
+      environment: { PATH: cwd, HOME: cwd },
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    try {
+      expect(await services.nativeCommand('probe', ['--live', '--json'])).toBe(1);
+      const body = JSON.parse(stdout) as {
+        error: { code: string };
+        profile: { capabilities: Array<{ key: string; outcome: string }> };
+      };
       expect(body.error.code).toBe('LIVE_MALFORMED');
       expect(body.profile.capabilities.find(({ key }) => key === 'headless.print')?.outcome)
         .not.toBe('supported');
@@ -820,3 +915,15 @@ echo "--conversation --mode --print --print-timeout --prompt-interactive --sandb
     }
   });
 });
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (_) { return false; }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (processIsAlive(pid) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

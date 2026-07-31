@@ -51,25 +51,25 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
 - Native probe policy enforces wall-clock, combined-output, and process-count
   limits. A process-tree overflow or unavailable counter cannot yield verified
   evidence. Process-tree inspection is non-blocking and deadline-bound. POSIX
-  probes bind a pre-spawn PID baseline to a persistent parent-tree/process-group
-  lineage. Observed detached descendants remain counted after the root exits,
-  while unrelated post-baseline processes are excluded once lineage is
-  established. A root that exits before its first observation fails closed
-  against the baseline delta. Timeout cleanup has a bounded force-settle
-  backstop.
+  probes bind a pre-spawn PID/start-marker baseline to a persistent
+  parent-tree/process-group lineage. Observed detached descendants remain
+  counted after the root exits, while unrelated, reused, and zombie PIDs are
+  excluded. A root that exits before its first observation fails closed against
+  the baseline delta. Timeout cleanup has a bounded force-settle backstop.
 - `supported: true` is a compatibility projection. Routing additionally
   requires the policy's minimum tier and a valid identity-bound candidate or
   receipt.
 - UI labels and private files are not public capability evidence.
 - Optional adapters stay disabled or unclaimed until explicitly configured.
 - `oma native capabilities` and `oma doctor --native` are passive. Only
-  `oma native probe --live` opts in; v1 verifies the exact-text worker route and
-  separately verifies structured JSON when advertised. The optional JSON
-  canary runs first and the route-authorizing exact-text canary runs last so its
-  freshness is not spent on optional probing. That final canary uses the same
-  worker argv builder and `--add-dir <current-repository>` shape as product
-  workflows; incompatible workspace mounting cannot authorize their route.
-  Every other side-effect domain remains explicitly indeterminate.
+  `oma native probe --live` opts in; v1 verifies both exact-text worker grammars
+  and separately verifies structured JSON when advertised. The optional JSON
+  canary runs first. The read-write `accept-edits` canary then runs in a
+  disposable empty workspace, and the route-authorizing read-only
+  `plan --sandbox` canary runs last with the same worker argv builder and
+  `--add-dir <current-repository>` shape as product workflows. Both grammars
+  must verify; this does not claim general filesystem-write capability. Every
+  other side-effect domain remains explicitly indeterminate.
 - Offline fixtures and tests prove implementation behavior, not live-host
   parity. See [Native capability negotiation](./native-capabilities.md).
 - `oma production verify` is the authority for the `production_verified`

@@ -18,26 +18,30 @@ oma doctor --native
   installed plugin assets, and OMA's identity-bound cache. It does not create a
   conversation, invoke a model or agent, fire a hook smoke test, or change host
   configuration. A failed plugin readback is `unknown`, not evidence that the
-  plugin is absent.
+  plugin is absent. Its bounded plugin command owns and terminates the full
+  process tree on timeout/output overflow and destroys inherited pipe readers
+  at the settlement backstop.
 - `native probe --live` is the only command that opts into a live probe. The v1
-  executor always runs the bounded exact-text print canary used by Team and
-  workflow workers. When the passive profile advertises structured JSON, it
-  runs that separate bounded JSON canary first, then runs the route-authorizing
-  exact-text canary last so optional work cannot consume the print receipt's
-  freshness window. The exact-text canary is built through the same worker argv
-  builder as product workflows and mounts the current repository with
-  `--add-dir`; a host that cannot execute that option gains no route authority.
+  executor requires the bounded exact-text grammars used by both read-write and
+  read-only Team/workflow workers. When the passive profile advertises
+  structured JSON, it runs that separate bounded JSON canary first. It then
+  executes `accept-edits` without `--sandbox` against a disposable empty
+  workspace outside the repository, followed by the final `plan --sandbox`
+  canary with the current repository mounted through `--add-dir`. Both are built
+  by the production worker argv builder and both must verify; the disposable
+  workspace is always removed and does not establish generic filesystem-write
+  capability. The final read-only observation owns the route freshness window.
   It parses only
   documented terminal fields and retains no response text. The policy's
   wall-clock, combined-output, and process-count ceilings are all enforced;
   process-tree overflow or an unavailable process counter leaves evidence
   indeterminate. A successful child exit is not accepted until the active or
-  final process-tree scan completes. POSIX inspection captures a PID baseline
-  before spawn, then retains a cross-snapshot lineage proven by parent-tree or
-  process-group relationships. Observed detached children therefore remain
-  counted after their root exits, while unrelated processes created during the
-  probe are excluded. If the root exits before any snapshot can establish its
-  lineage, the baseline delta fails closed. Enumeration is asynchronous and
+  final process-tree scan completes. POSIX inspection captures a PID plus start
+  marker baseline before spawn, then retains a cross-snapshot lineage proven by
+  parent-tree or process-group relationships. Observed detached children
+  therefore remain counted after their root exits, while unrelated, reused, and
+  zombie PIDs are excluded. If the root exits before any snapshot can establish
+  its lineage, the baseline delta fails closed. Enumeration is asynchronous and
   shares the probe's remaining deadline, so a slow Windows CIM query cannot
   block the wall-clock timer. Timeout/overflow termination
   includes the Windows

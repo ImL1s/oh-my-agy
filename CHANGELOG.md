@@ -38,19 +38,25 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 - Live canary observations are stamped after completion, and the existing
   text-only 1.1.6 headless adapter no longer requires unused JSON output.
 - When JSON is advertised, its optional canary now runs before the required
-  exact-text worker canary so optional probing cannot consume route-authority
-  freshness or authorize a different output mode. The final canary uses the
-  same worker argv builder and `--add-dir` repository mount as product workflow
-  dispatch, so an incompatible workspace flag cannot receive route authority.
+  exact-text worker canaries so optional probing cannot consume route-authority
+  freshness or authorize a different output mode. Route authority now requires
+  both the read-write `accept-edits` grammar in a disposable empty workspace and
+  the final read-only `plan --sandbox` grammar with the product
+  `--add-dir <repository>` mount. Both use the production worker argv builder.
 - Bounded native probes now enforce the policy process-count ceiling as well as
   combined output and wall-clock limits. Process-tree scans are asynchronous
   and share the probe deadline. POSIX probes bind a pre-spawn PID baseline to
-  a persistent parent-tree/process-group lineage, so observed detached
-  descendants remain counted after the root exits without charging unrelated
-  post-baseline processes. A root that exits before its first observation still
-  fails closed against the baseline delta. Timeout/overflow termination covers
+  a persistent parent-tree/process-group lineage keyed by PID plus process start
+  marker, so observed detached descendants remain counted after the root exits
+  without charging unrelated, reused, or zombie PIDs. A root that exits before
+  its first observation still fails closed against the baseline delta.
+  Timeout/overflow termination covers
   the whole Windows process tree, and a fixed force-settle backstop
   prevents a detached descendant from holding inherited pipes open indefinitely.
+- Bounded plugin-registry commands now terminate the owned POSIX process group
+  or Windows descendant tree and destroy pipe readers at the settlement
+  backstop, so a timed-out or oversized `agy plugin list` cannot leave an
+  inherited-pipe orphan behind.
 - Windows host identity lookup resolves `.exe` commands from a semicolon PATH
   and does not apply POSIX execute/ownership mode bits. Host, plugin, and route
   paths use the profile platform's absolute-path rules.

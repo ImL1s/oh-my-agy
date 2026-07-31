@@ -641,25 +641,59 @@ function defaultAgyPluginAdapter(
   return {
     async run(argv) {
       return await new Promise((resolve) => {
-        const child = spawn(agyCommand, [...argv], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const detached = process.platform !== 'win32';
+        const child = spawn(agyCommand, [...argv], {
+          detached,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
         let stdout = '';
         let stderr = '';
         let outputBytes = 0;
         let timedOut = false;
         let overflowed = false;
         let settled = false;
-        let timer: NodeJS.Timeout;
+        let terminationRequested = false;
+        let timer: NodeJS.Timeout | undefined;
         let killFallback: NodeJS.Timeout | undefined;
-        const finish = (code: number, extraStderr = '') => {
+        const finish = (code: number, extraStderr = '', destroyPipes = false) => {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
+          if (timer !== undefined) clearTimeout(timer);
           if (killFallback !== undefined) clearTimeout(killFallback);
+          if (destroyPipes) {
+            try { child.stdout?.destroy(); } catch (_) { /* bounded cleanup 僅能盡力執行 */ }
+            try { child.stderr?.destroy(); } catch (_) { /* bounded cleanup 僅能盡力執行 */ }
+          }
           resolve({ argv: [...argv], code, stdout, stderr: `${stderr}${extraStderr}` });
         };
+        const terminateTree = () => {
+          if (child.pid === undefined) return;
+          if (process.platform !== 'win32') {
+            try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { /* 程序樹已結束 */ }
+            return;
+          }
+          try {
+            const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+              stdio: 'ignore',
+              windowsHide: true,
+            });
+            killer.once('error', () => {
+              try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+            });
+            killer.once('close', (status) => {
+              if (status === 0) return;
+              try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+            });
+          } catch (_) {
+            try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+          }
+        };
         const killWithFallback = (code: number, detail: string) => {
-          child.kill('SIGKILL');
-          killFallback = setTimeout(() => { finish(code, detail); }, 1_000);
+          if (terminationRequested || settled) return;
+          terminationRequested = true;
+          if (timer !== undefined) clearTimeout(timer);
+          terminateTree();
+          killFallback = setTimeout(() => { finish(code, detail, true); }, 1_000);
         };
         const capture = (chunk: Buffer | string, target: 'stdout' | 'stderr') => {
           if (settled || overflowed) return;
@@ -689,6 +723,7 @@ function defaultAgyPluginAdapter(
             timedOut
               ? 'E_PLUGIN_COMMAND_TIMEOUT'
               : overflowed ? 'E_PLUGIN_COMMAND_OUTPUT_OVERFLOW' : '',
+            terminationRequested,
           );
         });
         timer = setTimeout(() => {
