@@ -22,14 +22,20 @@ oma doctor --native
 - `native probe --live` is the only command that opts into a live probe. The v1
   executor always runs the bounded exact-text print canary used by Team and
   workflow workers. When the passive profile advertises structured JSON, it
-  runs a separate bounded JSON canary for that capability. It parses only
+  runs that separate bounded JSON canary first, then runs the route-authorizing
+  exact-text canary last so optional work cannot consume the print receipt's
+  freshness window. It parses only
   documented terminal fields and retains no response text. The policy's
   wall-clock, combined-output, and process-count ceilings are all enforced;
   process-tree overflow or an unavailable process counter leaves evidence
   indeterminate. A successful child exit is not accepted until the active or
-  final process-tree scan completes. Process-tree enumeration is asynchronous
-  and shares the probe's remaining deadline, so a slow Windows CIM query cannot
-  block the wall-clock timer. Timeout/overflow termination includes the Windows
+  final process-tree scan completes. POSIX inspection captures a PID baseline
+  before spawn, then combines one parent-tree/process-group snapshot with every
+  still-live PID created after that baseline. Detached children therefore
+  remain conservatively counted after their root exits. Enumeration is
+  asynchronous and shares the probe's remaining deadline, so a slow Windows
+  CIM query cannot block the wall-clock timer. Timeout/overflow termination
+  includes the Windows
   descendant tree, and a fixed force-settle backstop prevents inherited pipes
   from hanging beyond the outer bound. Every other
   side-effect domain receives an explicit `live_probe`/`indeterminate`

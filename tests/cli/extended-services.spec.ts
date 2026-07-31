@@ -332,7 +332,7 @@ exit 0
       expect(body.profile.capabilities.find(({ key }) => key === 'headless.json'))
         .toEqual(expect.objectContaining({ outcome: 'supported' }));
       const liveObservation = body.profile.capabilities
-        .find(({ key }) => key === 'headless.json')
+        .find(({ key }) => key === 'headless.print')
         ?.observations.find(({ source }) => source === 'live_probe');
       expect(liveObservation).toBeDefined();
       expect(Date.parse(liveObservation!.observedAt) + 1).toBeGreaterThanOrEqual(
@@ -343,8 +343,8 @@ exit 0
         .filter((entry) => entry.trim() !== '')
         .map((entry) => entry.trim().split('\n'));
       expect(liveCalls).toHaveLength(2);
-      expect(liveCalls[0]).not.toContain('--output-format');
-      expect(liveCalls[1]).toEqual(expect.arrayContaining(['--output-format', 'json']));
+      expect(liveCalls[0]).toEqual(expect.arrayContaining(['--output-format', 'json']));
+      expect(liveCalls[1]).not.toContain('--output-format');
       for (const liveArgv of liveCalls) {
         const timeoutIndex = liveArgv.indexOf('--print-timeout');
         expect(liveArgv.slice(timeoutIndex, timeoutIndex + 2)).toEqual(['--print-timeout', '45s']);

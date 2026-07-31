@@ -119,4 +119,39 @@ describe('bounded probe runner', () => {
       signal: 'SIGKILL',
     });
   }, 10_000);
+
+  it('never accepts success after detached descendants escape a dead root parent', async () => {
+    if (process.platform === 'win32') return;
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-probe-detached-count-'));
+    const pidPath = path.join(root, 'children.json');
+    const script = [
+      "const fs=require('fs');",
+      "const {spawn}=require('child_process');",
+      'const pids=[];',
+      'for(let index=0;index<9;index+=1){',
+      "const child=spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{detached:true,stdio:'ignore'});",
+      'pids.push(child.pid);child.unref();',
+      '}',
+      `fs.writeFileSync(${JSON.stringify(pidPath)},JSON.stringify(pids));`,
+    ].join('');
+    try {
+      const outcome = await runBoundedProbe({
+        command: process.execPath,
+        argv: ['-e', script],
+        timeoutMs: 5_000,
+        maximumOutputBytes: 64,
+        maximumProcesses: 8,
+      });
+      expect(outcome.status).not.toBe(0);
+      expect(outcome.processCountOverflow || outcome.error === 'E_PROBE_PROCESS_COUNT_UNAVAILABLE').toBe(true);
+    } finally {
+      try {
+        const pids = JSON.parse(fs.readFileSync(pidPath, 'utf8')) as number[];
+        for (const pid of pids) {
+          try { process.kill(pid, 'SIGKILL'); } catch (_) { /* 已結束 */ }
+        }
+      } catch (_) { /* root 未完成 pid 紀錄 */ }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }, 10_000);
 });

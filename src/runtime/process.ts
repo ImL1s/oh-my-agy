@@ -395,26 +395,13 @@ function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_INTEGER)
     || !Number.isSafeInteger(stopAfter) || stopAfter <= 0) return null;
   if (process.platform === 'win32') return null;
   try {
-    const seen = new Set<number>();
-    const queue = [rootPid];
-    while (queue.length > 0) {
-      const pid = queue.pop()!;
-      if (seen.has(pid)) continue;
-      seen.add(pid);
-      if (seen.size > stopAfter) return seen.size;
-      const listed = spawnSync('pgrep', ['-P', String(pid)], {
-        encoding: 'utf8',
-        timeout: 1_000,
-        maxBuffer: 64 * 1024,
-      });
-      if (listed.error !== undefined) return null;
-      if (listed.status !== 0 && listed.status !== 1) return null;
-      const children = listed.stdout.trim() === ''
-        ? []
-        : listed.stdout.trim().split('\n').map((line) => Number(line)).filter((n) => Number.isFinite(n));
-      for (const child of children) queue.push(child);
-    }
-    return seen.size;
+    const listed = spawnSync('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid='], {
+      encoding: 'utf8',
+      timeout: 1_000,
+      maxBuffer: 64 * 1024,
+    });
+    if (listed.error !== undefined || listed.status !== 0) return null;
+    return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter);
   } catch (_) {
     return null;
   }
@@ -428,6 +415,7 @@ export async function countProcessGroupAsync(
   rootPid: number,
   stopAfter = Number.MAX_SAFE_INTEGER,
   timeoutMs = 1_000,
+  baselinePids?: ReadonlySet<number>,
 ): Promise<number | null> {
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0
     || !Number.isSafeInteger(stopAfter) || stopAfter <= 0
@@ -436,19 +424,96 @@ export async function countProcessGroupAsync(
   if (process.platform === 'win32') {
     return countWindowsProcessTreeAsync(rootPid, stopAfter, deadlineAt);
   }
+  const listed = await runProcessInspection(
+    'ps',
+    ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'pgid='],
+    deadlineAt,
+  );
+  if (listed === null || listed.status !== 0) return null;
+  return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter, baselinePids, listed.pid);
+}
+
+/** 在 probe spawn 前非阻塞擷取 POSIX PID baseline，供 root 退出後保守追蹤新程序。 */
+export async function capturePosixProcessBaselineAsync(timeoutMs = 1_000): Promise<ReadonlySet<number> | null> {
+  if (process.platform === 'win32' || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) return null;
+  const listed = await runProcessInspection('ps', ['-A', '-o', 'pid='], Date.now() + timeoutMs);
+  if (listed === null || listed.status !== 0) return null;
+  const pids = new Set<number>();
+  for (const line of listed.stdout.split('\n')) {
+    if (line.trim() === '') continue;
+    if (!/^\s*\d+\s*$/u.test(line)) return null;
+    const pid = Number(line.trim());
+    if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+    if (pid !== listed.pid) pids.add(pid);
+  }
+  return pids;
+}
+
+interface PosixProcessSnapshotRow {
+  pid: number;
+  ppid: number;
+  pgid: number;
+}
+
+/**
+ * 以單一 ps snapshot 同時計算 parent tree 與 root process group。
+ * 有 pre-spawn baseline 時，root 已退出後仍保守計入所有新 PID，避免 setsid 子孫被 reparent 後消失。
+ * 無 baseline 的 legacy caller 若失去 root，只能在已觀察 group 超限時下結論，否則回 null。
+ */
+function countPosixProbeSnapshot(
+  output: string,
+  rootPid: number,
+  stopAfter: number,
+  baselinePids?: ReadonlySet<number>,
+  inspectorPid?: number | null,
+): number | null {
+  const rows: PosixProcessSnapshotRow[] = [];
+  for (const line of output.split('\n')) {
+    if (line.trim() === '') continue;
+    const match = /^\s*(\d+)\s+(\d+)\s+(\d+)\s*$/u.exec(line);
+    if (match === null) return null;
+    const row = { pid: Number(match[1]), ppid: Number(match[2]), pgid: Number(match[3]) };
+    if (!Number.isSafeInteger(row.pid) || row.pid <= 0
+      || !Number.isSafeInteger(row.ppid) || row.ppid < 0
+      || !Number.isSafeInteger(row.pgid) || row.pgid < 0) return null;
+    rows.push(row);
+  }
+  const eligibleRows = inspectorPid === undefined || inspectorPid === null
+    ? rows
+    : rows.filter(({ pid }) => pid !== inspectorPid);
+  const root = eligibleRows.find(({ pid }) => pid === rootPid);
+  const rootGroup = eligibleRows.filter(({ pid, pgid }) => pid !== rootPid && pgid === rootPid);
+  if (root === undefined) {
+    if (baselinePids === undefined) {
+      const historicalCount = 1 + rootGroup.length;
+      return historicalCount > stopAfter ? historicalCount : null;
+    }
+    const possiblyOwned = new Set<number>([rootPid]);
+    for (const row of eligibleRows) {
+      if (row.pgid === rootPid || !baselinePids.has(row.pid)) possiblyOwned.add(row.pid);
+      if (possiblyOwned.size > stopAfter) return possiblyOwned.size;
+    }
+    return possiblyOwned.size;
+  }
+  if (root.pgid !== rootPid) return null;
+
+  const children = new Map<number, PosixProcessSnapshotRow[]>();
+  for (const row of eligibleRows) {
+    const entries = children.get(row.ppid) ?? [];
+    entries.push(row);
+    children.set(row.ppid, entries);
+  }
   const seen = new Set<number>();
-  const queue = [rootPid];
+  const newlyStarted = baselinePids === undefined
+    ? []
+    : eligibleRows.filter(({ pid }) => pid !== rootPid && !baselinePids.has(pid));
+  const queue = [root, ...rootGroup, ...newlyStarted];
   while (queue.length > 0) {
-    const pid = queue.pop()!;
-    if (seen.has(pid)) continue;
-    seen.add(pid);
+    const row = queue.pop()!;
+    if (seen.has(row.pid)) continue;
+    seen.add(row.pid);
     if (seen.size > stopAfter) return seen.size;
-    const listed = await runProcessInspection('pgrep', ['-P', String(pid)], deadlineAt);
-    if (listed === null || (listed.status !== 0 && listed.status !== 1)) return null;
-    const children = listed.stdout.trim() === ''
-      ? []
-      : listed.stdout.trim().split('\n').map((line) => Number(line)).filter((n) => Number.isFinite(n));
-    for (const child of children) queue.push(child);
+    queue.push(...(children.get(row.pid) ?? []));
   }
   return seen.size;
 }
@@ -488,7 +553,7 @@ function runProcessInspection(
   command: string,
   argv: readonly string[],
   deadlineAt: number,
-): Promise<{ status: number | null; stdout: string } | null> {
+): Promise<{ status: number | null; stdout: string; pid: number | null } | null> {
   return new Promise((resolve) => {
     const remainingMs = deadlineAt - Date.now();
     if (remainingMs <= 0) {
@@ -499,7 +564,7 @@ function runProcessInspection(
     let output = Buffer.alloc(0);
     let child: ReturnType<typeof spawn>;
     let timer: NodeJS.Timeout | undefined;
-    const settle = (value: { status: number | null; stdout: string } | null) => {
+    const settle = (value: { status: number | null; stdout: string; pid: number | null } | null) => {
       if (settled) return;
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
@@ -533,7 +598,7 @@ function runProcessInspection(
       output = Buffer.concat([output, chunk]);
     });
     child.once('error', () => settle(null));
-    child.once('close', (status) => settle({ status, stdout: output.toString('utf8') }));
+    child.once('close', (status) => settle({ status, stdout: output.toString('utf8'), pid: child.pid ?? null }));
   });
 }
 

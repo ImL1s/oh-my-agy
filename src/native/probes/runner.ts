@@ -1,5 +1,5 @@
 import { spawn } from 'child_process';
-import { countProcessGroupAsync } from '../../runtime/process';
+import { capturePosixProcessBaselineAsync, countProcessGroupAsync } from '../../runtime/process';
 import { BoundedProbeOutcomeV1, BoundedProbeRequestV1 } from './types';
 
 const PROCESS_COUNT_INTERVAL_MS = 100;
@@ -11,20 +11,29 @@ export interface BoundedProbeRunnerDependencies {
 }
 
 /** 僅接受 argv 的 bounded runner，同時限制輸出、程序數與牆鐘時間。 */
-export function runBoundedProbe(
+export async function runBoundedProbe(
   request: Readonly<BoundedProbeRequestV1>,
   dependencies: Readonly<BoundedProbeRunnerDependencies> = {},
 ): Promise<BoundedProbeOutcomeV1> {
+  if (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0
+    || !Number.isSafeInteger(request.maximumOutputBytes) || request.maximumOutputBytes <= 0
+    || !Number.isSafeInteger(request.maximumProcesses) || request.maximumProcesses <= 0) {
+    return failedLimitsOutcome();
+  }
+  const deadlineAt = Date.now() + request.timeoutMs;
+  const processBaseline = dependencies.countProcesses !== undefined || process.platform === 'win32'
+    ? undefined
+    : await capturePosixProcessBaselineAsync(Math.min(PROCESS_COUNT_SCAN_TIMEOUT_MS, request.timeoutMs));
+  if (dependencies.countProcesses === undefined && process.platform !== 'win32' && processBaseline === null) {
+    return failedProcessCountOutcome();
+  }
+  if (Date.now() >= deadlineAt) {
+    return { ...failedProcessCountOutcome(), timedOut: true };
+  }
   return new Promise((resolve) => {
-    if (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0
-      || !Number.isSafeInteger(request.maximumOutputBytes) || request.maximumOutputBytes <= 0
-      || !Number.isSafeInteger(request.maximumProcesses) || request.maximumProcesses <= 0) {
-      resolve(failedLimitsOutcome());
-      return;
-    }
     const detached = process.platform !== 'win32';
-    const deadlineAt = Date.now() + request.timeoutMs;
-    const countProcesses = dependencies.countProcesses ?? countProcessGroupAsync;
+    const countProcesses = dependencies.countProcesses ?? ((rootPid, stopAfter, timeoutMs) =>
+      countProcessGroupAsync(rootPid, stopAfter, timeoutMs, processBaseline ?? undefined));
     const child = spawn(request.command, [...request.argv], {
       cwd: request.cwd,
       env: request.environment ?? process.env,
@@ -182,7 +191,7 @@ export function runBoundedProbe(
     timeoutTimer = setTimeout(() => {
       timedOut = true;
       terminateAndBoundSettlement();
-    }, request.timeoutMs);
+    }, Math.max(1, deadlineAt - Date.now()));
     void inspectProcessCount();
     if (!settled) {
       processCountTimer = setInterval(() => { void inspectProcessCount(); }, PROCESS_COUNT_INTERVAL_MS);
@@ -200,5 +209,18 @@ function failedLimitsOutcome(): BoundedProbeOutcomeV1 {
     outputOverflow: false,
     processCountOverflow: false,
     error: 'E_PROBE_INVALID_LIMITS',
+  };
+}
+
+function failedProcessCountOutcome(): BoundedProbeOutcomeV1 {
+  return {
+    status: null,
+    signal: null,
+    stdout: '',
+    stderr: '',
+    timedOut: false,
+    outputOverflow: false,
+    processCountOverflow: false,
+    error: 'E_PROBE_PROCESS_COUNT_UNAVAILABLE',
   };
 }

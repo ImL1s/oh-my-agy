@@ -37,11 +37,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   headroom.
 - Live canary observations are stamped after completion, and the existing
   text-only 1.1.6 headless adapter no longer requires unused JSON output.
+- When JSON is advertised, its optional canary now runs before the required
+  exact-text worker canary so optional probing cannot consume route-authority
+  freshness or authorize a different output mode.
 - Bounded native probes now enforce the policy process-count ceiling as well as
   combined output and wall-clock limits. Process-tree scans are asynchronous
-  and share the probe deadline; timeout/overflow termination covers the whole
-  Windows process tree, and a fixed force-settle backstop prevents a detached
-  descendant from holding inherited pipes open indefinitely.
+  and share the probe deadline. POSIX probes bind a pre-spawn PID baseline to
+  parent-tree/process-group snapshots so reparented detached descendants remain
+  conservatively counted after the root exits. Timeout/overflow termination
+  covers the whole Windows process tree, and a fixed force-settle backstop
+  prevents a detached descendant from holding inherited pipes open indefinitely.
 - Windows host identity lookup resolves `.exe` commands from a semicolon PATH
   and does not apply POSIX execute/ownership mode bits. Host, plugin, and route
   paths use the profile platform's absolute-path rules.

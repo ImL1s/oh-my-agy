@@ -50,8 +50,11 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
   `unknown`; it is neither unsupported nor success.
 - Native probe policy enforces wall-clock, combined-output, and process-count
   limits. A process-tree overflow or unavailable counter cannot yield verified
-  evidence. Process-tree inspection is non-blocking and deadline-bound, and
-  timeout cleanup has a bounded force-settle backstop.
+  evidence. Process-tree inspection is non-blocking and deadline-bound. POSIX
+  probes bind a pre-spawn PID baseline to a parent-tree/process-group snapshot
+  and conservatively count every still-live PID created after that baseline, so
+  detached descendants cannot disappear when the root exits. Timeout cleanup
+  has a bounded force-settle backstop.
 - `supported: true` is a compatibility projection. Routing additionally
   requires the policy's minimum tier and a valid identity-bound candidate or
   receipt.
@@ -59,8 +62,10 @@ There is no generic shell, filesystem-write, publish, or secret-reading tool.
 - Optional adapters stay disabled or unclaimed until explicitly configured.
 - `oma native capabilities` and `oma doctor --native` are passive. Only
   `oma native probe --live` opts in; v1 verifies the exact-text worker route and
-  separately verifies structured JSON when advertised. Every other side-effect
-  domain remains explicitly indeterminate.
+  separately verifies structured JSON when advertised. The optional JSON
+  canary runs first and the route-authorizing exact-text canary runs last so its
+  freshness is not spent on optional probing. Every other side-effect domain
+  remains explicitly indeterminate.
 - Offline fixtures and tests prove implementation behavior, not live-host
   parity. See [Native capability negotiation](./native-capabilities.md).
 - `oma production verify` is the authority for the `production_verified`

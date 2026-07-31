@@ -40,11 +40,11 @@ OMA 将产品拥有的能力与对 Antigravity 的观测分开。Host 观测改�
 - 已配置文件不等于 fresh-session discovery。
 - 版本字符串只是 metadata 与 cache identity，不是 feature gate。
 - Timeout、parse failure、矛盾/过期证据或 identity drift 都是 `unknown`，既不是 unsupported 也不是 success。
-- Native probe policy 会实际限制墙钟时间、合并输出与进程树数量。进程树测量采用非阻塞方式并共享剩余 deadline；进程数超限或无法测量时不能产生 verified 证据，timeout cleanup 另有有界 force-settle backstop。
+- Native probe policy 会实际限制墙钟时间、合并输出与进程树数量。进程树测量采用非阻塞方式并共享剩余 deadline；POSIX probe 会在 spawn 前绑定 PID baseline，再通过 parent-tree/process-group snapshot 保守计入 baseline 后仍存活的所有新 PID，因此 detached descendant 不会在 root 退出后消失。进程数超限或无法测量时不能产生 verified 证据，timeout cleanup 另有有界 force-settle backstop。
 - `supported: true` 只是 compatibility projection；routing 还必须满足 policy 最低 tier，并持有有效、绑定 identity 的 candidate/receipt。
 - UI 标签与私有文件不是公开能力证据。
 - 可选 adapter 保持 disabled 或 unclaimed，直到显式配置。
-- `oma native capabilities` 与 `oma doctor --native` 是被动路径；只有 `oma native probe --live` 会 opt-in。v1 只执行一个有界公开 headless canary，其他带副作用 domain 都明确保持 indeterminate。
+- `oma native capabilities` 与 `oma doctor --native` 是被动路径；只有 `oma native probe --live` 会 opt-in。v1 在 help 声明 JSON 时先执行 optional JSON canary，最后再执行实际授权 worker route 的 exact-text canary，避免 optional work 消耗 print evidence 的 freshness；其他带副作用 domain 都明确保持 indeterminate。
 - 离线 fixture 与测试只证明实现行为，不证明 live-host parity。详见 [Native capability negotiation](./native-capabilities.md)。
 - `oma production verify` 是 `production_verified` 宣称的权威；普通单元测试仅建立实现证据。
 - Workflow production evidence 仅由 `oma production probe workflow` 创建，并使用规范的 host、plugin、repository 与 repository-external state-root 解析。Host authority 绑定规范安装的 `agy` realpath、字节长度与 SHA-256——不仅依赖其报告的 version/help 输出。Package 消费者不能 import 内部 workflow authority 或 production-evidence 模块。产品执行仅作为 non-exported CLI closure 存在；每个发出的 workflow 模块都有精确 export allowlist，且不暴露 executor、dispatcher 或 authority factory。可 import 的 generic runner 永久为 advisory，且 dispatch 零个 task，即使 package 代码读取 receipt key 并重建旧的 structural marker。
