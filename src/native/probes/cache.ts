@@ -45,7 +45,8 @@ export class HostCapabilityProfileCacheV1 {
     if (!profile.cacheable || profile.identityStatus !== 'matched') return 'conflict';
     const current = this.store.read(HOST_CAPABILITY_CACHE_KEY_V1);
     if (!current.ok) {
-      if (current.error.code === 'E_CORRUPT_STATE' || current.error.code === 'E_FUTURE_SCHEMA') {
+      if (current.error.code === 'E_FUTURE_SCHEMA') return 'conflict';
+      if (current.error.code === 'E_CORRUPT_STATE') {
         const exactCachePath = path.join(this.store.root, `${HOST_CAPABILITY_CACHE_KEY_V1}.json`);
         fs.rmSync(exactCachePath, { force: true });
       }
@@ -53,6 +54,7 @@ export class HostCapabilityProfileCacheV1 {
       return created.ok ? 'created' : 'conflict';
     }
     if (current.value.value.profileDigest === profile.profileDigest) return 'unchanged';
+    if (shouldPreserveCurrentAuthority(current.value.value, profile)) return 'unchanged';
     const updated = await this.store.compareAndSwap(
       HOST_CAPABILITY_CACHE_KEY_V1,
       current.value.revision,
@@ -101,4 +103,22 @@ export function isHostCapabilityProfileFresh(profileValue: unknown, now: string)
       return ageMs >= 0 && ageMs <= policy.freshnessMs;
     });
   });
+}
+
+function shouldPreserveCurrentAuthority(
+  current: Readonly<HostCapabilityProfileV1>,
+  incoming: Readonly<HostCapabilityProfileV1>,
+): boolean {
+  if (current.cacheKey !== incoming.cacheKey
+    || hasPositiveLiveAuthority(incoming)
+    || !hasPositiveLiveAuthority(current)) return false;
+  const comparisonTime = Date.parse(current.generatedAt) > Date.parse(incoming.generatedAt)
+    ? current.generatedAt
+    : incoming.generatedAt;
+  return isHostCapabilityProfileFresh(current, comparisonTime);
+}
+
+function hasPositiveLiveAuthority(profile: Readonly<HostCapabilityProfileV1>): boolean {
+  return profile.capabilities.some(({ observations }) => observations.some(({ source, result }) =>
+    source === 'live_probe' && result === 'positive'));
 }
