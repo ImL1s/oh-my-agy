@@ -16,7 +16,7 @@ const HELP_TOKENS: Readonly<Record<string, readonly RegExp[]>> = Object.freeze({
   'headless.print': [/(?:^|\s)-p(?:\s|,|$)/mu, exactLongOption('print')],
   'headless.json': [
     /(?:^|\s)--output-format(?:=|\s+)json(?=$|\s)/mu,
-    /^[ \t]*--output-format(?:[ \t=,]|$)[^\r\n]*(?:[\s,(|])json(?=$|[\s,)|])/mu,
+    /^[ \t]*--output-format(?=[ \t=,]|$)[^\r\n]*(?:[\s,(|])json(?=$|[\s,)|])/mu,
   ],
   'headless.stream_json': [exactHelpToken('(?:--)?stream-json')],
   'headless.json_schema': [exactLongOption('json-schema')],
