@@ -5,6 +5,8 @@ import { ContractViolation, assertCanonicalUtcTimestamp, canonicalBytesV1 } from
 export const HOST_CAPABILITY_PROFILE_SCHEMA_V1 = 'oma.host-capability-profile/v1' as const;
 export const HOST_CAPABILITY_POLICY_VERSION_V1 = 1 as const;
 export const HOST_CAPABILITY_PROBE_SET_VERSION_V1 = 1 as const;
+/** Live 模型 canary 會載入使用者已設定的 MCP；仍以固定累計 lineage 預算 fail closed。 */
+export const LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1 = 32 as const;
 
 export const EVIDENCE_TIERS = [
   'configured', 'installed', 'enabled', 'loadable', 'observed', 'healthy', 'verified',
@@ -118,6 +120,7 @@ const DEFAULT_LIMITS = Object.freeze({
 const MODEL_CANARY_LIMITS = Object.freeze({
   ...DEFAULT_LIMITS,
   timeoutMs: 60_000,
+  maximumProcesses: LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1,
 });
 const EVIDENCE_PREDICATES = Object.freeze({
   positive: 'result_positive' as const,

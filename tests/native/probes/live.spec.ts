@@ -7,6 +7,7 @@ import {
 } from '../../../src/native/probes/live';
 import { LiveProbeContextV1 } from '../../../src/native/probes/types';
 import { absentPluginIdentity } from '../../../src/native/probes/identity';
+import { LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1 } from '../../../src/native/capability-profile';
 
 const context: LiveProbeContextV1 = {
   mode: 'live', liveOptIn: true, evaluationTimestamp: '2026-07-31T12:00:00.000Z', identityDigest: 'd'.repeat(64),
@@ -59,6 +60,7 @@ describe('explicit live probe', () => {
 
   it('allows the advertised model timeout plus bounded startup overhead', async () => {
     expect(LIVE_MODEL_CANARY_OUTER_TIMEOUT_MS).toBeGreaterThan(LIVE_MODEL_CANARY_PRINT_TIMEOUT_MS);
+    expect(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1).toBe(32);
     let observedTimeoutMs = 0;
     const result = await runExplicitLiveProbe({
       live: true,
@@ -70,7 +72,7 @@ describe('explicit live probe', () => {
       context,
       runner: async (request) => {
         observedTimeoutMs = request.timeoutMs;
-        expect(request.maximumProcesses).toBe(8);
+        expect(request.maximumProcesses).toBe(LIVE_MODEL_CANARY_MAXIMUM_PROCESSES_V1);
         return { status: 0, signal: null, stdout: 'ok\n', stderr: '', timedOut: false, outputOverflow: false, processCountOverflow: false };
       },
     });

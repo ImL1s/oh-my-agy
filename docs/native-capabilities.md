@@ -34,6 +34,9 @@ oma doctor --native
   It parses only
   documented terminal fields and retains no response text. The policy's
   wall-clock, combined-output, and process-count ceilings are all enforced;
+  model-bearing canaries use a fixed 32-process cumulative lineage budget so
+  Antigravity can start the user's configured MCP services, while passive
+  help/version inspection remains at 8;
   process-tree overflow or an unavailable process counter leaves evidence
   indeterminate. A successful child exit is not accepted until the active or
   final process-tree scan completes. POSIX inspection captures a PID plus start
