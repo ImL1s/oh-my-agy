@@ -1,12 +1,20 @@
-import { spawn, spawnSync } from 'child_process';
-import { countProcessGroup } from '../../runtime/process';
+import { spawn } from 'child_process';
+import { countProcessGroupAsync } from '../../runtime/process';
 import { BoundedProbeOutcomeV1, BoundedProbeRequestV1 } from './types';
 
 const PROCESS_COUNT_INTERVAL_MS = 100;
 const FORCE_SETTLE_AFTER_KILL_MS = 1_000;
+const PROCESS_COUNT_SCAN_TIMEOUT_MS = 1_000;
+
+export interface BoundedProbeRunnerDependencies {
+  countProcesses?: (rootPid: number, stopAfter: number, timeoutMs: number) => Promise<number | null>;
+}
 
 /** 僅接受 argv 的 bounded runner，同時限制輸出、程序數與牆鐘時間。 */
-export function runBoundedProbe(request: Readonly<BoundedProbeRequestV1>): Promise<BoundedProbeOutcomeV1> {
+export function runBoundedProbe(
+  request: Readonly<BoundedProbeRequestV1>,
+  dependencies: Readonly<BoundedProbeRunnerDependencies> = {},
+): Promise<BoundedProbeOutcomeV1> {
   return new Promise((resolve) => {
     if (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0
       || !Number.isSafeInteger(request.maximumOutputBytes) || request.maximumOutputBytes <= 0
@@ -15,6 +23,8 @@ export function runBoundedProbe(request: Readonly<BoundedProbeRequestV1>): Promi
       return;
     }
     const detached = process.platform !== 'win32';
+    const deadlineAt = Date.now() + request.timeoutMs;
+    const countProcesses = dependencies.countProcesses ?? countProcessGroupAsync;
     const child = spawn(request.command, [...request.argv], {
       cwd: request.cwd,
       env: request.environment ?? process.env,
@@ -29,6 +39,7 @@ export function runBoundedProbe(request: Readonly<BoundedProbeRequestV1>): Promi
     let processCountOverflow = false;
     let settled = false;
     let terminationRequested = false;
+    let processInspectionInFlight = false;
     let error: string | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
     let processCountTimer: NodeJS.Timeout | undefined;
@@ -65,13 +76,20 @@ export function runBoundedProbe(request: Readonly<BoundedProbeRequestV1>): Promi
       if (process.platform === 'win32') {
         // Windows 沒有 POSIX process group；taskkill /T 才能界定整棵子程序樹。
         try {
-          spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+          const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
             stdio: 'ignore',
-            timeout: 2_000,
             windowsHide: true,
           });
-        } catch (_) { /* 失敗時退回下方 direct-child kill */ }
-        try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+          killer.once('error', () => {
+            try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+          });
+          killer.once('close', (status) => {
+            if (status === 0) return;
+            try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+          });
+        } catch (_) {
+          try { child.kill('SIGKILL'); } catch (_) { /* 程序已結束 */ }
+        }
         return;
       }
       try { process.kill(-child.pid, 'SIGKILL'); } catch (_) { /* 程序已結束 */ }
@@ -103,15 +121,32 @@ export function runBoundedProbe(request: Readonly<BoundedProbeRequestV1>): Promi
       }
     };
 
-    const inspectProcessCount = () => {
-      if (settled || processCountOverflow || child.pid === undefined) return;
-      const count = countProcessGroup(child.pid, request.maximumProcesses);
-      if (count === null) {
-        error = 'E_PROBE_PROCESS_COUNT_UNAVAILABLE';
-        terminateAndBoundSettlement();
-      } else if (count > request.maximumProcesses) {
-        processCountOverflow = true;
-        terminateAndBoundSettlement();
+    const inspectProcessCount = async () => {
+      if (settled || terminationRequested || processInspectionInFlight || child.pid === undefined) return;
+      processInspectionInFlight = true;
+      try {
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs <= 0) return;
+        const count = await countProcesses(
+          child.pid,
+          request.maximumProcesses,
+          Math.min(PROCESS_COUNT_SCAN_TIMEOUT_MS, remainingMs),
+        );
+        if (settled || terminationRequested) return;
+        if (count === null) {
+          error = 'E_PROBE_PROCESS_COUNT_UNAVAILABLE';
+          terminateAndBoundSettlement();
+        } else if (count > request.maximumProcesses) {
+          processCountOverflow = true;
+          terminateAndBoundSettlement();
+        }
+      } catch (_) {
+        if (!settled && !terminationRequested) {
+          error = 'E_PROBE_PROCESS_COUNT_UNAVAILABLE';
+          terminateAndBoundSettlement();
+        }
+      } finally {
+        processInspectionInFlight = false;
       }
     };
 
@@ -126,9 +161,9 @@ export function runBoundedProbe(request: Readonly<BoundedProbeRequestV1>): Promi
       timedOut = true;
       terminateAndBoundSettlement();
     }, request.timeoutMs);
-    inspectProcessCount();
+    void inspectProcessCount();
     if (!settled) {
-      processCountTimer = setInterval(inspectProcessCount, PROCESS_COUNT_INTERVAL_MS);
+      processCountTimer = setInterval(() => { void inspectProcessCount(); }, PROCESS_COUNT_INTERVAL_MS);
     }
   });
 }

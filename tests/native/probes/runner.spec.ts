@@ -17,6 +17,22 @@ describe('bounded probe runner', () => {
     expect(outcome).toMatchObject({ timedOut: true, signal: 'SIGKILL' });
   });
 
+  it('keeps the wall-clock deadline independent from a stalled process scan', async () => {
+    const started = Date.now();
+    const outcome = await runBoundedProbe(
+      {
+        command: process.execPath,
+        argv: ['-e', 'setInterval(() => {}, 1000)'],
+        timeoutMs: 50,
+        maximumOutputBytes: 64,
+        maximumProcesses: 8,
+      },
+      { countProcesses: async () => new Promise<number | null>(() => {}) },
+    );
+    expect(outcome).toMatchObject({ timedOut: true, signal: 'SIGKILL' });
+    expect(Date.now() - started).toBeLessThan(1_500);
+  });
+
   it('force-settles when a detached descendant keeps inherited pipes open', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-probe-force-settle-'));
     const pidPath = path.join(root, 'grandchild.pid');

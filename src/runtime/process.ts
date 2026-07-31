@@ -390,10 +390,10 @@ function redactedArgvEvidence(value: string): string {
 }
 
 /** 計算 pid 及其子孫數量；超過 policy 上限後立即停止列舉。失敗回 null。 */
-export function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_INTEGER): number | null {
+function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_INTEGER): number | null {
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0
     || !Number.isSafeInteger(stopAfter) || stopAfter <= 0) return null;
-  if (process.platform === 'win32') return countWindowsProcessTree(rootPid, stopAfter);
+  if (process.platform === 'win32') return null;
   try {
     const seen = new Set<number>();
     const queue = [rootPid];
@@ -420,7 +420,44 @@ export function countProcessGroup(rootPid: number, stopAfter = Number.MAX_SAFE_I
   }
 }
 
-function countWindowsProcessTree(rootPid: number, stopAfter: number): number | null {
+/**
+ * 非阻塞程序樹計數，供有硬性 wall-clock deadline 的 capability probes 使用。
+ * 整次列舉共用一個 deadline，避免每個子程序或 PowerShell fallback 各自重置 timeout。
+ */
+export async function countProcessGroupAsync(
+  rootPid: number,
+  stopAfter = Number.MAX_SAFE_INTEGER,
+  timeoutMs = 1_000,
+): Promise<number | null> {
+  if (!Number.isSafeInteger(rootPid) || rootPid <= 0
+    || !Number.isSafeInteger(stopAfter) || stopAfter <= 0
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) return null;
+  const deadlineAt = Date.now() + timeoutMs;
+  if (process.platform === 'win32') {
+    return countWindowsProcessTreeAsync(rootPid, stopAfter, deadlineAt);
+  }
+  const seen = new Set<number>();
+  const queue = [rootPid];
+  while (queue.length > 0) {
+    const pid = queue.pop()!;
+    if (seen.has(pid)) continue;
+    seen.add(pid);
+    if (seen.size > stopAfter) return seen.size;
+    const listed = await runProcessInspection('pgrep', ['-P', String(pid)], deadlineAt);
+    if (listed === null || (listed.status !== 0 && listed.status !== 1)) return null;
+    const children = listed.stdout.trim() === ''
+      ? []
+      : listed.stdout.trim().split('\n').map((line) => Number(line)).filter((n) => Number.isFinite(n));
+    for (const child of children) queue.push(child);
+  }
+  return seen.size;
+}
+
+async function countWindowsProcessTreeAsync(
+  rootPid: number,
+  stopAfter: number,
+  deadlineAt: number,
+): Promise<number | null> {
   const script = [
     '$ErrorActionPreference = "Stop"',
     '$rows = Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId',
@@ -435,17 +472,69 @@ function countWindowsProcessTree(rootPid: number, stopAfter: number): number | n
     '[Console]::Out.Write($seen.Count)',
   ].join('; ');
   for (const command of ['powershell.exe', 'pwsh.exe']) {
-    const result = spawnSync(command, ['-NoProfile', '-NonInteractive', '-Command', script], {
-      encoding: 'utf8',
-      timeout: 5_000,
-      maxBuffer: 64 * 1024,
-      windowsHide: true,
-    });
-    if (result.error !== undefined || result.status !== 0) continue;
+    const result = await runProcessInspection(
+      command,
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      deadlineAt,
+    );
+    if (result === null || result.status !== 0) continue;
     const count = Number(result.stdout.trim());
     if (Number.isSafeInteger(count) && count > 0) return count;
   }
   return null;
+}
+
+function runProcessInspection(
+  command: string,
+  argv: readonly string[],
+  deadlineAt: number,
+): Promise<{ status: number | null; stdout: string } | null> {
+  return new Promise((resolve) => {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) {
+      resolve(null);
+      return;
+    }
+    let settled = false;
+    let output = Buffer.alloc(0);
+    let child: ReturnType<typeof spawn>;
+    let timer: NodeJS.Timeout | undefined;
+    const settle = (value: { status: number | null; stdout: string } | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      resolve(value);
+    };
+    try {
+      child = spawn(command, [...argv], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      });
+    } catch (_) {
+      resolve(null);
+      return;
+    }
+    if (child.stdout === null) {
+      try { child.kill('SIGKILL'); } catch (_) { /* inspection 未啟動 */ }
+      resolve(null);
+      return;
+    }
+    timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch (_) { /* inspection 已結束 */ }
+      settle(null);
+    }, remainingMs);
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) return;
+      if (output.length + chunk.length > 64 * 1024) {
+        try { child.kill('SIGKILL'); } catch (_) { /* inspection 已結束 */ }
+        settle(null);
+        return;
+      }
+      output = Buffer.concat([output, chunk]);
+    });
+    child.once('error', () => settle(null));
+    child.once('close', (status) => settle({ status, stdout: output.toString('utf8') }));
+  });
 }
 
 function invokeSpawnCallback(

@@ -193,8 +193,10 @@ function assertKeys(value: Record<string, unknown>, expected: readonly string[])
 
 function assertAuthorityFile(target: string): void {
   const stat = fs.lstatSync(target);
+  // Windows 不保留 POSIX owner/group/other mode 語意；只能在 POSIX 主機強制 0600。
+  const unsafePosixMode = process.platform !== 'win32' && (stat.mode & 0o077) !== 0;
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size < 1 || stat.size > MAXIMUM_AUTHORITY_BYTES
-    || (stat.mode & 0o077) !== 0
+    || unsafePosixMode
     || (typeof process.getuid === 'function' && stat.uid !== process.getuid())) {
     throw violation('Worker route authority file ownership, type, or bounds are invalid');
   }

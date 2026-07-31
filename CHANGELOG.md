@@ -36,12 +36,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   renew live evidence when a 30-second route receipt lacks five seconds of
   headroom.
 - Bounded native probes now enforce the policy process-count ceiling as well as
-  combined output and wall-clock limits. Timeout/overflow termination covers
-  the whole Windows process tree, and a fixed force-settle backstop prevents a
-  detached descendant from holding inherited pipes open indefinitely.
+  combined output and wall-clock limits. Process-tree scans are asynchronous
+  and share the probe deadline; timeout/overflow termination covers the whole
+  Windows process tree, and a fixed force-settle backstop prevents a detached
+  descendant from holding inherited pipes open indefinitely.
 - Windows host identity lookup resolves `.exe` commands from a semicolon PATH
   and does not apply POSIX execute/ownership mode bits. Host, plugin, and route
   paths use the profile platform's absolute-path rules.
+- Worker route-authority files enforce POSIX permission bits only on POSIX;
+  Windows still validates type, bounds, containment, identity, and digest.
 
 ## [0.4.1] — 2026-07-24
 

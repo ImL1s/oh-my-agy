@@ -9,7 +9,11 @@ import {
   assembleHostCapabilityProfile,
 } from '../../src/native/capability-profile';
 import { routeTeamWorkerProvider } from '../../src/team/provider';
-import { createWorkerRouteAuthority, writeWorkerRouteAuthority } from '../../src/team/route-authority';
+import {
+  consumeWorkerRouteAuthority,
+  createWorkerRouteAuthority,
+  writeWorkerRouteAuthority,
+} from '../../src/team/route-authority';
 
 describe('worker-bootstrap', () => {
   test('writes marker, spawns mock agy with managed env, no claim plaintext in descriptor', () => {
@@ -75,6 +79,19 @@ describe('worker-bootstrap', () => {
         stateRoot: root, teamId: 't', taskId: 'a', generation: 1,
         contextDigest, profile, receipt: selected.value, now: selectedAt,
       });
+      const originalPlatform = process.platform;
+      const authorityPath = writeWorkerRouteAuthority(root, routeAuthority);
+      fs.chmodSync(authorityPath, 0o666);
+      try {
+        Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' });
+        expect(consumeWorkerRouteAuthority({
+          stateRoot: root, teamId: 't', taskId: 'a', generation: 1,
+          contextDigest, provider: 'agy_headless', requestMode: 'headless',
+          resolvedExecutable: host.realpath, now: selectedAt,
+        }).authorityDigest).toBe(routeAuthority.authorityDigest);
+      } finally {
+        Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform });
+      }
       writeWorkerRouteAuthority(root, routeAuthority);
       const desc = {
         schemaVersion: 1,

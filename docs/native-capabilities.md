@@ -25,9 +25,11 @@ oma doctor --native
   only documented terminal fields and retains no response text. The policy's
   wall-clock, combined-output, and process-count ceilings are all enforced;
   process-tree overflow or an unavailable process counter leaves evidence
-  indeterminate. Timeout/overflow termination includes the Windows descendant
-  tree, and a fixed force-settle backstop prevents inherited pipes from hanging
-  beyond the outer bound. Every other
+  indeterminate. Process-tree enumeration is asynchronous and shares the
+  probe's remaining deadline, so a slow Windows CIM query cannot block the
+  wall-clock timer. Timeout/overflow termination includes the Windows
+  descendant tree, and a fixed force-settle backstop prevents inherited pipes
+  from hanging beyond the outer bound. Every other
   side-effect domain receives an explicit `live_probe`/`indeterminate`
   observation with a domain-specific unavailable code until a bounded public
   executor exists. It never inspects private sidecar/brain internals.
