@@ -6,7 +6,7 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
-## [0.5.1] — 2026-07-31
+## [0.5.1] — 2026-08-01
 
 ### Fixed
 
