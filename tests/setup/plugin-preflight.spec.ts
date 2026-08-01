@@ -33,6 +33,7 @@ function createPackageSurface(root: string): void {
     },
   }));
   fs.writeFileSync(path.join(root, 'dist', 'bin', 'oma.js'), '#!/usr/bin/env node\n');
+  fs.chmodSync(path.join(root, 'dist', 'bin', 'oma.js'), 0o755);
   fs.writeFileSync(path.join(root, 'dist', 'src', 'hooks', 'pre-invocation.js'), 'module.exports = {};\n');
   fs.writeFileSync(path.join(root, 'dist', 'src', 'hooks', 'stop.js'), 'module.exports = {};\n');
   fs.writeFileSync(path.join(root, 'skills', 'oma-runtime', 'SKILL.md'), '# Runtime\n');

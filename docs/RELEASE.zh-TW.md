@@ -3,9 +3,11 @@
 English: [RELEASE.md](./RELEASE.md) · [简体中文](./RELEASE.zh.md) · [繁體中文](./RELEASE.zh-TW.md)
 ## 目前渠道策略
 
-OMA `0.5.0` 將 GitHub Release tarball 加 `SHA256SUMS` 視為唯一可安裝的發佈渠道。本儲存庫**目前不**發佈到 npmjs.org 或 GitHub Packages。`@iml1s/oh-my-agy` 是 tarball 內的 package identity，不能證明 registry 條目存在。
+OMA `0.5.1` 將 GitHub Release tarball 加 `SHA256SUMS` 視為唯一可安裝的發佈渠道。本儲存庫**目前不**發佈到 npmjs.org 或 GitHub Packages。`@iml1s/oh-my-agy` 是 tarball 內的 package identity，不能證明 registry 條目存在。
 
 `.github/workflows/release.yml` 刻意僅做驗證。它擁有唯讀權限，不能建立 tag、GitHub Release、asset 或 package。
+
+`v0.5.0` 已由 `v0.5.1` 取代：該 archive 保留了產生後 CLI 的不可執行權限，導致安裝後的 `oma`/`omy` symlink 無法直接執行。請使用 `v0.5.1` 或更新版本。
 
 ## 安裝
 
@@ -49,6 +51,8 @@ npm run test:package
 npm run smoke
 npm pack --dry-run
 ```
+
+決定性 gate 要求建置後的 CLI 可執行；全新 HOME 的 release installer 測試會直接執行 `oma --version` 與 `omy --version`。若 archive 遺失 execute bit，install preflight 會在任何 host 變更前拒絕它。
 
 `npm run test:production` 是獨立的 live gate。它僅接受新鮮（24 小時內）、schema-v1、且綁定精確候選 Git OID 的證據，涵蓋：
 

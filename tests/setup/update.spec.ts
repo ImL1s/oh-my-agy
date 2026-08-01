@@ -176,6 +176,49 @@ describe('immutable update and doctor gate', () => {
     expect(fs.existsSync(stateRoot)).toBe(false);
   });
 
+  test('preflight rejects a non-executable CLI before any install mutation', () => {
+    fs.chmodSync(path.join(source, 'dist', 'bin', 'oma.js'), 0o644);
+    const result = preflightImmutableInstallCandidate({
+      packageRoot: source,
+      mode: 'development',
+    });
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'E_VALIDATOR_REJECTED',
+        message: 'CLI entrypoint is not executable',
+      }),
+    }));
+    expect(fs.existsSync(stateRoot)).toBe(false);
+    expect(fs.existsSync(installedRoot)).toBe(true);
+  });
+
+  test('updater rejects a non-executable CLI before adapter or state mutation', async () => {
+    fs.chmodSync(path.join(source, 'dist', 'bin', 'oma.js'), 0o644);
+    const adapter = new InstallingAdapter(installedRoot);
+    const updater = new ImmutableInstallUpdater({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      binDir,
+      adapter,
+      mode: 'development',
+      doctorProbe: async () => probe(0),
+    });
+    const result = await updater.run();
+    expect(result).toEqual(expect.objectContaining({
+      ok: false,
+      error: expect.objectContaining({
+        code: 'E_VALIDATOR_REJECTED',
+        message: 'CLI entrypoint is not executable',
+      }),
+    }));
+    expect(adapter.calls).toEqual([]);
+    expect(fs.existsSync(stateRoot)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('0.9.0');
+  });
+
   test('switches CLI to immutable stage, writes a 0400 receipt, and binds exact installed bytes', async () => {
     const updater = new ImmutableInstallUpdater({
       packageRoot: source,

@@ -67,6 +67,8 @@ describe('Antigravity package surface', () => {
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
     expect(second.value.digest).toBe(first.value.digest);
+    expect(first.value.inventory.find((entry) => entry.path === first.value.entrypoints.cli))
+      .toEqual(expect.objectContaining({ executable: true }));
     expect(first.value.inventory.map((entry) => entry.path)).toEqual(
       [...first.value.inventory.map((entry) => entry.path)].sort((left, right) =>
         Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))),

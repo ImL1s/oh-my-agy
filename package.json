@@ -1,6 +1,6 @@
 {
   "name": "@iml1s/oh-my-agy",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "OMA — session slash skills (agy /autopilot; Claude/Grok /oh-my-agy:autopilot) + optional oma CLI ledger",
   "main": "dist/bin/oma.js",
   "exports": {
@@ -41,7 +41,7 @@
     "package.json"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"require('node:fs').chmodSync('dist/bin/oma.js', 0o755)\"",
     "prepack": "npm run build",
     "test:unit": "jest --config jest.unit.config.js --runInBand",
     "test:e2e": "jest --config jest.config.js --runInBand",

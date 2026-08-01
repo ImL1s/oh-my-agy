@@ -57,6 +57,20 @@ export interface ResolveInstalledPluginIdentityInput {
   homeDir?: string;
 }
 
+export function validateRunnablePackageEntrypoints(
+  identity: Readonly<PackageIdentityV1>,
+): Result<void, RuntimeError> {
+  const cliEntrypoint = identity.inventory.find(
+    (entry) => entry.path === identity.entrypoints.cli,
+  );
+  if (cliEntrypoint?.executable !== true) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'CLI entrypoint is not executable', {
+      entrypoint: identity.entrypoints.cli,
+    }));
+  }
+  return ok(undefined);
+}
+
 const REQUIRED_RELATIVE_PATHS = [
   'package.json',
   'plugin.json',
@@ -323,6 +337,8 @@ export function stageImmutablePackage(input: {
 }): Result<{ stagePath: string; identity: PackageIdentityV1 }, RuntimeError> {
   const source = computePackageIdentity(input.packageRoot);
   if (!source.ok) return source;
+  const runnable = validateRunnablePackageEntrypoints(source.value);
+  if (!runnable.ok) return runnable;
   const stagesRoot = path.resolve(input.stagesRoot);
   const stagePath = path.join(stagesRoot, source.value.digest);
   try {

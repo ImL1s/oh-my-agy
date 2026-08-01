@@ -16,9 +16,10 @@ test -f dist/src/setup/installed-identity.js
 test -f dist/src/setup/receipt.js
 test -f dist/src/setup/update.js
 test -f dist/src/setup/uninstall.js
+test -x dist/bin/oma.js
 
 node dist/bin/oma.js --help | grep -q 'ralph --'
-node dist/bin/oma.js --version
+dist/bin/oma.js --version
 
 PACK="$(npm pack --silent)"
 trap 'rm -f "$PACK"' EXIT

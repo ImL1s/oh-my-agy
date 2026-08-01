@@ -4,13 +4,17 @@ English | [简体中文](./RELEASE.zh.md) | [繁體中文](./RELEASE.zh-TW.md)
 
 ## Current channel policy
 
-OMA `0.5.0` treats a GitHub Release tarball plus `SHA256SUMS` as the only
+OMA `0.5.1` treats a GitHub Release tarball plus `SHA256SUMS` as the only
 installable release channel. The repository does **not** currently publish to
 npmjs.org or GitHub Packages. `@iml1s/oh-my-agy` is the package identity inside
 the tarball, not proof that a registry entry exists.
 
 `.github/workflows/release.yml` is deliberately verification-only. It has
 read-only permissions and cannot create a tag, GitHub Release, asset, or package.
+
+`v0.5.0` is superseded by `v0.5.1`: its archive preserved the generated CLI as
+non-executable, so the installed `oma`/`omy` symlinks could not be invoked
+directly. Use `v0.5.1` or newer.
 
 ## Install
 
@@ -54,6 +58,11 @@ npm run test:package
 npm run smoke
 npm pack --dry-run
 ```
+
+The deterministic gates require the built CLI to be executable and the
+fresh-home release installer tests invoke both `oma --version` and
+`omy --version` directly. Install preflight rejects an archive that loses the
+execute bit before any host mutation.
 
 `npm run test:production` is a separate live gate. It accepts only fresh
 (within 24 hours), schema-v1 evidence bound to the exact candidate Git OID for:
