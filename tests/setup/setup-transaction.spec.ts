@@ -30,7 +30,8 @@ function surface(root: string, version: string, marker = version): void {
       Stop: [{ command: 'node "${extensionPath}/dist/src/hooks/stop.js"' }],
     },
   }));
-  fs.writeFileSync(path.join(root, 'dist', 'bin', 'oma.js'), marker);
+  fs.writeFileSync(path.join(root, 'dist', 'bin', 'oma.js'), `#!/usr/bin/env node\n${marker}\n`);
+  fs.chmodSync(path.join(root, 'dist', 'bin', 'oma.js'), 0o755);
   fs.writeFileSync(path.join(root, 'dist', 'src', 'hooks', 'pre-invocation.js'), marker);
   fs.writeFileSync(path.join(root, 'dist', 'src', 'hooks', 'stop.js'), marker);
   fs.writeFileSync(path.join(root, 'skills', 'runtime', 'SKILL.md'), marker);

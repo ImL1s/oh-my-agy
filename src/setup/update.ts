@@ -8,7 +8,10 @@ import { runtimeError, RuntimeError } from '../runtime/errors';
 import { resolveStateRoot } from '../runtime/state-root';
 import { Result, err, ok } from '../runtime/types';
 import { doctorReportToLines, runDoctor } from './doctor';
-import { computePackageIdentity } from './installed-identity';
+import {
+  computePackageIdentity,
+  validateRunnablePackageEntrypoints,
+} from './installed-identity';
 import { PluginCommandAdapter, PluginCommandResult } from './plugin';
 import {
   InstallReceiptV1,
@@ -89,6 +92,8 @@ export function preflightImmutableInstallCandidate(input: {
   if (input.mode === 'release' && isDirtyGitSource(identity.value.rootPath)) {
     return err(runtimeError('E_VALIDATOR_REJECTED', 'release install refuses a dirty/local checkout'));
   }
+  const runnable = validateRunnablePackageEntrypoints(identity.value);
+  if (!runnable.ok) return runnable;
   if (input.expectedPackageDigest !== undefined
     && input.expectedPackageDigest !== identity.value.digest) {
     return err(runtimeError('E_VALIDATOR_REJECTED', 'package digest changed after preflight', {
@@ -151,6 +156,8 @@ export class ImmutableInstallUpdater {
   async run(): Promise<Result<ImmutableInstallUpdateSuccess, RuntimeError>> {
     const source = computePackageIdentity(this.options.packageRoot);
     if (!source.ok) return source;
+    const runnable = validateRunnablePackageEntrypoints(source.value);
+    if (!runnable.ok) return runnable;
     if (this.options.expectedPackageDigest !== undefined
       && this.options.expectedPackageDigest !== source.value.digest) {
       return err(runtimeError('E_VALIDATOR_REJECTED', 'package digest does not match expected asset', {

@@ -115,11 +115,11 @@ unscoped `oh-my-agy` package from npmjs.org, and do not assume `@iml1s/oh-my-agy
 exists in a registry. Install from the GitHub Release, which carries both the
 package tarball and `SHA256SUMS`.
 
-Convenient one-liner (latest verified release is `v0.5.0`):
+Convenient one-liner (latest verified release is `v0.5.1`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh \
-  | bash -s -- --github --tag v0.5.0
+  | bash -s -- --github --tag v0.5.1
 ```
 
 Manual / reproducible options:
@@ -128,11 +128,11 @@ Manual / reproducible options:
 # Download the installer first, then resolve the pinned release.
 curl -fsSLo /tmp/oma-install.sh \
   https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh
-bash /tmp/oma-install.sh --github --tag v0.5.0
+bash /tmp/oma-install.sh --github --tag v0.5.1
 
 # Fully offline: verify + install the exact files, no network/npm/build step.
 bash /tmp/oma-install.sh \
-  --asset ./iml1s-oh-my-agy-0.5.0.tgz \
+  --asset ./iml1s-oh-my-agy-0.5.1.tgz \
   --checksums ./SHA256SUMS
 ```
 
@@ -348,8 +348,8 @@ Tag example:
 ```bash
 # Only after deterministic checks, live evidence, independent review, and UltraQA pass.
 # Tag must match package.json / plugin.json / .claude-plugin version.
-git tag -a v0.5.0 -m "v0.5.0"
-git push origin v0.5.0
+git tag -a v0.5.1 -m "v0.5.1"
+git push origin v0.5.1
 ```
 
 Changelog: **[CHANGELOG.md](CHANGELOG.md)**.  

@@ -1,6 +1,6 @@
 {
   "name": "oh-my-agy",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "OMA — session slash skills for autopilot/ralph/team (Claude Code + Grok). Optional oma CLI durable ledger for Antigravity.",
   "author": {
     "name": "ImL1s"

@@ -430,6 +430,28 @@ describe('standalone and offline install shell acceptance', () => {
     }));
     expect(fs.realpathSync(path.join(harness.binDir, 'oma')))
       .toContain(`${path.sep}install${path.sep}stages${path.sep}`);
+    for (const command of ['oma', 'omy']) {
+      const cliPath = path.join(harness.binDir, command);
+      expect(fs.statSync(cliPath).mode & 0o111).not.toBe(0);
+      const versionProbe = spawnSync(cliPath, ['--version'], {
+        env: harness.env,
+        encoding: 'utf8',
+        timeout: 10_000,
+      });
+      expect({
+        command,
+        status: versionProbe.status,
+        signal: versionProbe.signal,
+        stdout: versionProbe.stdout.trim(),
+        stderr: versionProbe.stderr,
+      }).toEqual({
+        command,
+        status: 0,
+        signal: null,
+        stdout: version,
+        stderr: '',
+      });
+    }
   }, 120_000);
 
   test('manual archive + explicit digest succeeds offline without checksum file access', () => {

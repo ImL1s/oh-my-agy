@@ -6,6 +6,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-07-31
+
+### Fixed
+
+- Release builds now mark `dist/bin/oma.js` executable before packaging, so the
+  immutable `oma` and `omy` symlinks can be invoked directly after a verified
+  GitHub Release install. Both release preflight and the updater reject a
+  non-executable CLI before plugin, pointer, receipt, or host mutation.
+- Fresh-home release acceptance now executes both installed CLI names through a
+  sealed `PATH`, and package/smoke gates assert the shipped entrypoint retains
+  executable permission. This supersedes `v0.5.0`, whose archive installed the
+  CLI target read-only without an execute bit.
+
 ## [0.5.0] — 2026-07-31
 
 ### Added
@@ -236,6 +249,7 @@ Antigravity 1.1.5 host for this release.
 
 ---
 
+[0.5.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.0
 [0.4.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.0
