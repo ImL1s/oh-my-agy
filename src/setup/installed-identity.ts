@@ -334,11 +334,16 @@ function makeWritableForCleanup(root: string): void {
 export function stageImmutablePackage(input: {
   packageRoot: string;
   stagesRoot: string;
+   // 回滾快照須保留可能已損壞（entrypoint 非可執行）的舊安裝位元組，讓升級不被擋下；
+   // 只有 rollback 快照走 allowNonExecutable，新候選 staged preflight/run 仍須可執行。
+  allowNonExecutable?: boolean;
 }): Result<{ stagePath: string; identity: PackageIdentityV1 }, RuntimeError> {
   const source = computePackageIdentity(input.packageRoot);
   if (!source.ok) return source;
-  const runnable = validateRunnablePackageEntrypoints(source.value);
-  if (!runnable.ok) return runnable;
+  if (input.allowNonExecutable !== true) {
+    const runnable = validateRunnablePackageEntrypoints(source.value);
+    if (!runnable.ok) return runnable;
+   }
   const stagesRoot = path.resolve(input.stagesRoot);
   const stagePath = path.join(stagesRoot, source.value.digest);
   try {
