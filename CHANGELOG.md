@@ -6,6 +6,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-08-16
+
 ### Fixed
 
 - Upgrading from a broken `v0.5.0` install no longer aborts before any host
@@ -257,6 +259,7 @@ Antigravity 1.1.5 host for this release.
 
 ---
 
+[0.5.2]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.2
 [0.5.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.0
 [0.4.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.4.1

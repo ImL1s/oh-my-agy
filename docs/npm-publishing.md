@@ -1,6 +1,6 @@
 # Registry Publishing Policy
 
-Last reviewed for the OMA `0.5.1` candidate.
+Last reviewed for the OMA `0.5.2` candidate.
 
 ## Current truth
 
