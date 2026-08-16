@@ -270,4 +270,33 @@ describe('transactional immutable plugin setup', () => {
     expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
       .toBe('0.9.0');
   });
+  test('upgrade from a non-executable (broken) previous install snapshots and proceeds', async () => {
+      // 已損壞的 v0.5.0：entrypoint 非可執行，rollback 快照仍須保留，升級不被 E_VALIDATOR_REJECTED 擋下。
+      // 安裝後的 host bytes 為可執行新候選，不再是非可執行位元組。
+    surface(installedRoot, '0.5.0', 'broken');
+    fs.chmodSync(path.join(installedRoot, 'dist', 'bin', 'oma.js'), 0o644);
+    const adapter = new InstallingAdapter(installedRoot);
+    const transaction = new PluginSetupTransaction({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      adapter,
+      idFactory: () => 'transaction-upgrade-broken',
+       });
+
+    const result = await transaction.run();
+
+    expect(result).toEqual(expect.objectContaining({
+      ok: true,
+      value: expect.objectContaining({
+        status: 'success',
+        installedIdentity: expect.objectContaining({ version: '1.0.0' }),
+        previousSnapshotPath: expect.stringContaining('/install/rollback/transaction-upgrade-broken/'),
+       }),
+      }));
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+        .toBe('1.0.0');
+    expect(fs.statSync(path.join(installedRoot, 'dist', 'bin', 'oma.js')).mode & 0o111).not.toBe(0);
+    });
+
 });

@@ -147,4 +147,29 @@ describe('installed Antigravity identity', () => {
     });
     expect(second.ok && second.value.stagePath).toBe(staged.value.stagePath);
   });
+  test('rejects a non-executable entrypoint by default but stages it as a rollback snapshot', () => {
+      // 已損壞的 v0.5.0：entrypoint 非可執行，新候選預設拒絕、rollback 快照可保留原樣。
+    fs.chmodSync(path.join(source, 'dist', 'bin', 'oma.js'), 0o644);
+    const rejected = stageImmutablePackage({
+      packageRoot: source,
+      stagesRoot: path.join(scratch, 'preflight-stages'),
+      });
+    expect(rejected.ok).toBe(false);
+    if (rejected.ok) return;
+    expect(rejected.error).toEqual(expect.objectContaining({ code: 'E_VALIDATOR_REJECTED' }));
+
+    const snapshot = stageImmutablePackage({
+      packageRoot: source,
+      stagesRoot: path.join(scratch, 'rollback-stages'),
+      allowNonExecutable: true,
+      });
+    expect(snapshot.ok).toBe(true);
+    if (!snapshot.ok) return;
+    expect(path.basename(snapshot.value.stagePath)).toBe(snapshot.value.identity.digest);
+      // 快照保留非可執行位元組而非強制 chmod 回 0o500。
+    const stagedCli = path.join(snapshot.value.stagePath, 'dist', 'bin', 'oma.js');
+    expect(snapshot.value.identity.inventory.find((entry) => entry.path === 'dist/bin/oma.js')?.executable)
+        .toBe(false);
+    expect(fs.statSync(stagedCli).mode & 0o777).toBe(0o400);
+     });
 });

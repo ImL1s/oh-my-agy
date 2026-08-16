@@ -6,6 +6,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+### Fixed
+
+- Upgrading from a broken `v0.5.0` install no longer aborts before any host
+  mutation. The immutable-rollback snapshot now tolerates a non-executable CLI
+  entrypoint (preserving the old bytes for `transaction.rollback`), while the
+  new-candidate preflight and run paths still reject a non-executable package
+  before plugin installation.
+
 ## [0.5.1] — 2026-08-01
 
 ### Fixed

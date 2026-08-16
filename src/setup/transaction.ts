@@ -357,6 +357,9 @@ export class PluginSetupTransaction {
     const staged = stageImmutablePackage({
       packageRoot: resolved.value.installPath,
       stagesRoot: path.join(this.stateRoot, 'install', 'rollback', transactionId),
+        // 舊安裝可能是已損壞的 v0.5.0（entrypoint 非可執行）；rollback 快照須保留原樣，
+        // 否則升級前就擋成 E_VALIDATOR_REJECTED，使用者無法升級到可執行版本。
+      allowNonExecutable: true,
     });
     if (!staged.ok) return staged;
     return ok({ identity: resolved.value, snapshotPath: staged.value.stagePath });
