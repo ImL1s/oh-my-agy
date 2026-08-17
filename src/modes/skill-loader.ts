@@ -24,7 +24,9 @@ export type OmaWorkflowSkill =
   // 設計概念映射：OMC/OMX/OMG 的 ask（外部 advisor 第二意見 broker，advisory-only）。
   | 'ask'
   // 設計概念映射：OMC/OMX/OMG 的 wiki（session 內知識檢索）；OMA 額外帶 provenance/digest。
-  | 'wiki';
+  | 'wiki'
+  // 設計概念映射：OMX/OMC/OMG 的 hud（run-state 讀出面，含 preset 分層）。
+  | 'hud';
 
 const MODE_TO_SKILL: Readonly<Record<ManagedMode, OmaWorkflowSkill>> = Object.freeze({
   ralph: 'ralph',
