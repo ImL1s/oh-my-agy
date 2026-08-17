@@ -1,13 +1,50 @@
+import * as fs from 'fs';
 import * as path from 'path';
-import { appendJsonLineDurable } from '../runtime/atomic';
+import { appendJsonLineUnderLock, withDurableJsonLineLock } from '../runtime/atomic';
 import { fingerprintSecret, redactValue } from '../runtime/redaction';
 
 /**
- * 設計概念映射：live hook 是否被 host 呼叫必須有 durable 證據；
- * 寫入 OMA_STATE_ROOT 與 package .omx/artifacts，避免猜。
+ * 設計概念映射：OMX 把 hook 診斷收在 `omx hooks status|validate|test` 後面而非 always-on
+ * 寫檔；OMG `omg_cli/redaction.py` 對所有輸出做 bounded + redacted。
+ *
+ * OMA 的取捨：
+ * - 預設**完全不寫**，需以 `OMA_HOOK_DEBUG=1` 明確開啟。
+ * - 只寫 `<state-root>/logs/hook-debug.jsonl`；**絕不**寫入安裝目錄
+ *   （舊版會寫 package root 底下的 `.omx/artifacts/`，那既是別的專案的目錄名，
+ *   也讓全域安裝在唯讀掛載或多使用者環境下每個 turn 都嘗試寫安裝目錄）。
+ * - bounded ring：超過上限時裁掉最舊的整行，避免無限成長。
  * 安全：不寫明文 OMA_LAUNCH_NONCE；payload 只記 allowlist 欄位。
  */
+
+/** 診斷檔上限；超過時由檔頭裁掉整行。 */
+export const HOOK_DEBUG_MAX_BYTES_V1 = 1_048_576;
+
+/** 是否啟用 hook 診斷寫檔。未設或非 `1`/`true` 一律關閉。 */
+export function hookDebugEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = environment.OMA_HOOK_DEBUG;
+  if (typeof raw !== 'string') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+/**
+ * 解析診斷檔路徑。只認 `OMA_STATE_ROOT`；沒有可解析的 state root 就不寫，
+ * 而不是退回安裝目錄。
+ */
+export function hookDebugTarget(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const stateRoot = environment.OMA_STATE_ROOT;
+  if (typeof stateRoot !== 'string' || stateRoot.trim() === '') return null;
+  return path.join(stateRoot, 'logs', 'hook-debug.jsonl');
+}
+
 export function writeHookDebug(event: string, payload: unknown): void {
+  if (!hookDebugEnabled()) return;
+  const target = hookDebugTarget();
+  if (target === null) return;
   const record = {
     store_kind: 'hook_debug_event',
     schema_version: 1,
@@ -26,27 +63,41 @@ export function writeHookDebug(event: string, payload: unknown): void {
     },
     payload: redactValue(redactPayload(payload)),
   };
-  const targets = new Set<string>();
-  if (process.env.OMA_STATE_ROOT) {
-    targets.add(path.join(process.env.OMA_STATE_ROOT, 'hook-debug.jsonl'));
-  }
-  if (process.env.OMA_PACKAGE_ROOT) {
-    targets.add(path.join(process.env.OMA_PACKAGE_ROOT, '.omx', 'artifacts', 'hook-debug.jsonl'));
-  }
-  // 從 compiled hook 位置回推 package root：dist/src/hooks -> ../../../
   try {
-    const packageRoot = path.resolve(__dirname, '../../..');
-    targets.add(path.join(packageRoot, '.omx', 'artifacts', 'hook-debug.jsonl'));
+    // append 與 ring 裁切必須在**同一個鎖內**：若 trim 在鎖外，兩個並行的 hook
+    // process 可能同時讀檔、各自寫 temp、再依序 rename，後者會覆蓋掉前者剛 append
+    // 的紀錄；append 與 trim 交錯也會有同樣的遺失。共用鎖後，temp 檔名的唯一性也
+    // 不再依賴 pid（同一時間只有一個持鎖者）。
+    withDurableJsonLineLock(target, () => {
+      appendJsonLineUnderLock(target, record);
+      trimHookDebugRing(target, HOOK_DEBUG_MAX_BYTES_V1);
+    }, { lockTimeoutMs: 250 });
   } catch {
-    // ignore
+    // 不阻斷 hook
   }
-  for (const target of targets) {
-    try {
-      appendJsonLineDurable(target, record, { lockTimeoutMs: 250 });
-    } catch {
-      // 不阻斷 hook
-    }
+}
+
+/**
+ * 由檔頭裁掉整行，直到大小落在上限內。永遠以行邊界切割，
+ * 因此最後一行必定仍是完整可解析的 JSON。
+ */
+export function trimHookDebugRing(target: string, maxBytes: number): void {
+  let size: number;
+  try {
+    size = fs.statSync(target).size;
+  } catch {
+    return;
   }
+  if (size <= maxBytes) return;
+  const content = fs.readFileSync(target);
+  // 保留尾端 maxBytes，再往後推到第一個換行之後，避免留下半行。
+  let start = content.length - maxBytes;
+  const newlineIndex = content.indexOf(0x0a, start);
+  start = newlineIndex === -1 ? content.length : newlineIndex + 1;
+  const kept = content.subarray(start);
+  const temporary = `${target}.trim.${process.pid}`;
+  fs.writeFileSync(temporary, kept, { mode: 0o600 });
+  fs.renameSync(temporary, target);
 }
 
 function redactPayload(payload: unknown): unknown {
