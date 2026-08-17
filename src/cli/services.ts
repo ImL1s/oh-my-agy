@@ -381,18 +381,30 @@ export function createDefaultServices(
       return report.value.exitCode;
     },
     async skillCommand(argv) {
-      const { parseSkillCommand, runSkillCommand } = await import('./skill-commands');
+      // 設計概念映射：`oma doctor` 的雙路徑輸出（預設人類可讀，`--json` 才機器格式）。
+      const {
+        DEFAULT_SKILL_RENDER_FORMAT,
+        parseSkillCommand,
+        renderSkillCommandText,
+        renderSkillErrorText,
+        runSkillCommand,
+      } = await import('./skill-commands');
       const parsed = parseSkillCommand(argv);
       if (!parsed.ok) {
         stderr(`${parsed.error.code}: ${parsed.error.message}\n`);
         return 2;
       }
+      const format = parsed.value.format ?? DEFAULT_SKILL_RENDER_FORMAT;
       const result = runSkillCommand(parsed.value, packageRoot);
       if (!result.ok) {
-        stderr(`${result.error.code}: ${result.error.message}\n`);
+        stderr(format === 'json'
+          ? `${result.error.code}: ${result.error.message}\n`
+          : renderSkillErrorText(result.error));
         return result.error.code === 'E_NOT_FOUND' ? 1 : 2;
       }
-      stdout(`${JSON.stringify(result.value, null, 2)}\n`);
+      stdout(format === 'json'
+        ? `${JSON.stringify(result.value, null, 2)}\n`
+        : renderSkillCommandText(parsed.value, result.value));
       return 0;
     },
     async nativeCommand(command, argv) {
