@@ -108,5 +108,11 @@ function fullDetailSegments(snapshot: Readonly<HudSnapshotV1>): string[] {
     // blocker 只給數量無法行動，full 一律列出實際 task id。
     if (view.blockers.length > 0) segments.push(`blockers=${view.blockers.join(',')}`);
   }
+  // adapter 的 detail_code 才是排查用的資訊（`status` 只說可用與否）。
+  // 以獨立區段輸出而非改寫 adapters=，讓 full 維持為 focused 的前綴超集。
+  if (snapshot.adapters.length > 0) {
+    segments.push(`adapter_details=${snapshot.adapters
+      .map((entry) => `${entry.adapter}:${entry.detail_code}`).join(',')}`);
+  }
   return segments;
 }

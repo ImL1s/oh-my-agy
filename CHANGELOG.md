@@ -30,14 +30,20 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   calling the CLI.
 - New in-session skill **`hud`** (`/oh-my-agy:hud`) plus
   `oma hud --preset minimal|focused|full`. `collectHudSnapshot` already gathered
-  iteration, review cycle, no-progress streak, blocker task IDs, worker bindings
-  and adapter detail, but the only text renderer showed none of it — the whole
-  snapshot collapsed to one line. `full` surfaces those fields (blockers are
-  listed by task ID, since a count alone is not actionable), `minimal` reduces to
-  phase plus completion count, and `focused` stays **byte-identical** to the
-  previous single-line output and remains the default. `--json` is a machine
-  contract and is unaffected by the preset; an unknown preset is rejected rather
-  than silently falling back.
+  iteration, review cycle, no-progress streak, blocker task IDs, worker binding
+  counts and per-adapter detail codes, but the only text renderer showed none of
+  it — the whole snapshot collapsed to one line. `full` now appends those as
+  extra segments (blockers listed by task ID, and `adapter_details` carrying each
+  adapter's `detail_code`, since a bare `unavailable` is not diagnosable);
+  `minimal` reduces to phase plus completion count; and `focused` stays
+  **byte-identical** to the previous single-line output and remains the default,
+  with `full` a strict appending superset of it. `--json` is a machine contract
+  and is unaffected by the preset; an unknown preset is rejected with
+  `E_CLI_USAGE` (exit 2) rather than silently falling back, and the preset
+  applies to every tick of `--watch`. Note that team fields — including
+  `blockers` — are populated only when `--team <id> --workspace-key <key>` is
+  supplied; a bare `oma hud` reports `team=-`, meaning *not queried*, not
+  *not blocked*.
 - Regression coverage that `.claude-plugin/plugin.json` `skills` stays exactly in
   sync with the `skills/` directory, and that every shipped skill name is a
   member of the `OmaWorkflowSkill` union (the latter fails at `tsc` time, so the

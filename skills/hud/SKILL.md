@@ -36,14 +36,18 @@ OMC and OMX both expose a HUD so a long-running orchestration is legible at a gl
 |--------|-------|
 | `minimal` | Session phase + team completion count. One glance, nothing else. |
 | `focused` (default) | Session phase/revision/generation, team completed/total/blocked, adapter status. |
-| `full` | Everything in `focused` plus iteration, review cycle, no-progress streak, blocker task IDs, worker bindings, and per-adapter detail codes. |
+| `full` | Everything in `focused`, then — when a session is bound — `iter`, `review`, `streak`, `evidence` (accepted/verified), `binding`, plus `terminal` / `retryable` / `interaction` when set; when a team is bound — `active`, `terminal_tasks`, `mailbox`, `workers` (a binding count), `supervisor`, and `blockers` listed by task ID; and whenever adapters are present, `adapter_details` with each adapter's `detail_code`. |
+
+`full` is a strict superset of `focused` — it appends, never rewrites, so anything that parses the `focused` prefix keeps working.
+
+Two deliberate omissions, so you do not read the table as promising more than it gives: per-task `worker_provider` / `worker_state` are **not** rendered (only the binding count), and no preset renders the per-task list. Use `--json` when you need those.
 
 ## Rules
 
 1. **Read-only.** The HUD never mutates session or team state.
 2. **Report unavailability honestly.** `session=-` means no bound session, not "everything is fine". `status: corrupt` is a finding you must surface, not noise to skip.
 3. **A stale snapshot is worse than none.** If `collected_at` is old relative to work you just did, say so.
-4. **Blockers get named.** When `blocker_count > 0`, list the blocking task IDs; a count alone is not actionable.
+4. **Blockers get named — and an unqueried team is not a clean team.** When `blocker_count > 0`, list the blocking task IDs; a count alone is not actionable. Note that team fields are populated **only** when you pass `--team <id> --workspace-key <key>` (see the Appendix). A bare `oma hud` shows `team=-`, which means the team was never queried — never report that as "nothing is blocked".
 5. **Never infer progress.** If the snapshot says `no_progress_streak: 4`, that is the truth even if the transcript looks busy.
 
 ## Steps (in-session)
@@ -78,9 +82,16 @@ oma hud                                  # focused (default)
 oma hud --preset minimal
 oma hud --preset full
 oma hud --json                           # canonical snapshot; preset does not affect JSON
-oma hud --watch                          # live updates
+oma hud --watch                          # live updates; --preset applies to every tick
+
+# Bind a session / team, or the corresponding fields stay '-'
 oma hud --session <id> --workspace-key <key>
+oma hud --team <id> --workspace-key <key> [--repo-key <key>]
 ```
+
+**The team fields — including `blockers` — only exist when you pass `--team`.** A bare `oma hud` prints `team=-`, which means *nothing was queried*, not *nothing is blocked*. Reporting "nothing is stuck" off an unqueried HUD is the anti-pattern this skill forbids; if you cannot supply a team id, say the team was not queried.
+
+Flags take a **space-separated** value: `--preset minimal`, not `--preset=minimal` (the equals form is rejected as an unexpected argument).
 
 Design concept mapping: `oh-my-codex/skills/hud` (preset tiers + `--watch` + `--json`),
 `oh-my-claudecode/skills/hud` (statusline presets), `oh-my-grok/skills/omg-hud`.

@@ -75,6 +75,61 @@ describe('Structured CLI e2e baseline', () => {
     expect(help.stdout).not.toMatch(/piped|terminal/i);
   });
 
+  // 設計概念映射：OMX `omx hud --preset=…`。這三條守的是 CLI wiring 而非 renderer ——
+  // renderer 有純函式測試，但「未知 preset 必須被拒」與「watch 沿用 preset」只存在於
+  // runtime-adapter 的接線，純函式測試擋不住那裡被改壞。
+  test('TC-S-05: oma hud rejects an unknown preset instead of silently defaulting', async () => {
+    const rejected = await runOma(['hud', '--preset', 'bogus']);
+    expect(rejected.code).toBe(2);
+    expect(rejected.stderr).toContain('E_CLI_USAGE');
+    expect(rejected.stderr).toContain('minimal|focused|full');
+    expect(rejected.stdout).toBe('');
+
+    // 缺值同樣不得被當成合法輸入
+    const missingValue = await runOma(['hud', '--preset']);
+    expect(missingValue.code).toBe(2);
+  });
+
+  test('TC-S-06: oma hud presets differ, and the default matches focused byte-for-byte', async () => {
+    const [bare, focused, minimal, full] = await Promise.all([
+      runOma(['hud']),
+      runOma(['hud', '--preset', 'focused']),
+      runOma(['hud', '--preset', 'minimal']),
+      runOma(['hud', '--preset', 'full']),
+    ]);
+    for (const r of [bare, focused, minimal, full]) expect(r.code).toBe(0);
+    expect(bare.stdout).toBe(focused.stdout);
+    expect(minimal.stdout).not.toBe(focused.stdout);
+    expect(minimal.stdout).not.toContain('adapters=');
+    expect(full.stdout.startsWith(focused.stdout.trimEnd())).toBe(true);
+    // adapter 的 detail_code 只有 full 會輸出
+    expect(focused.stdout).not.toContain('adapter_details=');
+    expect(full.stdout).toContain('adapter_details=');
+  });
+
+  test('TC-S-07: --preset composes with --watch and does not affect --json', async () => {
+    const watched = await runOma(['hud', '--watch', '--iterations', '2', '--interval', '50', '--preset', 'minimal']);
+    expect(watched.code).toBe(0);
+    const lines = watched.stdout.split('\n').filter((line) => line !== '');
+    expect(lines.length).toBe(2);
+    for (const line of lines) {
+      expect(line).toMatch(/^oma-hud session=/);
+      // watch 必須沿用 preset；若接線漏傳 preset，這裡會出現 focused 的 adapters= 區段
+      expect(line).not.toContain('adapters=');
+    }
+
+    const [jsonBare, jsonFull] = await Promise.all([
+      runOma(['hud', '--json']),
+      runOma(['hud', '--json', '--preset', 'full']),
+    ]);
+    expect(jsonBare.code).toBe(0);
+    expect(jsonFull.code).toBe(0);
+    expect(JSON.parse(jsonFull.stdout).store_kind).toBe('oma_hud_snapshot');
+    // JSON 是機器契約，preset 不得改變其鍵集合
+    expect(Object.keys(JSON.parse(jsonFull.stdout)).sort())
+      .toEqual(Object.keys(JSON.parse(jsonBare.stdout)).sort());
+  });
+
   test('TC-S-02: oma doctor --no-strict-plugin exits 0|1|2', async () => {
     const r = await runOma(['doctor', '--no-strict-plugin']);
     expect([0, 1, 2]).toContain(r.code);
