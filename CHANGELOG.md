@@ -17,6 +17,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   allowlisted, shell-free `oma production capture … -- <tool>` surface. No
   `oma ask` CLI verb is introduced, and the skill states that explicitly rather
   than implying one exists.
+- New in-session skill **`wiki`** (`/oh-my-agy:wiki`). OMA already shipped the
+  durable half — `oma wiki index|list|search` over a digest-locked, provenance-
+  tracked record store plus the `wiki.search` MCP operation — but had no session
+  entry point, so agents never reached for it. The skill is read-only, requires a
+  `path` citation for every wiki-sourced claim, and treats a stale `index_digest`
+  as a finding rather than a footnote.
 - Regression coverage that `.claude-plugin/plugin.json` `skills` stays exactly in
   sync with the `skills/` directory, and that every shipped skill name is a
   member of the `OmaWorkflowSkill` union (the latter fails at `tsc` time, so the
