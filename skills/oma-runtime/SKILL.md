@@ -36,6 +36,7 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 | Multi-worker tmux team | `/oh-my-agy:team` | `skills/team/SKILL.md` | `oma team start\|status\|tick\|…` |
 | Stop active modes | `/oh-my-agy:cancel` | `skills/cancel/SKILL.md` | cancel managed session if bound |
 | Evidence before “done” | `/oh-my-agy:verify` | `skills/verify/SKILL.md` | tests/build/doctor evidence |
+| External advisor second opinion | `/oh-my-agy:ask` | `skills/ask/SKILL.md` | none — advisory only, never a worker |
 | Install/enable plugin | `/oh-my-agy:setup` | `skills/setup/SKILL.md` | `oma setup` / `oma doctor` |
 | This index | `/oh-my-agy:oma-runtime` | (this file) | `oma skill list` / `oma skill show <name>` |
 

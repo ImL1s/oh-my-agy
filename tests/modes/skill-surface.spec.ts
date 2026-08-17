@@ -4,6 +4,7 @@ import { ModeDirectiveRenderer } from '../../src/modes/directives';
 import {
   listWorkflowSkillNames,
   loadSkillMarkdown,
+  OmaWorkflowSkill,
   skillNameForManagedMode,
 } from '../../src/modes/skill-loader';
 import { appendSkillProtocol, extractSkillProtocol } from '../../src/modes/skill-protocol';
@@ -73,7 +74,17 @@ describe('OMA session skill surface', () => {
     expect([...declared].sort()).toEqual([...onDisk].sort());
   });
 
-  // 設計概念映射：OMC/OMX 的 skill 解析面；OMA 的 `oma skill show <name>` 依賴 union 型別涵蓋所有目錄。
+  // `OmaWorkflowSkill` union 若少了某個出貨中的 skill，這個 typed literal 會在 tsc 階段就失敗；
+  // 其他測試都走 `as any`，無法保護 union 本身。設計概念映射：OMC/OMX 的 skill 名稱型別化。
+  test('shipped skill names are members of the OmaWorkflowSkill union', () => {
+    const typed: OmaWorkflowSkill[] = ['ask', 'workflow', 'oma-runtime', 'verify'];
+    for (const name of typed) {
+      expect(listWorkflowSkillNames(packageRoot)).toContain(name);
+      expect(loadSkillMarkdown(packageRoot, name)).not.toBeNull();
+    }
+  });
+
+  // 設計概念映射：OMC/OMX 的 skill 解析面；OMA 以此確保每個出貨目錄都讀得出 frontmatter。
   test('every shipped skill directory is loadable through the skill loader', () => {
     for (const name of listWorkflowSkillNames(packageRoot)) {
       const body = loadSkillMarkdown(packageRoot, name as any);
