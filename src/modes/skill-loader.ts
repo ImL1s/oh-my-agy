@@ -21,7 +21,7 @@ export type OmaWorkflowSkill =
   | 'doctor'
   | 'workflow'
   | 'oma-runtime'
-  // 設計概念映射：OMC/OMX/OmO 的 ask（外部 advisor 第二意見 broker，advisory-only）。
+  // 設計概念映射：OMC/OMX/OMG 的 ask（外部 advisor 第二意見 broker，advisory-only）。
   | 'ask';
 
 const MODE_TO_SKILL: Readonly<Record<ManagedMode, OmaWorkflowSkill>> = Object.freeze({

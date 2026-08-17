@@ -84,14 +84,17 @@ describe('OMA session skill surface', () => {
     }
   });
 
-  // 設計概念映射：OMC/OMX 的 skill 解析面；OMA 以此確保每個出貨目錄都讀得出 frontmatter。
-  test('every shipped skill directory is loadable through the skill loader', () => {
+  // 設計概念映射：OMC/OMX 的 skill 解析面；OMA 以此確保每個出貨目錄都讀得出 frontmatter，
+  // 且 frontmatter 的 name 必須等於目錄名 —— 否則 host 註冊出來的 slash 名稱會與目錄不符。
+  test('every shipped skill directory is loadable with frontmatter name matching the directory', () => {
     for (const name of listWorkflowSkillNames(packageRoot)) {
       const body = loadSkillMarkdown(packageRoot, name as any);
       expect(body).not.toBeNull();
-      expect((body ?? '')).toMatch(/^---\n/);
-      expect((body ?? '')).toMatch(/\nname:\s*/);
-      expect((body ?? '')).toMatch(/\ndescription:\s*/);
+      const text = body ?? '';
+      expect(text).toMatch(/^---\n/);
+      expect(text).toMatch(/\ndescription:\s*\S/);
+      const declared = /\nname:\s*["']?([A-Za-z0-9._-]+)["']?\s*(\n|$)/.exec(text)?.[1];
+      expect(declared).toBe(name);
     }
   });
 

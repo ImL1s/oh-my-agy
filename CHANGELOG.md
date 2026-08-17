@@ -6,6 +6,22 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+### Added
+
+- New in-session skill **`ask`** (`/oh-my-agy:ask`), matching the `ask` entry
+  point that OMC, OMX, and OMG already ship: it brokers a second opinion from a
+  locally installed advisor CLI (Codex / Claude / Gemini / `agy`) under
+  advisory-only hard rules. The advisor is never a worker, its answer never
+  closes a gate, and its transcript is written to `.agy/ask/<provider>-<slug>.md`.
+  When the opinion must bind to an exact commit, the skill routes to the existing
+  allowlisted, shell-free `oma production capture … -- <tool>` surface. No
+  `oma ask` CLI verb is introduced, and the skill states that explicitly rather
+  than implying one exists.
+- Regression coverage that `.claude-plugin/plugin.json` `skills` stays exactly in
+  sync with the `skills/` directory, and that every shipped skill name is a
+  member of the `OmaWorkflowSkill` union (the latter fails at `tsc` time, so the
+  union can no longer drift silently).
+
 ## [0.5.2] — 2026-08-16
 
 ### Fixed
