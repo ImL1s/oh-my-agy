@@ -29,8 +29,8 @@ Usage:
   oma ralph -- <task>
   oma ultrawork -- <task>
   oma search -- <read-only query>
-  oma skill list
-  oma skill show <name>
+  oma skill list [--json|--text]
+  oma skill show <name> [--json|--text]
   oma workflow install [--source <definition.json>]
   oma workflow list|native-status
   oma workflow run <name> --input <input.json> [--version <semver>] [--generation <n>]

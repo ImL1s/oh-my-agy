@@ -22,6 +22,21 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   member of the `OmaWorkflowSkill` union (the latter fails at `tsc` time, so the
   union can no longer drift silently).
 
+### Changed
+
+- **Breaking (CLI output):** `oma skill list` and `oma skill show <name>` now
+  print human-readable output by default instead of raw JSON, matching the
+  existing `oma doctor` convention. `oma skill show <name>` emits the SKILL.md
+  body directly rather than a JSON envelope with an escaped `markdown` string.
+  Pass `--json` to restore the previous machine-readable output byte-for-byte;
+  `--text` forces the new rendering explicitly. Passing both `--json` and
+  `--text` is rejected with `E_VALIDATOR_REJECTED` rather than silently
+  choosing one. Scripts that parsed `oma skill list` should add `--json`.
+
+- `oma skill show <unknown>` now lists the available skills in text mode instead
+  of only reporting `E_NOT_FOUND`. Exit codes are unchanged (`1` for
+  `E_NOT_FOUND`, `2` for usage rejection, `0` on success).
+
 ## [0.5.2] — 2026-08-16
 
 ### Fixed

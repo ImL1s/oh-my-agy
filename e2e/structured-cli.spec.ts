@@ -28,8 +28,8 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('skill list');
   });
 
-  test('TC-S-01b: oma skill list returns JSON skill catalog', async () => {
-    const r = await runOma(['skill', 'list']);
+  test('TC-S-01b: oma skill list --json returns JSON skill catalog', async () => {
+    const r = await runOma(['skill', 'list', '--json']);
     expect(r.code).toBe(0);
     const body = JSON.parse(r.stdout);
     expect(Array.isArray(body.skills)).toBe(true);
@@ -37,6 +37,32 @@ describe('Structured CLI e2e baseline', () => {
     expect(names).toEqual(expect.arrayContaining([
       'autopilot', 'deep-interview', 'ralplan', 'ultragoal', 'code-review', 'ultraqa',
     ]));
+  });
+
+  // 設計概念映射：`oma doctor` 的預設人類可讀輸出；skill 面在 0.5.3 起對齊同一慣例。
+  test('TC-S-01c: oma skill list defaults to human-readable text, not JSON', async () => {
+    const r = await runOma(['skill', 'list']);
+    expect(r.code).toBe(0);
+    expect(r.stdout.startsWith('{')).toBe(false);
+    expect(r.stdout).toMatch(/^oma skill list \(\d+ skills\)/);
+    expect(r.stdout).toContain('skills/autopilot/SKILL.md');
+    expect(r.stdout).not.toContain('"name":');
+  });
+
+  test('TC-S-01d: oma skill show emits the markdown body and unknown names list alternatives', async () => {
+    const shown = await runOma(['skill', 'show', 'autopilot']);
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toContain('# autopilot — skills/autopilot/SKILL.md');
+    expect(shown.stdout).not.toContain('\\n');
+
+    const missing = await runOma(['skill', 'show', 'no-such-skill']);
+    expect(missing.code).toBe(1);
+    expect(missing.stderr).toContain('E_NOT_FOUND');
+    expect(missing.stderr).toContain('Available skills:');
+
+    const conflicted = await runOma(['skill', 'list', '--json', '--text']);
+    expect(conflicted.code).toBe(2);
+    expect(conflicted.stderr).toContain('E_VALIDATOR_REJECTED');
   });
 
   test('TC-S-02: oma doctor --no-strict-plugin exits 0|1|2', async () => {
