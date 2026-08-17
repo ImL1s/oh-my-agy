@@ -31,3 +31,6 @@ credentials.json
 ORIGINAL_REQUEST.md
 research_report.md
 test_todo.json
+
+# Octopus session handoff scratch（工具暫存，不入版控）
+.octo-continue.md
