@@ -30,6 +30,7 @@ describe('OMA session skill surface', () => {
       'setup',
       'workflow',
       'ask',
+      'wiki',
     ];
     const present = listWorkflowSkillNames(packageRoot);
     for (const name of required) {
@@ -77,7 +78,7 @@ describe('OMA session skill surface', () => {
   // `OmaWorkflowSkill` union 若少了某個出貨中的 skill，這個 typed literal 會在 tsc 階段就失敗；
   // 其他測試都走 `as any`，無法保護 union 本身。設計概念映射：OMC/OMX 的 skill 名稱型別化。
   test('shipped skill names are members of the OmaWorkflowSkill union', () => {
-    const typed: OmaWorkflowSkill[] = ['ask', 'workflow', 'oma-runtime', 'verify'];
+    const typed: OmaWorkflowSkill[] = ['ask', 'wiki', 'workflow', 'oma-runtime', 'verify'];
     for (const name of typed) {
       expect(listWorkflowSkillNames(packageRoot)).toContain(name);
       expect(loadSkillMarkdown(packageRoot, name)).not.toBeNull();

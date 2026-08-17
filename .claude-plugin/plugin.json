@@ -33,6 +33,7 @@
     "./skills/oma-runtime/",
     "./skills/discovery-proof/",
     "./skills/workflow/",
-    "./skills/ask/"
+    "./skills/ask/",
+    "./skills/wiki/"
   ]
 }

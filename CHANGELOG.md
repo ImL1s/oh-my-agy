@@ -17,6 +17,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   allowlisted, shell-free `oma production capture … -- <tool>` surface. No
   `oma ask` CLI verb is introduced, and the skill states that explicitly rather
   than implying one exists.
+- New in-session skill **`wiki`** (`/oh-my-agy:wiki`). OMA already shipped the
+  retrieval half — the `wiki.search` MCP operation and `oma wiki index|list|search`
+  — but nothing told a session agent that lane existed or how to read its output,
+  so it went unused. The skill documents what the index actually is: a read-only
+  view derived fresh on every call over `docs/`, `.agy/wiki/`, and
+  `.agy/decisions/` that **persists nothing and has no write verb**, excludes
+  root-level `README.md` / `CLAUDE.md` / `AGENTS.md` and all of `skills/**`, and
+  ranks with per-token OR scoring — so `total_matches` is not a relevance count
+  and a multi-word query can match every record in the index. Recording a
+  decision means writing a markdown file under one of the indexed roots, not
+  calling the CLI.
 - Regression coverage that `.claude-plugin/plugin.json` `skills` stays exactly in
   sync with the `skills/` directory, and that every shipped skill name is a
   member of the `OmaWorkflowSkill` union (the latter fails at `tsc` time, so the
