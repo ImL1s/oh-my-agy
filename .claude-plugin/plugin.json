@@ -32,6 +32,7 @@
     "./skills/setup/",
     "./skills/oma-runtime/",
     "./skills/discovery-proof/",
-    "./skills/workflow/"
+    "./skills/workflow/",
+    "./skills/ask/"
   ]
 }

@@ -28,6 +28,7 @@ describe('OMA session skill surface', () => {
       'verify',
       'setup',
       'workflow',
+      'ask',
     ];
     const present = listWorkflowSkillNames(packageRoot);
     for (const name of required) {
@@ -58,6 +59,28 @@ describe('OMA session skill surface', () => {
       const task = renderer.extractTask(`oma.${mode}/v1` as any, withSkill);
       expect(task.ok).toBe(true);
       if (task.ok) expect(task.value.toString('utf8')).toBe('do the thing');
+    }
+  });
+
+  // 設計概念映射：OMC/OMX 的 plugin manifest 與 skills 目錄同步；OMA 以回歸測試防止新 skill 漏註冊。
+  test('Claude plugin manifest lists exactly the shipped skills directories', () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(packageRoot, '.claude-plugin', 'plugin.json'), 'utf8'),
+    ) as { skills?: string[] };
+    const declared = (manifest.skills ?? []).map((entry) =>
+      entry.replace(/^\.\/skills\//, '').replace(/\/$/, ''));
+    const onDisk = listWorkflowSkillNames(packageRoot);
+    expect([...declared].sort()).toEqual([...onDisk].sort());
+  });
+
+  // 設計概念映射：OMC/OMX 的 skill 解析面；OMA 的 `oma skill show <name>` 依賴 union 型別涵蓋所有目錄。
+  test('every shipped skill directory is loadable through the skill loader', () => {
+    for (const name of listWorkflowSkillNames(packageRoot)) {
+      const body = loadSkillMarkdown(packageRoot, name as any);
+      expect(body).not.toBeNull();
+      expect((body ?? '')).toMatch(/^---\n/);
+      expect((body ?? '')).toMatch(/\nname:\s*/);
+      expect((body ?? '')).toMatch(/\ndescription:\s*/);
     }
   });
 
