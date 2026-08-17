@@ -39,7 +39,7 @@ describe('Structured CLI e2e baseline', () => {
     ]));
   });
 
-  // 設計概念映射：`oma doctor` 的預設人類可讀輸出；skill 面在 0.5.3 起對齊同一慣例。
+  // 設計概念映射：`oma doctor` 的預設人類可讀輸出；skill 面自本變更起對齊同一慣例。
   test('TC-S-01c: oma skill list defaults to human-readable text, not JSON', async () => {
     const r = await runOma(['skill', 'list']);
     expect(r.code).toBe(0);
@@ -53,7 +53,8 @@ describe('Structured CLI e2e baseline', () => {
     const shown = await runOma(['skill', 'show', 'autopilot']);
     expect(shown.code).toBe(0);
     expect(shown.stdout).toContain('# autopilot — skills/autopilot/SKILL.md');
-    expect(shown.stdout).not.toContain('\\n');
+    // 斷言「不是 JSON envelope」本身，而非字面反斜線-n
+    expect(() => JSON.parse(shown.stdout)).toThrow();
 
     const missing = await runOma(['skill', 'show', 'no-such-skill']);
     expect(missing.code).toBe(1);
@@ -63,6 +64,15 @@ describe('Structured CLI e2e baseline', () => {
     const conflicted = await runOma(['skill', 'list', '--json', '--text']);
     expect(conflicted.code).toBe(2);
     expect(conflicted.stderr).toContain('E_VALIDATOR_REJECTED');
+
+    const duplicated = await runOma(['skill', 'list', '--json', '--json']);
+    expect(duplicated.code).toBe(2);
+    expect(duplicated.stderr).toContain('duplicate option --json');
+
+    // help 不得宣稱不存在的 TTY 偵測能力
+    const help = await runOma(['skill', 'help']);
+    expect(help.code).toBe(0);
+    expect(help.stdout).not.toMatch(/piped|terminal/i);
   });
 
   test('TC-S-02: oma doctor --no-strict-plugin exits 0|1|2', async () => {

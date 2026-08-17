@@ -26,16 +26,24 @@ function takeFormatFlags(
 ): Result<{ rest: string[]; format?: SkillRenderFormat }, RuntimeError> {
   const rest: string[] = [];
   let format: SkillRenderFormat | undefined;
+  let endOfOptions = false;
   for (const token of argv) {
-    if (token === '--json' || token === '--text') {
-      const next: SkillRenderFormat = token === '--json' ? 'json' : 'text';
-      if (format !== undefined && format !== next) {
+    // `--` 之後一律視為字面值，讓名稱像旗標的 skill 仍可定址。
+    if (!endOfOptions && token === '--') {
+      endOfOptions = true;
+      continue;
+    }
+    if (!endOfOptions && (token === '--json' || token === '--text')) {
+      // 與 `parseDoctorCliOptions` 一致：重複指定同一旗標也視為錯誤，不靜默吸收。
+      if (format !== undefined) {
         return err(runtimeError(
           'E_VALIDATOR_REJECTED',
-          'oma skill accepts only one of --json or --text',
+          format === (token === '--json' ? 'json' : 'text')
+            ? `oma skill: duplicate option ${token}`
+            : 'oma skill accepts only one of --json or --text',
         ));
       }
-      format = next;
+      format = token === '--json' ? 'json' : 'text';
       continue;
     }
     rest.push(token);
@@ -131,8 +139,8 @@ export function renderSkillCommandText(command: ParsedSkillCommand, value: unkno
       '',
       help.note,
       '',
-      'Output format follows stdout: human-readable on a terminal, JSON when piped.',
-      'Override with --json or --text.',
+      'Default output is human-readable text; pass --json for machine-readable output.',
+      'Use --text to request the default rendering explicitly.',
     ];
     return `${lines.join('\n')}\n`;
   }

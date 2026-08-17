@@ -28,13 +28,27 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   print human-readable output by default instead of raw JSON, matching the
   existing `oma doctor` convention. `oma skill show <name>` emits the SKILL.md
   body directly rather than a JSON envelope with an escaped `markdown` string.
-  Pass `--json` to restore the previous machine-readable output byte-for-byte;
-  `--text` forces the new rendering explicitly. Passing both `--json` and
-  `--text` is rejected with `E_VALIDATOR_REJECTED` rather than silently
-  choosing one. Scripts that parsed `oma skill list` should add `--json`.
+  For **`list` and `show`**, `--json` restores the previous machine-readable
+  output byte-for-byte; `--text` forces the new rendering explicitly. Passing
+  both `--json` and `--text`, or the same flag twice, is rejected with
+  `E_VALIDATOR_REJECTED` rather than silently choosing one. A `--` terminator
+  ends flag parsing so a skill whose name begins with `--` stays addressable.
+  Scripts that parsed `oma skill list` should add `--json`.
+
+- **Breaking (CLI output):** the same default applies to bare `oma skill` and
+  `oma skill help`, which previously emitted a `{"usage":…,"note":…}` envelope.
+  Note that `oma skill help --json` is **not** byte-for-byte identical to before:
+  the `usage` strings now carry the `[--json|--text]` suffix.
+
+- **Breaking (exit code):** `oma skill --json` with no subcommand previously fell
+  through to `E_VALIDATOR_REJECTED` (exit 2) because `--json` matched no branch;
+  it is now a valid way to ask for help as JSON and exits 0. Conversely
+  `oma skill show --json` used to be read as a skill literally named `--json`
+  (`E_NOT_FOUND`, exit 1) and is now a usage rejection (exit 2); use
+  `oma skill show -- --json` to address such a name.
 
 - `oma skill show <unknown>` now lists the available skills in text mode instead
-  of only reporting `E_NOT_FOUND`. Exit codes are unchanged (`1` for
+  of only reporting `E_NOT_FOUND`. Documented exit codes are unchanged (`1` for
   `E_NOT_FOUND`, `2` for usage rejection, `0` on success).
 
 ## [0.5.2] — 2026-08-16

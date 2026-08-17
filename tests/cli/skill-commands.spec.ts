@@ -46,33 +46,56 @@ describe('oma skill commands', () => {
 describe('oma skill render format', () => {
   test('defaults to text and parses --json / --text without breaking bare parsing', () => {
     expect(DEFAULT_SKILL_RENDER_FORMAT).toBe('text');
-    // 回溯相容：未帶旗標時解析結果不得多出欄位
-    expect(parseSkillCommand(['list'])).toEqual({ ok: true, value: { kind: 'list' } });
-    expect(parseSkillCommand(['list', '--json'])).toEqual({
+    // 回溯相容：未帶旗標時解析結果不得多出欄位。用 toStrictEqual，因為 toEqual
+    // 會把 { kind: 'list', format: undefined } 判為等於 { kind: 'list' }。
+    expect(parseSkillCommand(['list'])).toStrictEqual({ ok: true, value: { kind: 'list' } });
+    expect(parseSkillCommand([])).toStrictEqual({ ok: true, value: { kind: 'help' } });
+    expect(parseSkillCommand(['show', 'autopilot'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'show', name: 'autopilot' },
+    });
+    expect(parseSkillCommand(['list', '--json'])).toStrictEqual({
       ok: true,
       value: { kind: 'list', format: 'json' },
     });
-    expect(parseSkillCommand(['--text', 'show', 'autopilot'])).toEqual({
+    expect(parseSkillCommand(['--text', 'show', 'autopilot'])).toStrictEqual({
       ok: true,
       value: { kind: 'show', name: 'autopilot', format: 'text' },
     });
-    expect(parseSkillCommand(['--json'])).toEqual({
+    expect(parseSkillCommand(['--json'])).toStrictEqual({
       ok: true,
       value: { kind: 'help', format: 'json' },
     });
   });
 
   test('rejects conflicting format flags instead of silently picking one', () => {
-    const conflicted = parseSkillCommand(['list', '--json', '--text']);
-    expect(conflicted.ok).toBe(false);
-    if (conflicted.ok) return;
-    expect(conflicted.error.code).toBe('E_VALIDATOR_REJECTED');
+    for (const argv of [['list', '--json', '--text'], ['list', '--text', '--json']]) {
+      const conflicted = parseSkillCommand(argv);
+      expect(conflicted.ok).toBe(false);
+      if (conflicted.ok) return;
+      expect(conflicted.error.code).toBe('E_VALIDATOR_REJECTED');
+    }
   });
 
-  test('repeating the same format flag stays valid', () => {
-    expect(parseSkillCommand(['list', '--json', '--json'])).toEqual({
+  // 與 `parseDoctorCliOptions` 對齊：doctor 會以「duplicate option」拒絕重複旗標，
+  // skill 面若靜默吸收就與它宣稱對齊的慣例不一致。
+  test('rejects a repeated format flag, matching the doctor convention', () => {
+    const repeated = parseSkillCommand(['list', '--json', '--json']);
+    expect(repeated.ok).toBe(false);
+    if (repeated.ok) return;
+    expect(repeated.error.code).toBe('E_VALIDATOR_REJECTED');
+    expect(repeated.error.message).toMatch(/duplicate option --json/);
+  });
+
+  // `--` 之後為字面值，讓名稱像旗標的 skill 仍可定址（回復舊版把 --json 當名稱的能力）。
+  test('a -- terminator makes flag-like skill names addressable again', () => {
+    expect(parseSkillCommand(['show', '--', '--json'])).toStrictEqual({
       ok: true,
-      value: { kind: 'list', format: 'json' },
+      value: { kind: 'show', name: '--json' },
+    });
+    expect(parseSkillCommand(['--text', 'show', '--', '--json'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'show', name: '--json', format: 'text' },
     });
   });
 
@@ -95,7 +118,9 @@ describe('oma skill render format', () => {
     if (!shown.ok) return;
     const text = renderSkillCommandText({ kind: 'show', name: 'autopilot' }, shown.value);
     expect(text).toMatch(/^# autopilot — skills\/autopilot\/SKILL\.md\n/);
-    expect(text).not.toMatch(/\\n/);
+    // 斷言「不是 JSON envelope」本身，而非字面反斜線-n；後者會被 SKILL.md 內
+    // 任何 shell 範例誤觸發，與本功能無關。
+    expect(() => JSON.parse(text)).toThrow();
     expect(text).toMatch(/ralplan/);
   });
 
@@ -107,6 +132,9 @@ describe('oma skill render format', () => {
     expect(text).toMatch(/--json/);
     expect(text).toMatch(/--text/);
     expect(text).toMatch(/oma skill list/);
+    // help 不得宣稱不存在的能力：格式由旗標決定，CLI 從不檢查 stdout 是否為 TTY。
+    expect(text).not.toMatch(/terminal|piped|TTY|isTTY/i);
+    expect(text).toMatch(/Default output is human-readable text/);
   });
 
   test('text error output lists available skills so the user need not read the tree', () => {
