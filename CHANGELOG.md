@@ -8,6 +8,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Fixed
 
+- Session skill catalogs in `skills/AGENTS.md` and `skills/oma-runtime/SKILL.md`
+  are generated from `skills/*/SKILL.md` and fail CI (`npm run catalog:check`)
+  when they drift. (#36)
 - POSIX native-probe process lineage no longer treats every new PID-1
   (reparented / baseline-delta) process as a probe descendant. Busy hosts
   were charging unrelated jest/LLM workers against the fail-closed process

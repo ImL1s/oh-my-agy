@@ -9,6 +9,7 @@ In-session skill playbooks shipped with the plugin. Each subdirectory has a `SKI
 
 ## Key Files
 
+<!-- OMA-SKILL-CATALOG:START -->
 | Path | Description |
 |------|-------------|
 | `autopilot/SKILL.md` | Full OMX five-phase delivery loop |
@@ -19,12 +20,18 @@ In-session skill playbooks shipped with the plugin. Each subdirectory has a `SKI
 | `ultraqa/SKILL.md` | Adversarial QA |
 | `ralph/SKILL.md` | Single-task persistence loop |
 | `ultrawork/SKILL.md` | Parallel high-throughput |
-| `team/SKILL.md` | Multi-worker coordination |
 | `search/SKILL.md` | Read-only / plan-style |
+| `team/SKILL.md` | Multi-worker coordination |
 | `cancel/SKILL.md` | Abort modes safely |
 | `verify/SKILL.md` | Fresh evidence gates |
+| `ask/SKILL.md` | External advisor second opinion (advisory-only) |
+| `wiki/SKILL.md` | Provenance-tracked knowledge lookup |
+| `hud/SKILL.md` | Run-state HUD with minimal/focused/full presets |
 | `setup/SKILL.md` | Install/doctor checks in-session |
+| `workflow/SKILL.md` | Repository DAG runner (permissions, replay, ship gate) |
+| `discovery-proof/SKILL.md` | Production canary for namespaced skill discovery |
 | `oma-runtime/SKILL.md` | Skill index / runtime notes |
+<!-- OMA-SKILL-CATALOG:END -->
 
 ## Subdirectories
 

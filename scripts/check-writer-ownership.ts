@@ -86,7 +86,10 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
       /^src\/modes\/(?:commands|directives|skill-loader|skill-protocol)\.ts$/,
       /^skills\/[^/]+\/SKILL\.md$/, /^agents\/.+$/, /^commands\/.+$/, /^\.agents\/workflows\/.+$/,
       /^tests\/(?:mcp|wiki|workflows)\/.+$/,
-      exact(['tests/modes/skill-surface.spec.ts', 'tests/package/native-components.spec.ts']),
+      exact([
+        'tests/modes/skill-surface.spec.ts', 'tests/package/native-components.spec.ts',
+        'scripts/generate-skill-catalog.ts', 'skills/AGENTS.md',
+      ]),
     ],
   },
   {
@@ -144,7 +147,9 @@ export interface FinalTreeEvidenceV1 {
 }
 
 export function ownershipForPath(repositoryPath: string): OwnershipMatch {
-  if (repositoryPath.split('/').includes('AGENTS.md')) {
+  // 根目錄與各模組 AGENTS.md 仍為不可變貢獻者指引。
+  // #36 明確授權 skills/AGENTS.md 作為 skill catalog 索引（OMX generate-catalog-docs）。
+  if (repositoryPath.split('/').includes('AGENTS.md') && repositoryPath !== 'skills/AGENTS.md') {
     throw new Error(`Immutable contributor guidance changed: ${repositoryPath}`);
   }
   const matches = OMA_OWNERSHIP_RULES_V1.filter((rule) =>

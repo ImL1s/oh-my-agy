@@ -22,6 +22,7 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 
 ## Slash catalog
 
+<!-- OMA-SKILL-CATALOG:START -->
 | User intent | Canonical slash | Skill body | Optional CLI helper |
 |-------------|-----------------|------------|---------------------|
 | Full autonomous delivery (OMX five-phase) | `/oh-my-agy:autopilot` | `skills/autopilot/SKILL.md` | `oma autopilot …` (ledger only) |
@@ -40,7 +41,10 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 | Provenance-tracked knowledge lookup | `/oh-my-agy:wiki` | `skills/wiki/SKILL.md` | `oma wiki index\|list\|search <query>` |
 | Where are we / what is stuck | `/oh-my-agy:hud` | `skills/hud/SKILL.md` | `oma hud [--preset minimal\|focused\|full] [--watch]` |
 | Install/enable plugin | `/oh-my-agy:setup` | `skills/setup/SKILL.md` | `oma setup` / `oma doctor` |
+| Deterministic repository workflow runner | `/oh-my-agy:workflow` | `skills/workflow/SKILL.md` | `oma workflow run <name> --input <json>` |
+| Internal discovery canary (do not use as a workflow) | `/oh-my-agy:discovery-proof` | `skills/discovery-proof/SKILL.md` | none — machine-verification token only |
 | This index | `/oh-my-agy:oma-runtime` | (this file) | `oma skill list` / `oma skill show <name>` |
+<!-- OMA-SKILL-CATALOG:END -->
 
 ### Autopilot phase cycle (canonical OMX)
 

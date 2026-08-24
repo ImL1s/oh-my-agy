@@ -28,6 +28,7 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     expect(() => ownershipForPath('src/contracts/extra.ts')).toThrow('0 ownership');
     expect(() => ownershipForPath('AGENTS.md')).toThrow('Immutable');
     expect(() => ownershipForPath('src/AGENTS.md')).toThrow('Immutable');
+    expect(() => ownershipForPath('scripts/AGENTS.md')).toThrow('Immutable');
     expect(() => validateChangedPathOwnership(['src/setup/doctor.ts'], 'OMA-W0')).toThrow('OMA-W1');
   });
 
@@ -42,6 +43,13 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
 
   test('product workflow authority is W4 native-surface-owned', () => {
     expect(ownershipForPath('src/workflows/authority.ts')).toEqual({
+      wave: 'OMA-W4', owner: 'oma-native-surface-owner',
+    });
+    expect(ownershipForPath('scripts/generate-skill-catalog.ts')).toEqual({
+      wave: 'OMA-W4', owner: 'oma-native-surface-owner',
+    });
+    // #36 授權的 skill catalog 索引；其他 AGENTS.md 仍不可變。
+    expect(ownershipForPath('skills/AGENTS.md')).toEqual({
       wave: 'OMA-W4', owner: 'oma-native-surface-owner',
     });
   });

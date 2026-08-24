@@ -15,6 +15,7 @@
     "bin/**/*",
     "src/**/*",
     "scripts/check-writer-ownership.ts",
+    "scripts/generate-skill-catalog.ts",
     "e2e/**/*",
     "tests/**/*"
   ]

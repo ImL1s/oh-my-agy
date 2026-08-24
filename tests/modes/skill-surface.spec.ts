@@ -8,6 +8,14 @@ import {
   skillNameForManagedMode,
 } from '../../src/modes/skill-loader';
 import { appendSkillProtocol, extractSkillProtocol } from '../../src/modes/skill-protocol';
+import {
+  AUTHORIZED_CATALOG_FILES,
+  applySkillCatalogs,
+  checkSkillCatalogs,
+  resolveAuthorizedWritePath,
+  runCatalogCli,
+} from '../../scripts/generate-skill-catalog';
+import { createStateFixture } from '../helpers/state-fixture';
 
 const packageRoot = path.resolve(__dirname, '../..');
 
@@ -106,4 +114,136 @@ describe('OMA session skill surface', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
     expect(pkg.files).toContain('skills');
   });
+  // 設計概念映射：OMX generate-catalog-docs / OMG operation catalog golden tests。
+  test('markdown catalogs name every on-disk skill and match the generator', () => {
+    const onDisk = listWorkflowSkillNames(packageRoot);
+    expect(onDisk).toEqual(expect.arrayContaining(['ask', 'workflow', 'discovery-proof']));
+    const agents = fs.readFileSync(path.join(packageRoot, 'skills', 'AGENTS.md'), 'utf8');
+    const runtime = fs.readFileSync(path.join(packageRoot, 'skills', 'oma-runtime', 'SKILL.md'), 'utf8');
+    for (const name of onDisk) {
+      expect(agents).toContain(`\`${name}/SKILL.md\``);
+      expect(runtime).toContain(`\`/oh-my-agy:${name}\``);
+    }
+    const result = checkSkillCatalogs(packageRoot);
+    expect(result.message).toBe('skill catalog check ok');
+    expect(result.ok).toBe(true);
+    expect(result.drifted).toEqual([]);
+    // GFM 以未跳脫的 `|` 切欄；CLI helper 裡的 pipe 必須是 `\|`。
+    expect(runtime).toMatch(/oma wiki index\\\|list\\\|search/);
+    expect(runtime).toMatch(/minimal\\\|focused\\\|full/);
+    expect(runtime).toMatch(/start\\\|status\\\|tick/);
+  });
+
+  test('catalog generator write targets are only the two authorized catalog files', () => {
+    expect([...AUTHORIZED_CATALOG_FILES]).toEqual([
+      'skills/AGENTS.md',
+      'skills/oma-runtime/SKILL.md',
+    ]);
+    expect(resolveAuthorizedWritePath(packageRoot, 'skills/AGENTS.md'))
+      .toBe(path.resolve(packageRoot, 'skills/AGENTS.md'));
+    expect(resolveAuthorizedWritePath(packageRoot, 'skills/oma-runtime/SKILL.md'))
+      .toBe(path.resolve(packageRoot, 'skills/oma-runtime/SKILL.md'));
+    expect(() => resolveAuthorizedWritePath(packageRoot, 'AGENTS.md'))
+      .toThrow('Unauthorized catalog write target');
+    expect(() => resolveAuthorizedWritePath(packageRoot, 'skills/ask/SKILL.md'))
+      .toThrow('Unauthorized catalog write target');
+    expect(() => resolveAuthorizedWritePath(packageRoot, 'skills/../AGENTS.md'))
+      .toThrow('Unsafe catalog path');
+  });
+
+  test('adding a skill directory without regenerating catalogs fails --check', () => {
+    const fixture = createStateFixture('oma-skill-catalog-');
+    try {
+      fs.writeFileSync(path.join(fixture.root, 'AGENTS.md'), '# root guidance\n', 'utf8');
+      writeCatalogFixture(fixture.root, ['oma-runtime', 'autopilot']);
+      expect(checkSkillCatalogs(fixture.root).ok).toBe(false);
+      expect(applySkillCatalogs(fixture.root).sort()).toEqual([
+        'skills/AGENTS.md',
+        'skills/oma-runtime/SKILL.md',
+      ]);
+      expect(checkSkillCatalogs(fixture.root).ok).toBe(true);
+      expect(runCatalogCli(['--check'], fixture.root)).toBe(0);
+
+      fs.mkdirSync(path.join(fixture.root, 'skills', 'zzz-extra'));
+      fs.writeFileSync(
+        path.join(fixture.root, 'skills', 'zzz-extra', 'SKILL.md'),
+        '---\nname: zzz-extra\ndescription: "Temporary extra skill"\n---\n\n# zzz-extra\n',
+        'utf8',
+      );
+      const drifted = checkSkillCatalogs(fixture.root);
+      expect(drifted.ok).toBe(false);
+      expect(runCatalogCli(['--check'], fixture.root)).toBe(1);
+      expect(drifted.missingByFile['skills/AGENTS.md']).toContain('zzz-extra');
+      expect(drifted.missingByFile['skills/oma-runtime/SKILL.md']).toContain('zzz-extra');
+      expect(drifted.message).toMatch(/zzz-extra/);
+
+      const before = listRelativeFiles(fixture.root);
+      const written = applySkillCatalogs(fixture.root);
+      expect(written.sort()).toEqual(['skills/AGENTS.md', 'skills/oma-runtime/SKILL.md']);
+      expect(listRelativeFiles(fixture.root)).toEqual(before);
+      expect(fs.readFileSync(path.join(fixture.root, 'AGENTS.md'), 'utf8')).toBe('# root guidance\n');
+      expect(checkSkillCatalogs(fixture.root).ok).toBe(true);
+      expect(fs.readFileSync(path.join(fixture.root, 'skills', 'AGENTS.md'), 'utf8'))
+        .toContain('`zzz-extra/SKILL.md`');
+      expect(fs.readFileSync(path.join(fixture.root, 'skills', 'oma-runtime', 'SKILL.md'), 'utf8'))
+        .toContain('`/oh-my-agy:zzz-extra`');
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });
+
+function writeCatalogFixture(root: string, names: readonly string[]): void {
+  for (const name of names) {
+    fs.mkdirSync(path.join(root, 'skills', name), { recursive: true });
+    if (name === 'oma-runtime') {
+      fs.writeFileSync(path.join(root, 'skills', name, 'SKILL.md'), [
+        '---',
+        'name: oma-runtime',
+        'description: "index"',
+        '---',
+        '',
+        '# index',
+        '',
+        '## Slash catalog',
+        '',
+        '<!-- OMA-SKILL-CATALOG:START -->',
+        '| User intent | Canonical slash | Skill body | Optional CLI helper |',
+        '|-------------|-----------------|------------|---------------------|',
+        '<!-- OMA-SKILL-CATALOG:END -->',
+        '',
+      ].join('\n'), 'utf8');
+      continue;
+    }
+    fs.writeFileSync(
+      path.join(root, 'skills', name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: "${name} body"\n---\n\n# ${name}\n`,
+      'utf8',
+    );
+  }
+
+  fs.writeFileSync(path.join(root, 'skills', 'AGENTS.md'), [
+    '# skills',
+    '',
+    '## Key Files',
+    '',
+    '<!-- OMA-SKILL-CATALOG:START -->',
+    '| Path | Description |',
+    '|------|-------------|',
+    '<!-- OMA-SKILL-CATALOG:END -->',
+    '',
+  ].join('\n'), 'utf8');
+}
+
+function listRelativeFiles(root: string): string[] {
+  const out: string[] = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const rel = prefix === '' ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) walk(path.join(dir, entry.name), rel);
+      else out.push(rel);
+    }
+  };
+  walk(root, '');
+  return out.sort();
+}
