@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { checkContinuation, acquireLock, releaseLock } from '../src/enforcer';
 import { ordinaryEnvironment } from '../src/cli/managed-invocation';
+import { resolveLegacyStdio } from '../src/cli/legacy-stdio';
 import { isStructuredNativeCommand } from '../src/cli/parser';
 
 // 常用諮詢詞之正規表示式，用以過濾諮詢意圖，避免誤觸攔截
@@ -235,8 +236,9 @@ async function main() {
     }
 
     // 執行實體 agy 子程序並同步等待 close（legacy magic：不注入 exact_env binding）
-    // e2e 預設靜音；互動環境可用 OMA_LEGACY_STDIO=inherit 看到輸出
-    const legacyStdio = process.env.OMA_LEGACY_STDIO === 'inherit' ? 'inherit' : 'ignore';
+    // TTY-gated stdio：互動終端 inherit（對齊 OMX host launch / OMG 互動政策）；
+    // 非 TTY（e2e/CI）保持 ignore。OMA_LEGACY_STDIO=inherit|ignore 可顯式覆寫。
+    const legacyStdio = resolveLegacyStdio(process.env, Boolean(process.stdout.isTTY));
 
     const { guardDangerousArgv } = await import('../src/cli/dangerous-launch');
     const magicGuarded = await guardDangerousArgv(remainingArgs, {
