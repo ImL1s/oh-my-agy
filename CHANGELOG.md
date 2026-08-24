@@ -6,6 +6,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+### Fixed
+
+- POSIX native-probe process lineage no longer treats every new PID-1
+  (reparented / baseline-delta) process as a probe descendant. Busy hosts
+  were charging unrelated jest/LLM workers against the fail-closed process
+  budget, so `oma native probe --live` could false-fail with
+  `processCountOverflow`. Ownership now requires parent-tree or
+  process-group proof; pre-spawn PID+start baseline rows are not adopted
+  as group members. (#67)
+
 ### Added
 
 - New in-session skill **`ask`** (`/oh-my-agy:ask`), matching the `ask` entry
