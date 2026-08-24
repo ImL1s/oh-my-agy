@@ -67,6 +67,7 @@ describe('CLI parser', () => {
     ['resume', ['--session', 's1']],
     ['production', ['verify']],
     ['explain', ['E_PLUGIN_NOT_ACTIVE', '--json']],
+    ['ask', ['codex', 'second opinion', '--dry-run']],
   ])('routes public composition command %s without agy pass-through', (command, args) => {
     expect(parseCliArguments([command, ...args])).toEqual({
       kind: 'extended',

@@ -32,6 +32,9 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('skill search');
     expect(r.stdout).toContain('oma session list');
     expect(r.stdout).toContain('oma resume --list');
+    expect(r.stdout).toContain(
+      'oma ask <codex|claude|grok|agy|cursor-agent> "<question>" [--file <path>] [--dry-run] [--json]',
+    );
     expect(r.stdout).toContain('oma explain <E_CODE> [--json]');
   });
 

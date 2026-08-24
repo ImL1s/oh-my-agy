@@ -71,7 +71,7 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
     'workflow', 'mcp-server', 'wiki', 'hud', 'session', 'cancel', 'hooks',
     'native-status', 'lsp-status', 'sidecar-status', 'notify',
     'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
-    'explain',
+    'explain', 'ask',
   ].includes(first)) {
     return true;
   }

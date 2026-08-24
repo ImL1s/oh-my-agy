@@ -107,7 +107,7 @@ const CATALOG_COPY: Readonly<Record<string, CatalogCopy>> = Object.freeze({
   ask: {
     agents: 'External advisor second opinion (advisory-only)',
     intent: 'External advisor second opinion',
-    cli: 'none — advisory only, never a worker',
+    cli: '`oma ask <codex|claude|grok|agy|cursor-agent>` (advisory only)',
   },
 
   wiki: {

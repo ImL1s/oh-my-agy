@@ -37,6 +37,8 @@ import {
 } from '../workflows/authority';
 import { validateProviderRoutePreconditions } from '../team/provider';
 import { resolveCanonicalAgyIdentity } from '../native/antigravity-status';
+// 與 `oma ask` 共用允許清單；成員必須與抽出前 byte 級相同（fail-closed capture）。
+import { ALLOWED_CAPTURE_TOOLS } from '../ask/allowed-tools';
 
 export type ProductionEvidenceSeam =
   | 'plugin-discovery'
@@ -134,7 +136,6 @@ const MAX_CAPTURE_BYTES = 4_194_304;
 const SAFE_ID = /^[A-Za-z0-9._:@+-]{1,256}$/u;
 const SAFE_RUN_ID = /^[A-Za-z0-9._:-]{1,160}$/u;
 const OID = /^[a-f0-9]{40,64}$/u;
-const ALLOWED_CAPTURE_TOOLS = new Set(['codex', 'claude', 'grok', 'agy', 'cursor-agent']);
 const PLUGIN_DISCOVERY_AUTHORITY = Symbol('product-owned-fresh-plugin-discovery');
 const WORKFLOW_PROBE_AUTHORITY = Symbol('product-owned-workflow-probe');
 

@@ -12,7 +12,7 @@ When invoked via **`/oh-my-agy:ask`** or this **ask** skill, treat **`$ARGUMENTS
 
 - Canonical slash: **`/oh-my-agy:ask`**.
 - The advisor's answer is **advisory input to you**, not a verdict, not a worker result, not verification evidence.
-- There is **no `oma ask` CLI verb** today — see [Appendix](#appendix-current-oma-cli-reality). Do not tell the user to run one.
+- Optional CLI: **`oma ask`** — see [Appendix](#appendix-oma-ask-cli). The CLI is outbound-only; it does not inject replies and does not close gates.
 
 ## Purpose
 
@@ -44,15 +44,21 @@ OMC/OMX/OMG expose `ask` as a **broker for locally installed advisor CLIs** (Cod
 1. **Scope the question.** State the exact decision, the files involved, and what would change based on the answer. A vague question wastes the round-trip.
 2. **Pick the advisor.** Match the request: Codex for adversarial code review, Claude for architecture/reasoning, Gemini when explicitly asked, `agy` for Antigravity-native perspective. If the user named one, use that one.
 3. **Redact.** Strip secrets and anything that must not leave the machine.
-4. **Ask, and write the answer down.** Invoke the advisor CLI with the tools available in this session, passing the question as a single argument. Save the verbatim reply to **`.agy/ask/<provider>-<slug>.md`** (create the directory if missing) so the reasoning is auditable later and does not have to live in the transcript. Do not give the advisor write access to the repo, and do not let it run the project's build or tests — it answers, it does not act.
+4. **Ask, and write the answer down.** Prefer the bounded CLI when a terminal is available:
 
-   When the second opinion has to be **evidence-bound to an exact commit** (release review, production gate), use the existing governed surface instead of an ad-hoc launch:
+   ```bash
+   oma ask <codex|claude|grok|agy|cursor-agent> "<question>" [--file <path>] [--dry-run] [--json]
+   ```
+
+   That verb allowlists the executable, redacts the question, spawns with an argv array (never a shell string), and writes **`.agy/artifacts/ask-<UTC>-<tool>.md`** marked **advisory only**. `--dry-run` prints the full argv and does not spawn. Do not give the advisor write access to the repo, and do not let it run the project's build or tests — it answers, it does not act.
+
+   When invoked as a slash skill with no CLI, use the tools available in this session and save the verbatim reply to **`.agy/ask/<provider>-<slug>.md`**.
+
+   When the second opinion has to be **evidence-bound to an exact commit** (release review, production gate), use the governed capture surface instead of `oma ask`:
 
    ```bash
    oma production capture <review|ultraqa> [--run-id <id>] -- <codex|claude|grok|agy|cursor-agent> <args...>
    ```
-
-   That path allowlists the executable and resolves it without a shell (`src/production/evidence.ts`), which is exactly the guarantee HARD RULE 3 is asking for.
 5. **Judge it.** Advisors are wrong regularly. For each claim, decide: does repo evidence support it? Cite `path:line` when you accept a point.
 6. **Report the split.** Say plainly which points you accepted, which you rejected, and why. Never silently adopt an advisor's framing.
 7. **Then do the work yourself** through the normal OMA lanes, and verify with `verify`.
@@ -61,15 +67,16 @@ OMC/OMX/OMG expose `ask` as a **broker for locally installed advisor CLIs** (Cod
 
 | What | Path |
 |------|------|
-| Advisor transcript | `.agy/ask/<provider>-<slug>.md` |
+| CLI transcript (`oma ask`) | `.agy/artifacts/ask-<UTC>-<tool>.md` |
+| Slash-skill transcript | `.agy/ask/<provider>-<slug>.md` |
 
-Do **not** invent `.omc` / `.omx` paths. The transcript is advisory input; it never counts as review or QA evidence, which live under `.agy/reviews/` and `.agy/qa/`.
+Do **not** invent `.omc` / `.omx` paths. The transcript is advisory input; it never counts as review or QA evidence, which live under `.agy/reviews/` and `.agy/qa/`. Never copy it into `.agy/autopilot`.
 
 ## Checklist
 
 - [ ] Question states a concrete decision, not "review this"
 - [ ] Secrets redacted before the question left the session
-- [ ] Advisor transcript saved under `.agy/ask/`
+- [ ] Advisor transcript saved under `.agy/artifacts/ask-*.md` (CLI) or `.agy/ask/` (slash)
 - [ ] Advisor identified by name in the report
 - [ ] Each accepted claim backed by repo evidence (`path:line` or command output)
 - [ ] No completion claim rests on the advisor's word
@@ -85,18 +92,29 @@ Do **not** invent `.omc` / `.omx` paths. The transcript is advisory input; it ne
 
 ---
 
-## Appendix: current `oma` CLI reality
+## Appendix: `oma ask` CLI
 
-OMA ships **no `ask` verb** today. `oma --help` lists the shipped surface; `ask` is not on it. This skill is the in-session contract for advisor brokering; it does not claim CLI support that does not exist.
+The session skill remains primary. The optional CLI is a bounded outbound broker:
 
-Related OMA surfaces that *do* exist and are usually the right call first:
+```bash
+oma ask <codex|claude|grok|agy|cursor-agent> "<question>" [--file <path>] [--dry-run] [--json]
+```
+
+- Allowlist is the same five tools as `oma production capture` (`src/ask/allowed-tools.ts`).
+- Spawn is `spawnSync` + argv array only; `--dry-run` prints that argv and does not spawn.
+- The question is redacted (`src/runtime/redaction.ts`) before it leaves the process.
+- Transcripts are capped; overflow is truncated with a marker.
+- Artifact: `.agy/artifacts/ask-<UTC>-<tool>.md`, marked **ADVISORY ONLY**.
+- **Does not** write `.agy/autopilot` or `.agy/reviews`. **Does not** close a gate.
+- **Outbound only** — no inbound reply injection (parity: `host_impossible`).
+
+Related surfaces:
 
 ```bash
 oma doctor            # install/plugin health before blaming code
 oma skill show verify # the evidence lane that actually closes claims
 
-# The one existing OMA surface that does launch advisor CLIs, allowlisted and
-# shell-free — use it when the second opinion must bind to an exact commit:
+# Exact-commit independent review / UltraQA (not advisory scratch):
 oma production capture <review|ultraqa> [--run-id <id>] -- <codex|claude|grok|agy|cursor-agent> <args...>
 ```
 

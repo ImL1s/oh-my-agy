@@ -112,6 +112,9 @@ describe('CLI application wiring', () => {
     );
     expect(output().stdout).toContain('oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]');
     expect(output().stdout).toContain('oma update [--release] [--bin-dir <dir>] [--check]');
+    expect(output().stdout).toContain(
+      'oma ask <codex|claude|grok|agy|cursor-agent> "<question>" [--file <path>] [--dry-run] [--json]',
+    );
     expect(output().stdout).toContain('oma explain <E_CODE> [--json]');
   });
 
@@ -127,6 +130,8 @@ describe('CLI application wiring', () => {
     expect(services.extendedCommand).toHaveBeenCalledWith('hooks', ['status', '--json']);
     expect(await runCli(['explain', 'E_PLUGIN_NOT_ACTIVE', '--json'], services, io)).toBe(0);
     expect(services.extendedCommand).toHaveBeenCalledWith('explain', ['E_PLUGIN_NOT_ACTIVE', '--json']);
+    expect(await runCli(['ask', 'codex', 'q', '--dry-run'], services, io)).toBe(0);
+    expect(services.extendedCommand).toHaveBeenCalledWith('ask', ['codex', 'q', '--dry-run']);
     expect(services.passThrough).not.toHaveBeenCalled();
   });
 
