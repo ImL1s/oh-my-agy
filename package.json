@@ -37,6 +37,7 @@
     "docs/parity/oma-traceability.json",
     "docs/security.md",
     "docs/workflows.md",
+    "docs/error-codes.md",
     "docs/npm-publishing.md",
     "LICENSE",
     "package.json"

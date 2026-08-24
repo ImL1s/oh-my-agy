@@ -10,6 +10,7 @@ import { TeamOrchestrator } from '../../src/team/orchestrator';
 import { TeamStateStore } from '../../src/team/state';
 import { RuntimeContext } from '../../src/team/types';
 import { resolveGitWorktreeIdentity } from '../../src/team/worktree';
+import { formatCliError } from '../../src/runtime/error-catalog';
 import { runtimeError } from '../../src/runtime/errors';
 import { err, ok } from '../../src/runtime/types';
 import { GitFixture } from '../helpers/git-fixture';
@@ -283,7 +284,7 @@ describe('team start max-parallel (#43)', () => {
           stderr: (chunk) => { stderr += chunk; },
         });
         expect(code).toBe(2);
-        expect(stderr).toBe(`E_VALIDATOR_REJECTED: ${MAX_PARALLEL_FLAG_MESSAGE}\n`);
+        expect(stderr).toBe(formatCliError('E_VALIDATOR_REJECTED', MAX_PARALLEL_FLAG_MESSAGE));
       },
     );
 

@@ -41,6 +41,21 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     });
   });
 
+  test('error catalog is W2 runtime-owned; explain command and docs are W6', () => {
+    expect(ownershipForPath('src/runtime/error-catalog.ts')).toEqual({
+      wave: 'OMA-W2', owner: 'oma-state-owner',
+    });
+    expect(ownershipForPath('tests/runtime/error-catalog.spec.ts')).toEqual({
+      wave: 'OMA-W2', owner: 'oma-state-owner',
+    });
+    expect(ownershipForPath('src/cli/explain-command.ts')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+    expect(ownershipForPath('docs/error-codes.md')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+  });
+
   test('production probe implementation and evidence tests are W6 composition-owned', () => {
     expect(ownershipForPath('src/production/evidence.ts')).toEqual({
       wave: 'OMA-W6', owner: 'oma-final-composition-owner',

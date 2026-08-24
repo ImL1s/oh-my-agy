@@ -12,6 +12,7 @@ import {
   DANGEROUS_OVERRIDE_FLAG,
   guardDangerousArgv,
 } from './dangerous-launch';
+import { formatCliError } from '../runtime/error-catalog';
 import { isStructuredNativeCommand } from './parser';
 
 export const MADMAX_FLAG = '--madmax';
@@ -27,6 +28,7 @@ export const STRUCTURED_FIRST_TOKENS = Object.freeze(new Set([
   'workflow', 'mcp-server', 'wiki', 'hud', 'session', 'cancel', 'hooks',
   'native-status', 'lsp-status', 'sidecar-status', 'notify',
   'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
+  'explain',
 ]));
 
 export const LAUNCHER_ONLY_FLAGS = Object.freeze(new Set([
@@ -382,7 +384,7 @@ export async function runHostLaunch(argv: readonly string[], options: {
       stderr,
     });
     if (!guarded.ok) {
-      stderr(`${guarded.error.code}: ${guarded.error.message}\n`);
+      stderr(formatCliError(guarded.error.code, guarded.error.message));
       return 2;
     }
   }

@@ -5,6 +5,7 @@ import { AutopilotRuntime } from '../autopilot/runtime';
 import { ProcessRunner } from '../runtime/process';
 import { resolveStateRoot, resolveWorkspaceIdentity } from '../runtime/state-root';
 import { Result, err, ok } from '../runtime/types';
+import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { verifyPluginActive, PluginCommandAdapter } from '../setup/plugin';
 import { PluginSetupTransaction } from '../setup/transaction';
@@ -103,7 +104,7 @@ export function createDefaultServices(
         workspaceRoot: cwd,
       });
       if (!runtime.ok) {
-        stderr(`${runtime.error.code}: ${runtime.error.message}\n`);
+        stderr(formatCliError(runtime.error.code, runtime.error.message));
         return 1;
       }
       // drive：ledger + ManagedInvocationService.resumeConversation（production 呼叫者）
@@ -116,7 +117,7 @@ export function createDefaultServices(
           parsed.value.expectedRevision,
         );
         if (!driven.ok) {
-          stderr(`${driven.error.code}: ${driven.error.message}\n`);
+          stderr(formatCliError(driven.error.code, driven.error.message));
           return driven.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
         }
         const managed = buildManagedService({
@@ -128,7 +129,7 @@ export function createDefaultServices(
           runner,
         });
         if (!managed.ok) {
-          stderr(`${managed.error.code}: ${managed.error.message}\n`);
+          stderr(formatCliError(managed.error.code, managed.error.message));
           return 1;
         }
         // 首次 drive 不依賴 plugin preflight：arm → spawn → bind。
@@ -155,7 +156,7 @@ export function createDefaultServices(
           );
         }
         if (!outcome.ok) {
-          stderr(`${outcome.error.code}: ${outcome.error.message}\n`);
+          stderr(formatCliError(outcome.error.code, outcome.error.message));
           stdout(`${JSON.stringify({
             ok: false,
             kind: 'autopilot-driven',
@@ -180,7 +181,7 @@ export function createDefaultServices(
       }
       const result = await runtime.value.dispatch(argv);
       if (!result.ok) {
-        stderr(`${result.error.code}: ${result.error.message}\n`);
+        stderr(formatCliError(result.error.code, result.error.message));
         return result.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
       }
       stdout(`${JSON.stringify(result.value, null, 2)}\n`);
@@ -189,7 +190,7 @@ export function createDefaultServices(
     async teamCommand(argv) {
       const context = buildTeamContext(cwd, options.stateRoot);
       if (!context.ok) {
-        stderr(`${context.error.code}: ${context.error.message}\n`);
+        stderr(formatCliError(context.error.code, context.error.message));
         return 1;
       }
       const mayLaunch = ['start', 'supervise', 'tick'].includes(argv[0] ?? '');
@@ -274,7 +275,7 @@ export function createDefaultServices(
           : resolveStateRoot({ create: true });
         if (!state.ok) {
           if (agyOnly) {
-            stderr(`${state.error.code}: ${state.error.message}\n`);
+            stderr(formatCliError(state.error.code, state.error.message));
             return 1;
           }
           stderr(`warn: agy setup skipped (${state.error.code}: ${state.error.message})\n`);
@@ -291,7 +292,7 @@ export function createDefaultServices(
           const result = await transaction.run();
           if (!result.ok) {
             if (agyOnly) {
-              stderr(`${result.error.code}: ${result.error.message}\n`);
+              stderr(formatCliError(result.error.code, result.error.message));
               return 1;
             }
             stderr(
@@ -313,7 +314,7 @@ export function createDefaultServices(
           : hosts.filter((h): h is 'claude' | 'grok' => h === 'claude' || h === 'grok');
         const installed = installSlashHosts(packageRoot, [...slashHosts], options.hostCliAdapter);
         if (!installed.ok) {
-          stderr(`${installed.error.code}: ${installed.error.message}\n`);
+          stderr(formatCliError(installed.error.code, installed.error.message));
           return 1;
         }
         slashResult = installed.value;
@@ -351,7 +352,7 @@ export function createDefaultServices(
             schema: 'oma.cli-result/v1',
           }).toString('utf8')}\n`);
         } else {
-          stderr(`E_CLI_USAGE: ${message}\n`);
+          stderr(formatCliError('E_CLI_USAGE', message));
         }
         return 2;
       }
@@ -393,7 +394,7 @@ export function createDefaultServices(
         } : undefined,
       });
       if (!report.ok) {
-        stderr(`${report.error.code}: ${report.error.message}\n`);
+        stderr(formatCliError(report.error.code, report.error.message));
         return 1;
       }
       if (doctorOptions.asJson) {
@@ -414,14 +415,14 @@ export function createDefaultServices(
       } = await import('./skill-commands');
       const parsed = parseSkillCommand(argv);
       if (!parsed.ok) {
-        stderr(`${parsed.error.code}: ${parsed.error.message}\n`);
+        stderr(formatCliError(parsed.error.code, parsed.error.message));
         return 2;
       }
       const format = parsed.value.format ?? DEFAULT_SKILL_RENDER_FORMAT;
       const result = runSkillCommand(parsed.value, packageRoot);
       if (!result.ok) {
         stderr(format === 'json'
-          ? `${result.error.code}: ${result.error.message}\n`
+          ? formatCliError(result.error.code, result.error.message)
           : renderSkillErrorText(result.error));
         return result.error.code === 'E_NOT_FOUND' ? 1 : 2;
       }

@@ -4,6 +4,7 @@
  */
 import { isInternalCatalogSkill } from '../modes/skill-catalog';
 import { listWorkflowSkillNames, loadSkillMarkdown, OmaWorkflowSkill } from '../modes/skill-loader';
+import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 
@@ -193,7 +194,7 @@ export function renderSkillCommandText(command: ParsedSkillCommand, value: unkno
 /** 人類可讀錯誤輸出；`E_NOT_FOUND` 額外列出可用 skill，避免使用者要自己去翻目錄。 */
 export function renderSkillErrorText(error: RuntimeError): string {
   const available = (error.details as { available?: unknown } | undefined)?.available;
-  const lines = [`${error.code}: ${error.message}`];
+  const lines = formatCliError(error.code, error.message).trimEnd().split('\n');
   if (Array.isArray(available) && available.length > 0) {
     lines.push('', 'Available skills:', ...available.map((name) => `  ${String(name)}`));
     lines.push('', 'Try: oma skill show <name>');
