@@ -221,7 +221,7 @@ oma workflow run <name> --input <input.json> [--version <semver>] [--generation 
 oma workflow status|replay --run <run-id>
 oma mcp-server
 oma wiki index|list|search <query> [--limit <1..50>]
-oma hud [--json] [--watch] [--session <id> --workspace-key <key>]
+oma hud [--json] [--watch] [--preset minimal|focused|full] [--session <id> --workspace-key <key>]
 oma native capabilities [--json]
 oma native probe --live [--json]
 oma native-status | lsp-status | sidecar-status

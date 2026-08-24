@@ -2385,7 +2385,7 @@ async function runHudCommand(
 ): Promise<number> {
   const allowed = [
     '--json', '--watch', '--interval', '--iterations', '--session', '--team',
-    '--workspace-key', '--repo-key',
+    '--workspace-key', '--repo-key', '--preset',
   ];
   assertOnlyOptions(argv, allowed);
   const stateRoot = commandStateRoot(context);
@@ -2411,17 +2411,28 @@ async function runHudCommand(
     };
   }
   const format = argv.includes('--json') ? 'json' : 'text';
-  const { collectHudSnapshot, renderHud, watchHud } = await import('../hud');
+  const {
+    collectHudSnapshot, renderHud, watchHud, DEFAULT_HUD_PRESET, HUD_PRESETS, isHudPreset,
+  } = await import('../hud');
+  // 設計概念映射：OMX `omx hud --preset=minimal|focused|full` 的三段呈現密度。
+  // 未指定時維持 focused，輸出與導入 preset 之前逐字相同。
+  const requestedPreset = optionValue(argv, '--preset');
+  if (requestedPreset !== undefined && !isHudPreset(requestedPreset)) {
+    throw new ExtendedCliUsageError(
+      `hud --preset must be one of ${HUD_PRESETS.join('|')}`,
+    );
+  }
+  const preset = requestedPreset ?? DEFAULT_HUD_PRESET;
   if (!argv.includes('--watch')) {
     const snapshot = collectHudSnapshot(query);
     if (!snapshot.ok) throw new Error(`${snapshot.error.code}: ${snapshot.error.message}`);
-    context.stdout(`${renderHud(snapshot.value, format)}\n`);
+    context.stdout(`${renderHud(snapshot.value, format, preset)}\n`);
     return 0;
   }
   const watched = await watchHud(query, {
     interval_ms: integerOption(argv, '--interval', 1_000, 50, 60_000),
     max_iterations: integerOption(argv, '--iterations', 10_000, 1, 10_000),
-    on_snapshot: (snapshot) => { context.stdout(`${renderHud(snapshot, format)}\n`); },
+    on_snapshot: (snapshot) => { context.stdout(`${renderHud(snapshot, format, preset)}\n`); },
   });
   if (!watched.ok) throw new Error(`${watched.error.code}: ${watched.error.message}`);
   return 0;

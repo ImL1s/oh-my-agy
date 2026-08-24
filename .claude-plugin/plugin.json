@@ -34,6 +34,7 @@
     "./skills/discovery-proof/",
     "./skills/workflow/",
     "./skills/ask/",
-    "./skills/wiki/"
+    "./skills/wiki/",
+    "./skills/hud/"
   ]
 }
