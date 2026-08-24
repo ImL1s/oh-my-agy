@@ -68,6 +68,9 @@ Usage:
   oma autopilot doctor --session <id>
   oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]
   oma team status --team <id>
+  oma team panes --team <id>
+  oma team capture --team <id> --task <id> [--lines 1..2000]
+  oma team view --team <id> [--task <id>] --print-argv
   oma team stop --team <id>
   oma team supervise --team <id>
   oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead|alive|unknown --process dead|alive|unknown

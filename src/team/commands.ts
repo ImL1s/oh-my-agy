@@ -16,8 +16,17 @@ import {
 } from './recovery-fork';
 import { TeamOrchestrator, TeamOrchestratorOptions } from './orchestrator';
 import { isCanonicalTeamIdentifier, readTeamManifest } from './manifest';
+import {
+  DEFAULT_CAPTURE_LINES,
+  TmuxSpawnFn,
+  capturePane,
+  listOwnedPanes,
+  parseCaptureLineCount,
+  printAttachArgv,
+  sessionNameFromHeartbeat,
+} from './pane-observe';
 import { TeamStateStore } from './state';
-import { RuntimeContext, TeamActorIdentityV1 } from './types';
+import { RuntimeContext, SupervisorHeartbeatV1, TeamActorIdentityV1 } from './types';
 import { resolveGitWorktreeIdentity } from './worktree';
 
 export type ParsedTeamCommand =
@@ -75,6 +84,22 @@ export type ParsedTeamCommand =
       operation: string;
       inputJson: string;
       json: boolean;
+    }
+  | {
+      kind: 'panes';
+      teamId: string;
+    }
+  | {
+      kind: 'capture';
+      teamId: string;
+      taskId: string;
+      lines: number;
+    }
+  | {
+      kind: 'view';
+      teamId: string;
+      taskId?: string;
+      printArgv: true;
     };
 
 /**
@@ -241,6 +266,15 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
   if (subcommand === 'api') {
     return parseTeamApiCommand(argv.slice(1));
   }
+  if (subcommand === 'panes') {
+    return parseTeamPanesCommand(argv.slice(1));
+  }
+  if (subcommand === 'capture') {
+    return parseTeamCaptureCommand(argv.slice(1));
+  }
+  if (subcommand === 'view') {
+    return parseTeamViewCommand(argv.slice(1));
+  }
   return err(runtimeError('E_VALIDATOR_REJECTED', 'Unknown team command'));
 }
 
@@ -280,6 +314,72 @@ function parseTeamApiCommand(argv: readonly string[]): Result<ParsedTeamCommand,
   return ok({ kind: 'api', operation, inputJson, json });
 }
 
+function parseTeamPanesCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  const flags = parseStrictFlags(argv);
+  if (!flags.ok) return flags;
+  if (flags.value.size !== 1 || !flags.value.has('--team')) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team panes requires --team'));
+  }
+  return ok({ kind: 'panes', teamId: flags.value.get('--team')! });
+}
+
+function parseTeamCaptureCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  const flags = parseStrictFlags(argv);
+  if (!flags.ok) return flags;
+  if (!flags.value.has('--team') || !flags.value.has('--task')) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team capture requires --team and --task'));
+  }
+  const allowed = new Set(['--team', '--task', '--lines']);
+  for (const key of flags.value.keys()) {
+    if (!allowed.has(key)) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', `Unknown team capture flag: ${key}`));
+    }
+  }
+  let lines = DEFAULT_CAPTURE_LINES;
+  if (flags.value.has('--lines')) {
+    const parsed = parseCaptureLineCount(flags.value.get('--lines')!);
+    if (!parsed.ok) return parsed;
+    lines = parsed.value;
+  }
+  return ok({
+    kind: 'capture',
+    teamId: flags.value.get('--team')!,
+    taskId: flags.value.get('--task')!,
+    lines,
+  });
+}
+
+/**
+ * 設計概念映射：OMG `team view --print`；OMA 僅支援 `--print-argv`，永不 attach。
+ */
+function parseTeamViewCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  const printCount = argv.filter((token) => token === '--print-argv').length;
+  if (printCount !== 1) {
+    return err(runtimeError(
+      'E_VALIDATOR_REJECTED',
+      'team view requires --print-argv (read-only; never attaches)',
+    ));
+  }
+  const flags = parseStrictFlags(argv.filter((token) => token !== '--print-argv'));
+  if (!flags.ok) return flags;
+  if (!flags.value.has('--team')) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team view requires --team'));
+  }
+  const allowed = new Set(['--team', '--task']);
+  for (const key of flags.value.keys()) {
+    if (!allowed.has(key)) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', `Unknown team view flag: ${key}`));
+    }
+  }
+  const taskId = flags.value.get('--task');
+  return ok({
+    kind: 'view',
+    teamId: flags.value.get('--team')!,
+    ...(taskId === undefined ? {} : { taskId }),
+    printArgv: true,
+  });
+}
+
 function isLiveness(value: string): value is 'alive' | 'dead' | 'unknown' {
   return value === 'alive' || value === 'dead' || value === 'unknown';
 }
@@ -296,6 +396,11 @@ export interface TeamCommandOptions {
   orchestratorFactory?: (context: RuntimeContext) => TeamOrchestrator;
   /** CLI composition supplies evidence-bearing profiles; Team owns routing. */
   providerProfileFactory?: TeamOrchestratorOptions['providerProfileFactory'];
+  /**
+   * 測試注入：攔截 tmux argv。production 走 spawnSync('tmux', argv)。
+   * 設計概念映射：OMG operator adapter；observe 路徑不得 send-keys。
+   */
+  tmuxSpawn?: TmuxSpawnFn;
 }
 
 function defaultOrchestrator(
@@ -470,6 +575,10 @@ export async function teamCommand(
     return runTeamApiCommand(parsed.value, options, stdout, stderr);
   }
 
+  if (parsed.value.kind === 'panes' || parsed.value.kind === 'capture' || parsed.value.kind === 'view') {
+    return runTeamObserveCommand(parsed.value, options, stdout, stderr);
+  }
+
   let evidence: RecoveryForkSelectionEvidenceV1;
   try {
     evidence = JSON.parse(fs.readFileSync(parsed.value.evidencePath, 'utf8')) as RecoveryForkSelectionEvidenceV1;
@@ -622,6 +731,136 @@ function parseStrictFlags(argv: readonly string[]): Result<Map<string, string>, 
     flags.set(key, value);
   }
   return ok(flags);
+}
+
+function observeErrorExit(code: string): number {
+  return code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
+}
+
+function runTeamObserveCommand(
+  parsed: Extract<ParsedTeamCommand, { kind: 'panes' | 'capture' | 'view' }>,
+  options: Readonly<TeamCommandOptions>,
+  stdout: (value: string) => void,
+  stderr: (value: string) => void,
+): number {
+  const store = new TeamStateStore(
+    options.context.stateRoot,
+    options.context.repoKey,
+    options.context.workspaceKey,
+    parsed.teamId,
+  );
+  const snapshot = store.read();
+  if (!snapshot.ok) {
+    stderr(`${snapshot.error.code}: ${snapshot.error.message}\n`);
+    return observeErrorExit(snapshot.error.code);
+  }
+  const aggregate = snapshot.value.value;
+
+  if (parsed.kind === 'view') {
+    // `--print-argv` 零 spawn：只從 durable heartbeat 組 argv，不碰 tmux。
+    const target = resolveObserveTarget(aggregate, parsed.taskId);
+    if (!target.ok) {
+      stderr(`${target.error.code}: ${target.error.message}\n`);
+      return observeErrorExit(target.error.code);
+    }
+    const argv = printAttachArgv({
+      sessionName: target.value.sessionName,
+      paneId: target.value.paneId,
+    });
+    if (!argv.ok) {
+      stderr(`${argv.error.code}: ${argv.error.message}\n`);
+      return observeErrorExit(argv.error.code);
+    }
+    stdout(`${JSON.stringify({
+      ok: true,
+      kind: 'team-view-argv',
+      teamId: parsed.teamId,
+      taskId: target.value.taskId,
+      argv: argv.value,
+    })}\n`);
+    return 0;
+  }
+
+  const spawn = options.tmuxSpawn;
+  if (parsed.kind === 'panes') {
+    const listed = listOwnedPanes({
+      teamId: parsed.teamId,
+      aggregate,
+      ...(spawn === undefined ? {} : { spawn }),
+    });
+    if (!listed.ok) {
+      stderr(`${listed.error.code}: ${listed.error.message}\n`);
+      return observeErrorExit(listed.error.code);
+    }
+    stdout(`${JSON.stringify({
+      ok: true,
+      kind: 'team-panes',
+      teamId: parsed.teamId,
+      panes: listed.value,
+    })}\n`);
+    return 0;
+  }
+
+  const target = resolveObserveTarget(aggregate, parsed.taskId);
+  if (!target.ok) {
+    stderr(`${target.error.code}: ${target.error.message}\n`);
+    return observeErrorExit(target.error.code);
+  }
+  const captured = capturePane({
+    pane: target.value.paneId,
+    sessionName: target.value.sessionName,
+    expectedOwnerNonce: aggregate.ownerNonce,
+    lines: parsed.lines,
+    ...(spawn === undefined ? {} : { spawn }),
+  });
+  if (!captured.ok) {
+    stderr(`${captured.error.code}: ${captured.error.message}\n`);
+    return observeErrorExit(captured.error.code);
+  }
+  stdout(`${JSON.stringify({
+    ok: true,
+    kind: 'team-capture',
+    teamId: parsed.teamId,
+    taskId: target.value.taskId,
+    paneId: captured.value.paneId,
+    sessionName: captured.value.sessionName,
+    lines: captured.value.lines,
+    text: captured.value.text,
+  })}\n`);
+  return 0;
+}
+
+function resolveObserveTarget(
+  aggregate: { teamId: string; heartbeats: Readonly<Record<string, SupervisorHeartbeatV1>> },
+  taskId: string | undefined,
+): Result<{ taskId: string; sessionName: string; paneId: string }, RuntimeError> {
+  if (taskId !== undefined) {
+    const heartbeat = aggregate.heartbeats[taskId];
+    if (heartbeat === undefined) {
+      return err(runtimeError('E_NOT_FOUND', 'Team task pane does not exist', { taskId }));
+    }
+    return ok({
+      taskId,
+      sessionName: sessionNameFromHeartbeat(aggregate.teamId, heartbeat),
+      paneId: heartbeat.paneId,
+    });
+  }
+  const heartbeats = Object.values(aggregate.heartbeats);
+  const heartbeat = heartbeats[0];
+  if (heartbeat === undefined) {
+    return err(runtimeError('E_NOT_FOUND', 'Team has no owned panes to view'));
+  }
+  if (heartbeats.length !== 1) {
+    return err(runtimeError(
+      'E_VALIDATOR_REJECTED',
+      'team view requires --task when the team has multiple panes',
+    ));
+  }
+  return ok({
+    taskId: heartbeat.workerId,
+    sessionName: sessionNameFromHeartbeat(aggregate.teamId, heartbeat),
+    paneId: heartbeat.paneId,
+  });
 }
 
 async function runTeamApiCommand(
