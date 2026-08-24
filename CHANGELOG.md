@@ -51,6 +51,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 - New in-session skill **`trace`** (`/oh-my-agy:trace`): competing-hypothesis
   causal tracking with evidence for/against and a next probe. No `oma trace`
   CLI. (#39)
+- Runtime skill catalog SSOT `OMA_SKILL_CATALOG_V1` (`src/modes/skill-catalog.ts`)
+  with `{ name, visibility, category, hostSlashForm }`. `OmaWorkflowSkill` is
+  derived from the catalog (the ghost `'doctor'` union member is gone).
+  `oma doctor` gains `skill_manifest_drift`, which fails when
+  `.claude-plugin/plugin.json` `skills[]` and `skills/*/SKILL.md` disagree in
+  either direction. (#41)
 
 - New in-session skill **`plan`** (`/oh-my-agy:plan`): light planning under
   `ralplan`, with verifiable per-step completion and artifacts in `.agy/plans/`.
@@ -130,6 +136,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   union can no longer drift silently).
 
 ### Changed
+
+- **Breaking (CLI output):** `oma skill list` hides `visibility: internal`
+  skills (`discovery-proof`) by default. Pass `--all` to include them; `--json`
+  and `--text` are unchanged. (#41)
 
 - **Breaking (CLI output):** `oma skill list` and `oma skill show <name>` now
   print human-readable output by default instead of raw JSON, matching the

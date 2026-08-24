@@ -16,6 +16,8 @@ import {
   resolveHookEntrypoints,
   verifyPluginActive,
 } from './plugin';
+import { normalizeClaudePluginSkillEntry } from '../modes/skill-catalog';
+import { listWorkflowSkillNames } from '../modes/skill-loader';
 
 export type DoctorCheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -102,6 +104,7 @@ export async function runDoctor(
   checks.push(checkPluginManifestVersion(packageRoot, packageVersion));
   checks.push(checkClaudePluginManifest(packageRoot));
   checks.push(checkSlashSkillSurface(packageRoot));
+  checks.push(checkSkillManifestDrift(packageRoot));
   checks.push(checkHooks(packageRoot));
   checks.push(checkAgyOnPath(agyCommand, homeDir, configRoot));
   checks.push(checkStateRoot(input.stateRoot, homeDir, input.homeDir !== undefined));
@@ -511,6 +514,81 @@ function checkSlashSkillSurface(packageRoot: string): DoctorCheckV1 {
       ? 'autopilot skill present (in-session primary language detected)'
       : 'autopilot skill present but body may still be CLI-first — prefer slash-first wording',
     detail: { path: autopilot },
+  };
+}
+
+/**
+ * 雙向比對 `.claude-plugin/plugin.json` `skills[]` 與 `skills/<name>/SKILL.md`。
+ * 設計概念映射：OMX `sync:plugin:check` / `verify:plugin-bundle`（plugin bundle 必須鏡像
+ * top-level skills/）；缺檔或未宣告目錄皆 fail-closed。
+ */
+function checkSkillManifestDrift(packageRoot: string): DoctorCheckV1 {
+  const manifestPath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+  if (!fs.existsSync(manifestPath)) {
+    return {
+      id: 'skill_manifest_drift',
+      status: 'fail',
+      message: '.claude-plugin/plugin.json missing — cannot verify skill manifest',
+    };
+  }
+  let raw: { skills?: unknown };
+  try {
+    raw = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { skills?: unknown };
+  } catch (error) {
+    return {
+      id: 'skill_manifest_drift',
+      status: 'fail',
+      message: '.claude-plugin/plugin.json unreadable',
+      detail: { cause: error instanceof Error ? error.message : String(error) },
+    };
+  }
+  if (!Array.isArray(raw.skills)) {
+    return {
+      id: 'skill_manifest_drift',
+      status: 'fail',
+      message: '.claude-plugin/plugin.json skills[] is not an array',
+    };
+  }
+  const declared: string[] = [];
+  for (const entry of raw.skills) {
+    if (typeof entry !== 'string' || entry.trim() === '') {
+      return {
+        id: 'skill_manifest_drift',
+        status: 'fail',
+        message: '.claude-plugin/plugin.json skills[] contains a non-string entry',
+      };
+    }
+    const name = normalizeClaudePluginSkillEntry(entry);
+    if (name === '') {
+      return {
+        id: 'skill_manifest_drift',
+        status: 'fail',
+        message: '.claude-plugin/plugin.json skills[] contains an empty skill path',
+      };
+    }
+    declared.push(name);
+  }
+  const declaredUnique = [...new Set(declared)].sort();
+  const onDisk = [...listWorkflowSkillNames(packageRoot)].sort();
+  const missingFiles = declaredUnique.filter((name) => !onDisk.includes(name));
+  const undeclared = onDisk.filter((name) => !declaredUnique.includes(name));
+  if (missingFiles.length > 0 || undeclared.length > 0) {
+    const bits = [
+      missingFiles.length > 0 ? `missing files for declared skills (${missingFiles.join(', ')})` : '',
+      undeclared.length > 0 ? `undeclared skill directories (${undeclared.join(', ')})` : '',
+    ].filter((bit) => bit !== '');
+    return {
+      id: 'skill_manifest_drift',
+      status: 'fail',
+      message: `skill manifest drifted: ${bits.join('; ')}`,
+      detail: { declared: declaredUnique, onDisk, missingFiles, undeclared },
+    };
+  }
+  return {
+    id: 'skill_manifest_drift',
+    status: 'pass',
+    message: `skill manifest matches plugin.json skills[] and skills/*/SKILL.md (${onDisk.length} skills)`,
+    detail: { skills: onDisk },
   };
 }
 

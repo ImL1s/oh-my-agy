@@ -48,6 +48,12 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     expect(ownershipForPath('scripts/generate-skill-catalog.ts')).toEqual({
       wave: 'OMA-W4', owner: 'oma-native-surface-owner',
     });
+    expect(ownershipForPath('src/modes/skill-catalog.ts')).toEqual({
+      wave: 'OMA-W4', owner: 'oma-native-surface-owner',
+    });
+    expect(ownershipForPath('tests/package/skill-catalog.spec.ts')).toEqual({
+      wave: 'OMA-W4', owner: 'oma-native-surface-owner',
+    });
     // #36 授權的 skill catalog 索引；其他 AGENTS.md 仍不可變。
     expect(ownershipForPath('skills/AGENTS.md')).toEqual({
       wave: 'OMA-W4', owner: 'oma-native-surface-owner',
