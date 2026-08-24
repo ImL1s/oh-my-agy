@@ -310,49 +310,123 @@ function checkPackageRoot(packageRoot: string, version: string): DoctorCheckV1 {
   };
 }
 
-function checkPluginManifestVersion(packageRoot: string, packageVersion: string): DoctorCheckV1 {
+function failVersionSync(message: string, detail?: unknown): DoctorCheckV1 {
+  return {
+    id: 'version_sync',
+    status: 'fail',
+    message,
+    ...(detail === undefined ? {} : { detail }),
+  };
+}
+
+function readJsonObject(
+  filePath: string,
+): { ok: true; value: Record<string, unknown> } | { ok: false; cause: string } {
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(packageRoot, 'plugin.json'), 'utf8')) as {
-      version?: string;
-      name?: string;
-    };
-    if (raw.version !== packageVersion) {
-      return {
-        id: 'version_sync',
-        status: 'fail',
-        message: `plugin.json version ${raw.version ?? 'missing'} != package.json ${packageVersion}`,
-      };
+    const raw: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      return { ok: false, cause: 'JSON root is not an object' };
     }
-    // Claude slash surface 必須與 package 同步，否則 marketplace 裝到舊 manifest
-    const claudePath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
-    if (fs.existsSync(claudePath)) {
-      const claude = JSON.parse(fs.readFileSync(claudePath, 'utf8')) as { version?: string };
-      if (claude.version !== packageVersion) {
-        return {
-          id: 'version_sync',
-          status: 'fail',
-          message:
-            `.claude-plugin/plugin.json version ${claude.version ?? 'missing'} != package.json ${packageVersion}`,
-        };
-      }
-    }
-    const claudeSynced = fs.existsSync(claudePath);
-    return {
-      id: 'version_sync',
-      status: 'pass',
-      message: claudeSynced
-        ? `package.json, plugin.json, and .claude-plugin all ${packageVersion}`
-        : `package.json and plugin.json both ${packageVersion} (.claude-plugin absent)`,
-      detail: { name: raw.name, claudePluginSynced: claudeSynced },
-    };
+    return { ok: true, value: raw as Record<string, unknown> };
   } catch (error) {
-    return {
-      id: 'version_sync',
-      status: 'fail',
-      message: 'plugin.json unreadable',
-      detail: { cause: error instanceof Error ? error.message : String(error) },
-    };
+    return { ok: false, cause: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function manifestVersion(raw: Record<string, unknown>): string | undefined {
+  return typeof raw.version === 'string' ? raw.version : undefined;
+}
+
+/**
+ * 設計概念映射：OMC `scripts/sync-version.sh` 把 package.json 版本寫進
+ * `.claude-plugin/plugin.json` 與 `marketplace.json`（頂層 + plugin 條目）。
+ * OMA 以 doctor `version_sync` 四方比對取代 shell 同步，過期 catalog 必須紅燈。
+ */
+function checkPluginManifestVersion(packageRoot: string, packageVersion: string): DoctorCheckV1 {
+  const pluginPath = path.join(packageRoot, 'plugin.json');
+  const pluginResult = readJsonObject(pluginPath);
+  if (!pluginResult.ok) {
+    return failVersionSync('plugin.json unreadable', { cause: pluginResult.cause });
+  }
+  const pluginVersion = manifestVersion(pluginResult.value);
+  if (pluginVersion !== packageVersion) {
+    return failVersionSync(
+      `plugin.json version ${pluginVersion ?? 'missing'} != package.json ${packageVersion}`,
+    );
+  }
+  const pluginName = typeof pluginResult.value.name === 'string' && pluginResult.value.name.length > 0
+    ? pluginResult.value.name
+    : 'oh-my-agy';
+
+  const claudePath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+  const claudePresent = fs.existsSync(claudePath);
+  if (claudePresent) {
+    const claudeResult = readJsonObject(claudePath);
+    if (!claudeResult.ok) {
+      return failVersionSync('.claude-plugin/plugin.json unreadable', { cause: claudeResult.cause });
+    }
+    const claudeVersion = manifestVersion(claudeResult.value);
+    if (claudeVersion !== packageVersion) {
+      return failVersionSync(
+        `.claude-plugin/plugin.json version ${claudeVersion ?? 'missing'} != package.json ${packageVersion}`,
+      );
+    }
+  }
+
+  // Claude slash surface 必須連 marketplace catalog 一起對齊，否則會裝到舊版本宣傳
+  const marketplacePath = path.join(packageRoot, '.claude-plugin', 'marketplace.json');
+  const marketplacePresent = fs.existsSync(marketplacePath);
+  if (claudePresent && !marketplacePresent) {
+    return failVersionSync(
+      `.claude-plugin/marketplace.json missing != package.json ${packageVersion}`,
+    );
+  }
+  if (marketplacePresent) {
+    const marketplaceResult = readJsonObject(marketplacePath);
+    if (!marketplaceResult.ok) {
+      return failVersionSync(
+        '.claude-plugin/marketplace.json unreadable',
+        { cause: marketplaceResult.cause },
+      );
+    }
+    const marketplaceVersion = manifestVersion(marketplaceResult.value);
+    if (marketplaceVersion !== packageVersion) {
+      return failVersionSync(
+        `.claude-plugin/marketplace.json version ${marketplaceVersion ?? 'missing'} != package.json ${packageVersion}`,
+      );
+    }
+    const plugins = marketplaceResult.value.plugins;
+    const entries = Array.isArray(plugins) ? plugins : [];
+    const entry = entries.find((item) => (
+      typeof item === 'object'
+      && item !== null
+      && !Array.isArray(item)
+      && (item as { name?: unknown }).name === pluginName
+    )) as Record<string, unknown> | undefined;
+    const entryVersion = entry === undefined ? undefined : manifestVersion(entry);
+    if (entryVersion !== packageVersion) {
+      return failVersionSync(
+        `.claude-plugin/marketplace.json plugin ${pluginName} version ${entryVersion ?? 'missing'} != package.json ${packageVersion}`,
+      );
+    }
+  }
+
+  const claudeSynced = claudePresent;
+  const marketplaceSynced = marketplacePresent;
+  return {
+    id: 'version_sync',
+    status: 'pass',
+    message: claudeSynced && marketplaceSynced
+      ? `package.json, plugin.json, .claude-plugin/plugin.json, and .claude-plugin/marketplace.json all ${packageVersion}`
+      : marketplaceSynced
+        ? `package.json, plugin.json, and .claude-plugin/marketplace.json all ${packageVersion} (.claude-plugin/plugin.json absent)`
+        : `package.json and plugin.json both ${packageVersion} (.claude-plugin absent)`,
+    detail: {
+      name: pluginResult.value.name,
+      claudePluginSynced: claudeSynced,
+      marketplaceSynced,
+    },
+  };
 }
 
 function checkHooks(packageRoot: string): DoctorCheckV1 {

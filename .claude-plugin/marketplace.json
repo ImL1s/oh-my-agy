@@ -1,5 +1,7 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "oh-my-agy",
+  "version": "0.5.2",
   "owner": {
     "name": "ImL1s"
   },
@@ -10,7 +12,21 @@
     {
       "name": "oh-my-agy",
       "source": "./",
-      "description": "OMA slash-first autopilot and related session skills (optional oma CLI ledger)"
+      "description": "OMA slash-first autopilot and related session skills (optional oma CLI ledger)",
+      "version": "0.5.2",
+      "category": "productivity",
+      "tags": [
+        "antigravity",
+        "agy",
+        "oma",
+        "orchestration",
+        "slash-skills",
+        "autopilot"
+      ],
+      "author": {
+        "name": "ImL1s"
+      },
+      "homepage": "https://github.com/ImL1s/oh-my-agy#readme"
     }
   ]
 }

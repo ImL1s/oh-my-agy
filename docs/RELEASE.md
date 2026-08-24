@@ -64,6 +64,8 @@ fresh-home release installer tests invoke both `oma --version` and
 `omy --version` directly. Install preflight rejects an archive that loses the
 execute bit before any host mutation.
 
+`.claude-plugin/marketplace.json` top-level `version` and the plugin entry `version` must stay identical to `package.json`, or `oma doctor` `version_sync` fails the next cut.
+
 `npm run test:production` is a separate live gate. It accepts only fresh
 (within 24 hours), schema-v1 evidence bound to the exact candidate Git OID for:
 
