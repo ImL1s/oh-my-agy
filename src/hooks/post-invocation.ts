@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { appendHookLifecycleEvent } from './common';
+import { appendHookLifecycleEvent, hookSuppressed } from './common';
 
 export interface OptionalPostInvocationInput { conversationId?: string }
 export interface OptionalPostInvocationResult {
@@ -13,6 +13,9 @@ export function handlePostInvocation(
   input: Readonly<OptionalPostInvocationInput>,
   env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): OptionalPostInvocationResult {
+  if (hookSuppressed('post-invocation', env)) {
+    return { decision: 'allow', ok: false, claimed: false };
+  }
   const root = env.OMA_STATE_ROOT?.trim();
   if (root) {
     try {

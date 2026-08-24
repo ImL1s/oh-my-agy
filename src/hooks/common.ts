@@ -1,8 +1,58 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { canonicalJson } from '../runtime/atomic';
 import { StopHookDecision } from '../continuation/decision';
 import { LifecycleEventType, LifecycleEventV1, validateLifecycleEvent } from '../contracts/lifecycle';
 import { createLifecycleEvent, LifecycleJournal } from '../runtime/tracker';
+
+/**
+ * Operator kill switch。設計概念映射：OMC `scripts/run.cjs` 的 `DISABLE_OMC` /
+ * `OMC_SKIP_HOOKS`，以及 OMG `hooks/bin/*.py` 的 `DISABLE_OMG` / `OMG_SKIP_HOOKS`。
+ *
+ * 存在理由：managed session（binding env 齊備）中 hook 一定會執行；若 Stop hook
+ * hang 住或錯誤回傳 continue，使用者原本唯一的出路是去改安裝目錄的 hooks.json 或
+ * 整包解除安裝。這是 hook lane 最便宜的 operator safety。
+ */
+export type HookNameV1 = 'pre-invocation' | 'stop' | 'session-start' | 'post-invocation';
+
+/** kill switch 命中時寫入 lifecycle 的 source，讓「被關掉」與「fail-open」可區分。 */
+export const HOOK_OPERATOR_DISABLED_SOURCE_V1 = 'operator_disabled';
+
+function isTruthyFlag(raw: unknown): boolean {
+  if (typeof raw !== 'string') return false;
+  const normalized = raw.trim().toLowerCase();
+  return normalized === '1' || normalized === 'true';
+}
+
+/** `DISABLE_OMA=1|true`（大小寫不敏感）時關閉全部 hook。 */
+export function hooksDisabled(environment: Readonly<NodeJS.ProcessEnv> = process.env): boolean {
+  return isTruthyFlag(environment.DISABLE_OMA);
+}
+
+/**
+ * `OMA_SKIP_HOOKS` 以逗號分隔的邏輯 hook 名跳過個別 hook；
+ * 容忍空白與大小寫（`" stop , Pre-Invocation "` 有效）。
+ */
+export function hookSkipped(
+  name: HookNameV1,
+  environment: Readonly<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  const raw = environment.OMA_SKIP_HOOKS;
+  if (typeof raw !== 'string' || raw.trim() === '') return false;
+  return raw
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '')
+    .includes(name);
+}
+
+/** 全域關閉或個別跳過任一成立時，該 hook 不得執行任何解析或狀態寫入。 */
+export function hookSuppressed(
+  name: HookNameV1,
+  environment: Readonly<NodeJS.ProcessEnv> = process.env,
+): boolean {
+  return hooksDisabled(environment) || hookSkipped(name, environment);
+}
 
 export function serializeHookDecision(decision: Readonly<StopHookDecision>): string {
   if (decision.decision === 'continue' && decision.reason.trim() === '') {
@@ -51,6 +101,45 @@ export function readHookLifecycleEvents(journalPath: string): LifecycleEventV1[]
   if (!fs.existsSync(journalPath)) return [];
   const lines = fs.readFileSync(journalPath, 'utf8').split('\n').filter(Boolean);
   return lines.map((line) => validateLifecycleEvent(JSON.parse(line)));
+}
+
+/** kill switch 專用 journal；與 `hooks.jsonl`（source `antigravity_hook`）分離以免 source 混寫。 */
+export function operatorDisabledJournalPath(stateRoot: string): string {
+  return path.join(stateRoot, 'lifecycle', 'operator-disabled.jsonl');
+}
+
+/**
+ * 僅在 `OMA_STATE_ROOT` **已經存在**時寫入 `source: operator_disabled`。
+ * 不得呼叫 `resolveStateRoot`（PreInvocation 的 create:true 會mkdir 預設路徑）；
+ * 路徑不存在就跳過，寧可沒紀錄也不要為了寫紀錄去建立 state root。
+ */
+export function appendOperatorDisabledLifecycle(
+  name: HookNameV1,
+  environment: Readonly<NodeJS.ProcessEnv>,
+): LifecycleEventV1 | undefined {
+  const root = environment.OMA_STATE_ROOT?.trim();
+  if (!root) return undefined;
+  try {
+    const stat = fs.lstatSync(root);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return undefined;
+  } catch {
+    return undefined;
+  }
+  try {
+    const generationRaw = environment.OMA_INVOCATION_GENERATION?.trim();
+    const parsed = Number.parseInt(generationRaw ?? '', 10);
+    return appendHookLifecycleEvent(operatorDisabledJournalPath(root), {
+      eventType: 'turn_completed',
+      runId: environment.OMA_SESSION_ID?.trim() || 'operator-disabled',
+      generation: Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1,
+      parentId: null,
+      nativeIdentity: null,
+      payload: { hook: name, suppressed: true },
+      source: HOOK_OPERATOR_DISABLED_SOURCE_V1,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 export interface ShellRedirectionAst {

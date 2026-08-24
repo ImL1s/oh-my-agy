@@ -20,7 +20,12 @@ import { StopEventIdentity } from '../continuation/event-identity';
 import { StopLocatorEventV1, SessionLocator } from '../continuation/state';
 import { sha256, canonicalJson } from '../runtime/atomic';
 import { resolveStateRoot } from '../runtime/state-root';
-import { appendHookLifecycleEvent, serializeHookDecision } from './common';
+import {
+  appendHookLifecycleEvent,
+  appendOperatorDisabledLifecycle,
+  hookSuppressed,
+  serializeHookDecision,
+} from './common';
 import { writeHookDebug } from './debug-log';
 import { resolveHookWorkspace } from './workspace';
 
@@ -44,6 +49,13 @@ export async function handleStop(
   input: Readonly<StopHookInput>,
   env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): Promise<string> {
+  // Operator kill switch 必須是**第一件事**。設計概念映射：OMC `DISABLE_OMC` /
+  // `OMC_SKIP_HOOKS` 與 OMG `DISABLE_OMG` / `OMG_SKIP_HOOKS` — 命中時立刻 allow、
+  // 不得解析 workspace / state root（事故當下 Stop 本身可能就是故障源）。
+  if (hookSuppressed('stop', env)) {
+    appendOperatorDisabledLifecycle('stop', env);
+    return serializeHookDecision({ decision: 'allow' });
+  }
   writeHookDebug('stop.start', input);
   const sessionId = env.OMA_SESSION_ID?.trim();
   const launchNonce = env.OMA_LAUNCH_NONCE?.trim();

@@ -12,7 +12,7 @@ import * as path from 'path';
 import { ManagedBindingEnv, PreInvocationEventV1, SessionLocator } from '../continuation/state';
 import { writeSessionProjection } from '../continuation/session-aggregate';
 import { resolveStateRoot } from '../runtime/state-root';
-import { appendHookLifecycleEvent } from './common';
+import { appendHookLifecycleEvent, appendOperatorDisabledLifecycle, hookSuppressed } from './common';
 import { writeHookDebug } from './debug-log';
 import { resolveHookWorkspace } from './workspace';
 
@@ -39,6 +39,12 @@ export async function handlePreInvocation(
   input: Readonly<PreInvocationHookInput>,
   env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): Promise<PreInvocationHookResult> {
+  // Operator kill switch 必須是**第一件事**：不得 resolveStateRoot / workspace。
+  // lifecycle 只在 OMA_STATE_ROOT 已存在時寫 `operator_disabled`；否則跳過。
+  if (hookSuppressed('pre-invocation', env)) {
+    appendOperatorDisabledLifecycle('pre-invocation', env);
+    return operatorDisabled();
+  }
   writeHookDebug('preinvocation.start', input);
   const bindingEnv = readBindingEnv(env);
   if (bindingEnv === undefined) {
@@ -149,6 +155,15 @@ function buildManagedSkillInjectSteps(
 
 function failOpen(): PreInvocationHookResult {
   return { injectSteps: [], decision: 'allow', ok: false };
+}
+
+/**
+ * kill switch 命中。與 `failOpen` 的差別在 `ok`：fail-open 代表 OMA 想接管卻辦不到
+ * （`ok: false`），operator disabled 代表使用者明確要求不要接管（`ok: true`），
+ * 兩者在證據上必須可區分。
+ */
+function operatorDisabled(): PreInvocationHookResult {
+  return { injectSteps: [], decision: 'allow', ok: true };
 }
 
 function readBindingEnv(env: Readonly<NodeJS.ProcessEnv>): ManagedBindingEnv | undefined {
