@@ -1,13 +1,13 @@
 /**
  * 設計概念映射：Team worker bootstrap，對齊 OMC team pane 啟動 CLI worker。
- * 讀 descriptor + 可選 capability 檔，spawn agy（或 descriptor.agyCommand），stdio inherit；結束碼透傳。
+ * 讀 descriptor + 可選 capability 檔，驗證 route authority 後啟動
+ * `oma team worker run`（協定 loop 的 CLI authority host），不再裸 spawn agy 當主體。
  * argv: [markerPath, descriptorPath]（TmuxController 附加 descriptor 為最後一參）
  */
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { sha256 } from '../runtime/atomic';
-import { buildAgy115Argv } from './agy-argv';
 import { isCanonicalTeamIdentifier } from './manifest';
 import { consumeWorkerRouteAuthority } from './route-authority';
 
@@ -148,30 +148,43 @@ function main(): void {
   // claim 明文僅經 env 短生命週期交給子程序；descriptor 永不寫明文
   if (claimToken !== '') env.OMA_CLAIM_TOKEN = claimToken;
 
-  const agy = desc.agyCommand;
-  const prompt = desc.taskPrompt && desc.taskPrompt.trim() !== ''
-    ? desc.taskPrompt
-    : `Execute team task ${desc.taskId}`;
-  const provider = desc.provider;
-  const launchMode = provider === 'agy_headless' ? 'headless' : 'interactive';
-  const argv = buildAgy115Argv({
-    launchMode,
-    capabilityMode: desc.capabilityMode ?? 'read-write',
-    prompt,
-    ...(desc.boundedDuration === undefined ? {} : { boundedDuration: desc.boundedDuration }),
-    ...(desc.conversationId === undefined ? {} : { conversationId: desc.conversationId }),
-  });
-  if (!argv.ok) {
-    process.stderr.write(`worker-bootstrap: invalid Antigravity argv: ${argv.error.message}\n`);
+  if (claimToken === '') {
+    process.stderr.write('worker-bootstrap: claim token is required to start oma team worker run\n');
     try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
     process.exit(1);
   }
-  const child = spawn(agy, [...argv.value], {
+
+  let omaEntrypoint: string;
+  try {
+    omaEntrypoint = resolveOmaCliEntrypoint(desc);
+  } catch (error) {
+    process.stderr.write(`worker-bootstrap: ${error instanceof Error ? error.message : String(error)}\n`);
+    try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
+    process.exit(1);
+  }
+
+  // 設計概念映射：OMC/OMX/OMG worker 進入點是 CLI，不是裸 host 對話。
+  // 一律 spawn(process.execPath, argv[])，禁止 shell 字串。
+  const workerArgv = [
+    omaEntrypoint,
+    'team', 'worker', 'run',
+    '--team', desc.teamId,
+    '--task', desc.taskId,
+    '--claim-token', claimToken,
+    '--generation', String(desc.generation),
+  ];
+  const child = spawn(process.execPath, workerArgv, {
     cwd: desc.worktreePath,
     env,
     stdio: 'inherit',
     shell: false,
   });
+
+  const forward = (signal: NodeJS.Signals): void => {
+    try { child.kill(signal); } catch (_) { /* child may have already exited */ }
+  };
+  process.on('SIGTERM', forward);
+  process.on('SIGINT', forward);
 
   child.on('error', (error) => {
     process.stderr.write(`worker-bootstrap: spawn failed: ${error.message}\n`);
@@ -180,10 +193,31 @@ function main(): void {
   });
 
   child.on('exit', (code, signal) => {
+    process.off('SIGTERM', forward);
+    process.off('SIGINT', forward);
     try { fs.rmSync(capPath, { force: true }); } catch (_) { /* best-effort */ }
     if (signal === 'SIGINT') process.exit(130);
+    if (signal === 'SIGTERM') process.exit(143);
     process.exit(code ?? 1);
   });
+}
+
+/** 解析 `oma` CLI 進入點；禁止回退去 spawn 裸 agy。 */
+function resolveOmaCliEntrypoint(desc: WorkerDescriptorV1): string {
+  const candidates: string[] = [];
+  if (desc.packageRoot !== undefined) {
+    candidates.push(path.join(desc.packageRoot, 'dist/bin/oma.js'));
+  }
+  const envRoot = process.env.OMA_PACKAGE_ROOT?.trim();
+  if (envRoot) candidates.push(path.join(envRoot, 'dist/bin/oma.js'));
+  candidates.push(path.resolve(__dirname, '../../bin/oma.js'));
+  for (const candidate of candidates) {
+    try {
+      const real = fs.realpathSync(candidate);
+      if (fs.statSync(real).isFile()) return real;
+    } catch (_) { /* try next */ }
+  }
+  throw new Error('oma CLI entrypoint is unavailable for team worker run');
 }
 
 function validateWorkerDescriptor(value: unknown): WorkerDescriptorV1 {

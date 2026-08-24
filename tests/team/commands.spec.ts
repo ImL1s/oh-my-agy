@@ -206,6 +206,21 @@ describe('typed teamCommand surface', () => {
     }
   });
 
+  test('parseTeamCommand accepts worker run fencing flags', () => {
+    expect(parseTeamCommand([
+      'worker', 'run', '--team', 'alpha', '--task', 't1', '--claim-token', 'tok', '--generation', '3',
+    ])).toEqual({
+      ok: true,
+      value: {
+        kind: 'worker-run',
+        teamId: 'alpha',
+        taskId: 't1',
+        claimToken: 'tok',
+        generation: 3,
+      },
+    });
+  });
+
   test('parseTeamCommand accepts status and stop', () => {
     expect(parseTeamCommand(['status', '--team', 'alpha'])).toEqual({
       ok: true,

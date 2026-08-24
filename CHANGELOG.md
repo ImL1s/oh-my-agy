@@ -14,6 +14,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   Inject text is capped with a stable truncation marker; catalog load/list
   failures fail-open to the previous static hint and still `decision: 'allow'`.
   (#52)
+- `worker-bootstrap` no longer spawns bare `agy` as the worker body.
+  Interactive and headless panes (`oma team start --worker-mode
+  interactive|headless`) start `oma team worker run` via `spawn` + argv
+  (no shell). Route authority is still consumed against the profile-bound
+  executable before that entrypoint starts. (#45)
 - Team and repository-workflow validation now derive a `capability_mode` floor
   from `native_role` / optional task `role` (`src/team/roles.ts`; OMG
   `omg_cli/team/roles.py` — posture is derived from role and is never an
@@ -81,6 +86,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   `hooks_kill_switch` check is pass when `DISABLE_OMA` / `OMA_SKIP_HOOKS`
   are unset, and warns that hooks are off when they are set. (#50)
 
+- `oma team worker run --team <id> --task <id> --claim-token <tok> --generation <n>`
+  binds the canonical worker protocol loop (`runWorkerProtocolLoop`) to a real
+  `TeamStateStore` + P0 `oma team api` host. Heartbeat, ordered mailbox
+  read/ack, authority transitions, verification evidence, immutable delivery,
+  integration, and terminal receipts are sequenced by the program — not a
+  prompt. Missing verification evidence rejects delivery with
+  `E_DELIVERY_UNINTEGRATED`. Duplicate mailbox acks are idempotent; cursors
+  never move backwards. Stale `claim-token` / `generation` fail closed with
+  `E_REVISION_CONFLICT` and no state write. SIGTERM refuses further CAS;
+  incomplete atomic writes do not persist. (#45)
 - Claude Code plugin MCP wiring: `.claude-plugin/.mcp.json` uses
   `${CLAUDE_PLUGIN_ROOT}` (not Antigravity `${extensionPath}`), and
   `.claude-plugin/plugin.json` `mcpServers` points at that file. Grok host
