@@ -75,6 +75,12 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     expect(ownershipForPath('src/modes/skill-catalog.ts')).toEqual({
       wave: 'OMA-W4', owner: 'oma-native-surface-owner',
     });
+    expect(ownershipForPath('src/modes/skill-frontmatter.ts')).toEqual({
+      wave: 'OMA-W4', owner: 'oma-native-surface-owner',
+    });
+    expect(ownershipForPath('tests/modes/skill-frontmatter.spec.ts')).toEqual({
+      wave: 'OMA-W4', owner: 'oma-native-surface-owner',
+    });
     expect(ownershipForPath('tests/package/skill-catalog.spec.ts')).toEqual({
       wave: 'OMA-W4', owner: 'oma-native-surface-owner',
     });

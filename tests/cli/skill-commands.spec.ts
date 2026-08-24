@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import {
   DEFAULT_SKILL_RENDER_FORMAT,
@@ -5,20 +6,35 @@ import {
   renderSkillCommandText,
   renderSkillErrorText,
   runSkillCommand,
+  type SkillListViewV1,
+  type SkillSearchViewV1,
 } from '../../src/cli/skill-commands';
 import { formatCliError } from '../../src/runtime/error-catalog';
 import { runtimeError } from '../../src/runtime/errors';
+import { createStateFixture } from '../helpers/state-fixture';
 
 const packageRoot = path.resolve(__dirname, '../..');
 
 describe('oma skill commands', () => {
-  test('parses list/show/help', () => {
+  test('parses list/show/help/search', () => {
     expect(parseSkillCommand(['list'])).toEqual({ ok: true, value: { kind: 'list' } });
     expect(parseSkillCommand(['show', 'autopilot'])).toEqual({
       ok: true,
       value: { kind: 'show', name: 'autopilot' },
     });
     expect(parseSkillCommand([])).toEqual({ ok: true, value: { kind: 'help' } });
+    expect(parseSkillCommand(['search', 'verify'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'search', query: 'verify' },
+    });
+    expect(parseSkillCommand(['search'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'search', query: '' },
+    });
+    expect(parseSkillCommand(['search', 'foo', 'bar', '--json'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'search', query: 'foo bar', format: 'json' },
+    });
   });
 
   test('lists workflow skills including OMX five-phase set', () => {
@@ -145,6 +161,9 @@ describe('oma skill render format', () => {
     expect(text).toMatch(/^oma skill list \(\d+ skills\)/);
     expect(text).toMatch(/\n {2}autopilot\s+skills\/autopilot\/SKILL\.md\n/);
     expect(text).toMatch(/Show one: oma skill show <name>/);
+    expect(text).toMatch(/Search: oma skill search <query>/);
+    expect(text).toContain('In-session OMA autonomous delivery');
+    expect(text).toContain('argument-hint: <product idea or task>');
     expect(text.endsWith('\n')).toBe(true);
   });
 
@@ -168,6 +187,7 @@ describe('oma skill render format', () => {
     expect(text).toMatch(/--json/);
     expect(text).toMatch(/--text/);
     expect(text).toMatch(/oma skill list/);
+    expect(text).toMatch(/oma skill search/);
     // help 不得宣稱不存在的能力：格式由旗標決定，CLI 從不檢查 stdout 是否為 TTY。
     expect(text).not.toMatch(/terminal|piped|TTY|isTTY/i);
     expect(text).toMatch(/Default output is human-readable text/);
@@ -190,5 +210,119 @@ describe('oma skill render format', () => {
   test('error rendering degrades gracefully when no available list is attached', () => {
     const text = renderSkillErrorText(runtimeError('E_VALIDATOR_REJECTED', 'bad usage'));
     expect(text).toBe(formatCliError('E_VALIDATOR_REJECTED', 'bad usage'));
+  });
+});
+
+// 設計概念映射：OMX `$skill` search / `omx list --json` 欄位；OMC skill YAML description。
+describe('oma skill list JSON frontmatter and search', () => {
+  test('list JSON rows include name, path, description, argumentHint in that order', () => {
+    const listed = runSkillCommand({ kind: 'list' }, packageRoot);
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    const view = listed.value as SkillListViewV1;
+    expect(view.skills.length).toBeGreaterThan(0);
+    for (const skill of view.skills) {
+      expect(Object.keys(skill)).toEqual(['name', 'path', 'description', 'argumentHint']);
+      expect(skill.path).toBe(`skills/${skill.name}/SKILL.md`);
+      expect(skill.description === null || typeof skill.description === 'string').toBe(true);
+      expect(skill.argumentHint === null || typeof skill.argumentHint === 'string').toBe(true);
+    }
+    const verify = view.skills.find((skill) => skill.name === 'verify');
+    expect(verify).toBeDefined();
+    expect((verify?.description ?? '').length).toBeGreaterThan(0);
+    expect(verify?.argumentHint).toBeNull();
+    const autopilot = view.skills.find((skill) => skill.name === 'autopilot');
+    expect(autopilot?.argumentHint).toBe('<product idea or task>');
+    expect(view.skills.map((skill) => skill.name)).not.toContain('discovery-proof');
+  });
+
+  test('corrupt frontmatter fail-opens with null description without failing list', () => {
+    const fixture = createStateFixture('oma-skill-frontmatter-');
+    try {
+      const goodDir = path.join(fixture.root, 'skills', 'good');
+      const badDir = path.join(fixture.root, 'skills', 'broken');
+      fs.mkdirSync(goodDir, { recursive: true });
+      fs.mkdirSync(badDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(goodDir, 'SKILL.md'),
+        '---\nname: good\ndescription: "ok row"\nargument-hint: "<hint>"\n---\n\n# good\n',
+        'utf8',
+      );
+      fs.writeFileSync(path.join(badDir, 'SKILL.md'), 'not valid frontmatter\n', 'utf8');
+      const listed = runSkillCommand({ kind: 'list' }, fixture.root);
+      expect(listed.ok).toBe(true);
+      if (!listed.ok) return;
+      const view = listed.value as SkillListViewV1;
+      expect(view.skills).toEqual([
+        {
+          name: 'broken',
+          path: 'skills/broken/SKILL.md',
+          description: null,
+          argumentHint: null,
+        },
+        {
+          name: 'good',
+          path: 'skills/good/SKILL.md',
+          description: 'ok row',
+          argumentHint: '<hint>',
+        },
+      ]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('search verify hits verify; empty and unknown queries return empty lists', () => {
+    const hit = runSkillCommand({ kind: 'search', query: 'verify' }, packageRoot);
+    expect(hit.ok).toBe(true);
+    if (!hit.ok) return;
+    const view = hit.value as SkillSearchViewV1;
+    expect(view.query).toBe('verify');
+    expect(view.skills.map((skill) => skill.name)).toContain('verify');
+    expect(view.skills.map((skill) => skill.name)).not.toContain('discovery-proof');
+    for (const skill of view.skills) {
+      expect(Object.keys(skill)).toEqual(['name', 'path', 'description', 'argumentHint']);
+    }
+
+    const again = runSkillCommand({ kind: 'search', query: 'verify' }, packageRoot);
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(JSON.stringify(again.value)).toBe(JSON.stringify(hit.value));
+    expect(renderSkillCommandText({ kind: 'search', query: 'verify' }, again.value))
+      .toBe(renderSkillCommandText({ kind: 'search', query: 'verify' }, hit.value));
+
+    for (const query of ['', '   ', 'no-such-skill-zzzxxyy-issue-53']) {
+      const miss = runSkillCommand({ kind: 'search', query }, packageRoot);
+      expect(miss.ok).toBe(true);
+      if (!miss.ok) return;
+      expect((miss.value as SkillSearchViewV1).skills).toEqual([]);
+      const text = renderSkillCommandText({ kind: 'search', query }, miss.value);
+      expect(text).toMatch(/no matching skills/);
+    }
+  });
+
+  test('show output is unchanged by frontmatter parsing', () => {
+    const shown = runSkillCommand({ kind: 'show', name: 'autopilot' }, packageRoot);
+    expect(shown.ok).toBe(true);
+    if (!shown.ok) return;
+    expect(Object.keys(shown.value as object).sort()).toEqual(['markdown', 'name', 'path']);
+    const text = renderSkillCommandText({ kind: 'show', name: 'autopilot' }, shown.value);
+    expect(text).toMatch(/^# autopilot — skills\/autopilot\/SKILL\.md\n/);
+    expect(text).toContain('---\nname: autopilot\n');
+  });
+
+  test('--json|--text still apply to search; --all does not', () => {
+    expect(parseSkillCommand(['search', 'verify', '--json'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'search', query: 'verify', format: 'json' },
+    });
+    expect(parseSkillCommand(['--text', 'search', 'verify'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'search', query: 'verify', format: 'text' },
+    });
+    const withAll = parseSkillCommand(['search', 'verify', '--all']);
+    expect(withAll.ok).toBe(false);
+    if (withAll.ok) return;
+    expect(withAll.error.code).toBe('E_VALIDATOR_REJECTED');
   });
 });
