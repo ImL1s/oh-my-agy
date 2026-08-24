@@ -16,14 +16,25 @@ import {
 } from '../../src/team/route-authority';
 
 describe('worker-bootstrap', () => {
-  test('writes marker, spawns mock agy with managed env, no claim plaintext in descriptor', () => {
+  test('writes marker, starts oma team worker run (not bare agy), no claim plaintext in descriptor', () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'oma-wb-')));
     try {
       const marker = path.join(root, 'ready');
       const descriptorPath = path.join(root, 'desc.json');
       const outFile = path.join(root, 'out.txt');
       const mockAgy = path.join(root, 'mock-agy.js');
+      const agySentinel = path.join(root, 'agy-was-spawned');
       fs.writeFileSync(mockAgy, [
+        '#!/usr/bin/env node',
+        "const fs=require('fs');",
+        `fs.writeFileSync(${JSON.stringify(agySentinel)}, 'spawned');`,
+        'process.exit(0);',
+        '',
+      ].join('\n'));
+      fs.chmodSync(mockAgy, 0o755);
+      const packageRoot = path.join(root, 'pkg');
+      fs.mkdirSync(path.join(packageRoot, 'dist/bin'), { recursive: true });
+      fs.writeFileSync(path.join(packageRoot, 'dist/bin/oma.js'), [
         '#!/usr/bin/env node',
         "const fs=require('fs');",
         `fs.writeFileSync(${JSON.stringify(outFile)}, [`,
@@ -35,7 +46,6 @@ describe('worker-bootstrap', () => {
         'process.exit(0);',
         '',
       ].join('\n'));
-      fs.chmodSync(mockAgy, 0o755);
 
       const claimToken = 'secret-claim-token';
       const selectedAt = new Date(Date.now() - 1_000).toISOString();
@@ -108,6 +118,7 @@ describe('worker-bootstrap', () => {
         invocationGeneration: 1,
         agyCommand: host.realpath,
         taskPrompt: 'Execute mock task',
+        packageRoot,
         provider: 'agy_headless',
         providerProfileDigest: profile.profileDigest,
         routeReceiptDigest: selected.value.receiptDigest,
@@ -136,16 +147,20 @@ describe('worker-bootstrap', () => {
       expect(result.stderr).toBe('');
       expect(result.status).toBe(0);
       expect(fs.existsSync(marker)).toBe(true);
+      expect(fs.existsSync(agySentinel)).toBe(false);
       expect(fs.readFileSync(outFile, 'utf8')).toContain('sess-1');
       expect(fs.readFileSync(outFile, 'utf8')).toContain(sha256(claimToken));
       expect(fs.readFileSync(outFile, 'utf8')).toContain(claimToken);
       const recorded = fs.readFileSync(outFile, 'utf8').trim().split('\n');
       const argv = JSON.parse(recorded[3]) as string[];
       expect(argv).toEqual([
-        '--model', 'gemini-3.6-flash-high', '--print', 'Execute mock task', '--print-timeout', '5m0s', '--mode', 'accept-edits',
+        'team', 'worker', 'run',
+        '--team', 't', '--task', 'a',
+        '--claim-token', claimToken,
+        '--generation', '1',
       ]);
+      expect(argv).not.toContain('--print');
       expect(argv).not.toContain('--dangerously-skip-permissions');
-      expect(argv.filter((entry) => entry === 'Execute mock task')).toHaveLength(1);
       // capability 應被 unlink
       expect(fs.existsSync(path.join(root, '.oma', 'worker-capability.json'))).toBe(false);
       expect(fs.existsSync(path.join(

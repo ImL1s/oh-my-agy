@@ -229,7 +229,7 @@ export class TeamOrchestrator {
     } else if (options.workerHoldEntryPath !== undefined) {
       this.workerBootstrapArgv = [options.workerHoldEntryPath];
     } else {
-      // 生產預設：agy worker-bootstrap（hold 僅測試注入）
+      // 生產預設：worker-bootstrap → oma team worker run（hold 僅測試注入）
       const entry = path.resolve(__dirname, 'worker-bootstrap.js');
       this.workerBootstrapArgv = [entry];
     }

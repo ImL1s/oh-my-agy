@@ -33,6 +33,7 @@ import {
 import { TeamStateStore } from './state';
 import { RuntimeContext, SupervisorHeartbeatV1, TeamActorIdentityV1 } from './types';
 import { resolveGitWorktreeIdentity } from './worktree';
+import { runTeamWorker } from './worker-runtime';
 
 export type ParsedTeamCommand =
   | {
@@ -112,6 +113,13 @@ export type ParsedTeamCommand =
       teamId: string;
       taskId?: string;
       printArgv: true;
+    }
+  | {
+      kind: 'worker-run';
+      teamId: string;
+      taskId: string;
+      claimToken: string;
+      generation: number;
     };
 
 /**
@@ -290,6 +298,9 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
   if (subcommand === 'view') {
     return parseTeamViewCommand(argv.slice(1));
   }
+  if (subcommand === 'worker') {
+    return parseTeamWorkerRunCommand(argv.slice(1));
+  }
   return err(runtimeError('E_VALIDATOR_REJECTED', 'Unknown team command'));
 }
 
@@ -465,6 +476,36 @@ function parseTeamViewCommand(argv: readonly string[]): Result<ParsedTeamCommand
   });
 }
 
+/**
+ * 設計概念映射：OMX `$worker` / OMG `omg worker own` 的 CLI 進入點。
+ * 協定階段由 `runWorkerProtocolLoop` 決定，而非 prompt。
+ */
+function parseTeamWorkerRunCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  if (argv[0] !== 'run') {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team worker requires run'));
+  }
+  const flags = parseStrictFlags(argv.slice(1));
+  if (!flags.ok) return flags;
+  const required = ['--team', '--task', '--claim-token', '--generation'];
+  if (flags.value.size !== required.length || required.some((key) => !flags.value.has(key))) {
+    return err(runtimeError(
+      'E_VALIDATOR_REJECTED',
+      'team worker run requires --team, --task, --claim-token, and --generation',
+    ));
+  }
+  const generation = Number(flags.value.get('--generation'));
+  if (!Number.isSafeInteger(generation) || generation < 1) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'generation must be a positive integer'));
+  }
+  return ok({
+    kind: 'worker-run',
+    teamId: flags.value.get('--team')!,
+    taskId: flags.value.get('--task')!,
+    claimToken: flags.value.get('--claim-token')!,
+    generation,
+  });
+}
+
 function isLiveness(value: string): value is 'alive' | 'dead' | 'unknown' {
   return value === 'alive' || value === 'dead' || value === 'unknown';
 }
@@ -500,7 +541,7 @@ function defaultOrchestrator(
   providerProfileFactory: TeamOrchestratorOptions['providerProfileFactory'],
 ): TeamOrchestrator {
   const managedRoot = path.join(context.stateRoot, 'managed-worktrees');
-  // 生產預設 worker-bootstrap（真 agy）；測試仍可 inject hold
+  // 生產預設 worker-bootstrap（進入 oma team worker run，不再裸 spawn agy）
   const bootstrapEntry = path.resolve(__dirname, 'worker-bootstrap.js');
   return new TeamOrchestrator({
     stateRoot: context.stateRoot,
@@ -673,6 +714,10 @@ export async function teamCommand(
 
   if (parsed.value.kind === 'panes' || parsed.value.kind === 'capture' || parsed.value.kind === 'view') {
     return runTeamObserveCommand(parsed.value, options, stdout, stderr);
+  }
+
+  if (parsed.value.kind === 'worker-run') {
+    return runTeamWorkerCommand(parsed.value, options, stdout, stderr);
   }
 
   let evidence: RecoveryForkSelectionEvidenceV1;
@@ -1012,6 +1057,61 @@ function resolveObserveTarget(
     sessionName: sessionNameFromHeartbeat(aggregate.teamId, heartbeat),
     paneId: heartbeat.paneId,
   });
+}
+
+/**
+ * 設計概念映射：`oma team worker run` 是協定 loop 的唯一 production host。
+ * claim-token / generation 不符時沿用 E_REVISION_CONFLICT，且不得寫入狀態。
+ */
+async function runTeamWorkerCommand(
+  parsed: Extract<ParsedTeamCommand, { kind: 'worker-run' }>,
+  options: Readonly<TeamCommandOptions>,
+  stdout: (value: string) => void,
+  stderr: (value: string) => void,
+): Promise<number> {
+  const store = new TeamStateStore(
+    options.context.stateRoot,
+    options.context.repoKey,
+    options.context.workspaceKey,
+    parsed.teamId,
+  );
+  const worktreePath = process.env.OMA_WORKSPACE_PATH?.trim() || options.context.workspaceRoot;
+  const providerEnv = process.env.OMA_WORKER_PROVIDER;
+  const provider = providerEnv === 'tmux_agy' || providerEnv === 'agy_headless'
+    ? providerEnv
+    : undefined;
+  const receipt = process.env.OMA_ROUTE_RECEIPT_DIGEST;
+  const result = await runTeamWorker({
+    store,
+    teamId: parsed.teamId,
+    taskId: parsed.taskId,
+    claimToken: parsed.claimToken,
+    generation: parsed.generation,
+    worktreePath,
+    managedWorktreesRoot: path.join(options.context.stateRoot, 'managed-worktrees'),
+    ...(options.context.clock === undefined ? {} : { nowMs: () => options.context.clock!.now() }),
+    ...(provider === undefined ? {} : { provider }),
+    ...(typeof receipt === 'string' && /^[a-f0-9]{64}$/u.test(receipt)
+      ? { providerReceiptHash: receipt }
+      : {}),
+  });
+  if (!result.ok) {
+    stderr(formatCliError(result.error.code, result.error.message));
+    return result.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
+  }
+  stdout(`${JSON.stringify({
+    ok: true,
+    kind: 'team-worker-run',
+    teamId: parsed.teamId,
+    taskId: parsed.taskId,
+    generation: parsed.generation,
+    outcome: result.value.outcome,
+    deliveryDigest: result.value.deliveryDigest,
+    integrationReceiptHash: result.value.integrationReceiptHash,
+    mailboxCursor: result.value.mailboxCursor,
+    commandCount: result.value.commandCount,
+  })}\n`);
+  return 0;
 }
 
 async function runTeamApiCommand(

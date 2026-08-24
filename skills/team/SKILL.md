@@ -72,6 +72,7 @@ oma team start --manifest <path> [--mode headless|interactive]
 oma team status --team <id>
 oma team tick --team <id>
 oma team wait --team <id> [--timeout-ms <n>] [--poll-interval-ms <n>] [--json]
+oma team worker run --team <id> --task <id> --claim-token <tok> --generation <n>
 oma team deliver --team <id> --task <id> --claim-token <tok> --generation <n> --worktree <path> --expected-revision <n>
 oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> …

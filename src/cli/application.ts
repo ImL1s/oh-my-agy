@@ -82,6 +82,7 @@ Usage:
   oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
   oma team tick --team <id> [--worker-mode headless|interactive] [--max-parallel <n>]
   oma team wait --team <id> [--timeout-ms <n>] [--poll-interval-ms <n>] [--json]
+  oma team worker run --team <id> --task <id> --claim-token <tok> --generation <n>
   oma team api <op> --input JSON [--json]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]

@@ -108,6 +108,9 @@ describe('CLI application wiring', () => {
     expect(output().stdout).toContain('oma native probe --live [--json]');
     expect(output().stdout).toContain('team resolve-fork --team <id> --fork <id> --winner-generation <n>');
     expect(output().stdout).toContain(
+      'oma team worker run --team <id> --task <id> --claim-token <tok> --generation <n>',
+    );
+    expect(output().stdout).toContain(
       'oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]',
     );
     expect(output().stdout).toContain('oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]');

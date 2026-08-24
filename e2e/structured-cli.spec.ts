@@ -27,6 +27,7 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team deliver');
     expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('team wait');
+    expect(r.stdout).toContain('team worker run');
     expect(r.stdout).toContain('autopilot drive');
     expect(r.stdout).toContain('skill list');
     expect(r.stdout).toContain('skill search');

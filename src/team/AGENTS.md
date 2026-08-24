@@ -18,7 +18,8 @@ Multi-worker Team orchestration: manifest DAG, claims, worktrees, tmux panes, he
 | `state.ts` | Team aggregate, claims, mailbox |
 | `worktree.ts` | Safe managed worktree lifecycle |
 | `tmux.ts` | Owned pane create/kill |
-| `worker-bootstrap.ts` | Spawn agy worker with managed env |
+| `worker-bootstrap.ts` | Consume route authority, then start `oma team worker run` |
+| `worker-runtime.ts` | WorkerLoopHost bound to TeamStateStore + P0 team api |
 | `worker-hold.ts` | Hold worker pane protocol |
 | `delivery.ts` / `publisher.ts` | Deliver + publish with verification |
 | `supervisor.ts` / `reclaim.ts` / `liveness.ts` | Hung worker / DeadProof |
