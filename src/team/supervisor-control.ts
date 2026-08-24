@@ -1,3 +1,8 @@
+/**
+ * 設計概念映射：持久化 supervisor 對齊 OMC/OMX worker adoption fence。
+ * tmux 路徑必須有路由執行檔 basename 相符的 provider 子程序才可 adopt
+ * （OMG process_stable / provider identity）；pane 存活不足以為證。
+ */
 import { canonicalJson, sha256 } from '../runtime/atomic';
 import { ProcessLiveness } from '../runtime/lock';
 import { RuntimeError, runtimeError } from '../runtime/errors';
@@ -21,6 +26,11 @@ export interface WorkerRuntimeObservationV1 {
   paneLiveness: ProcessLiveness;
   nativeConversationHealthy?: boolean;
   exitCode?: number;
+  /**
+   * tmux 路徑：必須比對到路由執行檔 basename 才可 adopt。
+   * 省略或 false 時，即使 pane 存活也不得 adopt。
+   */
+  providerIdentityMatched?: boolean;
 }
 
 export type WorkerReconciliationV1 =
@@ -65,7 +75,8 @@ export function reconcileWorkerObservation(
       ? { action: 'reclaim_generation_plus_one', taskId: observation.taskId, generation: observation.generation }
       : { action: 'block_identity_unproven', taskId: observation.taskId, generation: observation.generation };
   }
-  if (observation.processLiveness === 'alive' || observation.paneLiveness === 'alive') {
+  // tmux_agy：pane 存活不足以 adopt，必須有相符的 provider 子程序。
+  if (observation.providerIdentityMatched === true && observation.processLiveness === 'alive') {
     return { action: 'adopt', taskId: observation.taskId, generation: observation.generation };
   }
   if (observation.processLiveness === 'dead' && observation.paneLiveness === 'dead') {

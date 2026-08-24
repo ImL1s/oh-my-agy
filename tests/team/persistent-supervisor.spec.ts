@@ -60,6 +60,11 @@ describe('persistent supervisor adoption and recovery', () => {
       taskId: 'task', generation: 1, providerReceiptHash: sha256('tmux_agy'),
       process: { pid: 42, startMarker: 'start' }, pane: binding('tmux_agy').pane,
       processLiveness: 'dead', paneLiveness: 'alive',
+    }).action).toBe('block_identity_unproven');
+    expect(reconcileWorkerObservation(tmux, {
+      taskId: 'task', generation: 1, providerReceiptHash: sha256('tmux_agy'),
+      process: { pid: 42, startMarker: 'start' }, pane: binding('tmux_agy').pane,
+      processLiveness: 'alive', paneLiveness: 'alive', providerIdentityMatched: true,
     }).action).toBe('adopt');
     expect(reconcileWorkerObservation(tmux, {
       taskId: 'task', generation: 1, providerReceiptHash: sha256('tmux_agy'),

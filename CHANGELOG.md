@@ -40,6 +40,19 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Fixed
 
+- Team tmux workers no longer adopt on a live pane shell. `resolveProviderChild`
+  (`src/team/tmux.ts`) reads `#{pane_pid}` then `ps` `pid/ppid/lstart/comm`
+  via argv (no shell) and `reconcileWorkerObservation` requires a live child
+  whose `comm` matches the pane worker (`process.execPath` / `oma team worker
+  run` after #45) and/or the routed host basename. Pane-alive with no match
+  is `block_identity_unproven`, not `adopt`. tmux/ps failures are `unknown`,
+  not `alive`. Start markers now store `ps` `lstart` (PID-reuse-safe);
+  session name and provider basename live on the heartbeat and survive
+  worker heartbeats. `WorkerReadinessPhaseV1` (`pane_created` →
+  `provider_spawned` → `provider_ready` → `task_dispatched`) is monotonic
+  (including out-of-order inputs and execution-state transitions); bindings
+  without a phase field are legacy and do not crash. Headless observation is
+  unchanged. (#59)
 - Session skill catalogs in `skills/AGENTS.md` and `skills/oma-runtime/SKILL.md`
   are generated from `skills/*/SKILL.md` and fail CI (`npm run catalog:check`)
   when they drift. (#36)

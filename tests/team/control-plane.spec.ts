@@ -72,4 +72,19 @@ describe('receipt-bound worker control plane', () => {
       receipt: { ...route.receipt, receiptDigest: sha256('tampered') },
     }).ok).toBe(false);
   });
+
+  test('tmux binding defaults readinessPhase to pane_created and accepts an explicit phase', () => {
+    const route = authority('tmux_agy');
+    const pane = { schemaVersion: 1 as const, sessionName: 's', paneId: '%1', ownerNonce: 'o', workerNonce: 'w' };
+    const process = { pid: 42, startMarker: 'Mon Aug 24 10:00:01 2026' };
+    const prepared = prepareWorkerControl({ ...input(route), process, pane });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    expect(prepared.value.binding.readinessPhase).toBe('pane_created');
+    const dispatched = prepareWorkerControl({
+      ...input(route), process, pane, readinessPhase: 'task_dispatched',
+    });
+    expect(dispatched.ok).toBe(true);
+    if (dispatched.ok) expect(dispatched.value.binding.readinessPhase).toBe('task_dispatched');
+  });
 });
