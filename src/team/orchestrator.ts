@@ -19,14 +19,14 @@ import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { createDeliveryEvidence, DeliveryValidator } from './delivery';
 import { IntegrationManager } from './integration';
-import { probeRecordedWorkerProcess, probeTmuxSession } from './liveness';
+import { probeRecordedWorkerProcess, probeTmuxSession, processLivenessForReclaim } from './liveness';
 import { ProcessLiveness } from '../runtime/lock';
 import { readTeamManifest } from './manifest';
 import { FastForwardPublisherV1 } from './publisher';
 import { requireDeadProof } from './reclaim';
 import { TeamStateStore } from './state';
 import { assessWorker, SupervisorAssessment } from './supervisor';
-import { teamWorkerLivenessBasenames } from './provider-readiness';
+import { providerCommMatchesAnyBasename, teamWorkerLivenessBasenames } from './provider-readiness';
 import {
   ArgvSpawnFn,
   observeTmuxWorkerIdentity,
@@ -533,7 +533,7 @@ export class TeamOrchestrator {
       ? probeTmuxSession(sessionName)
       : (paneLiveness ?? 'unknown');
     const proc = hb !== undefined
-      ? probeRecordedWorkerProcess(hb.process)
+      ? processLivenessForReclaim(hb.process, pane)
       : (processLiveness ?? 'unknown');
     // 若重探結果與呼叫端矛盾且呼叫端宣稱 dead，仍以重探為準
     const proof = requireDeadProof(pane, proc);
@@ -1256,10 +1256,7 @@ export class TeamOrchestrator {
       routeReceipt.resolvedExecutable,
     );
     const resolvedChild = await resolveProviderChildAtLaunch(sessionName, expectedBasenames);
-    // 不得把 pane bootstrap PID 當 worker；沒等到子程序就寫未證明佔位，
-    // 之後 resume 觀測到真正 child 才可 adopt（Codex PR97 P1）。
-    const processIdentity = providerChildProcessMarker(resolvedChild)
-      ?? { pid: 0, startMarker: '' };
+    const processIdentity = processIdentityAfterLaunch(resolvedChild, expectedBasenames);
     const heartbeat: SupervisorHeartbeatV1 = {
       schemaVersion: 1,
       workerId,
@@ -1506,8 +1503,8 @@ function sanitizeSession(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 80);
 }
 
-const PROVIDER_CHILD_LAUNCH_ATTEMPTS = 5;
-const PROVIDER_CHILD_LAUNCH_WAIT_MS = 20;
+const PROVIDER_CHILD_LAUNCH_ATTEMPTS = 15;
+const PROVIDER_CHILD_LAUNCH_WAIT_MS = 50;
 
 /** launch 時 worker-bootstrap 可能尚未 spawn `oma team worker run`；有界重試。 */
 async function resolveProviderChildAtLaunch(
@@ -1524,6 +1521,28 @@ async function resolveProviderChildAtLaunch(
     resolved = resolveProviderChild(sessionName, { expectedBasenames });
   }
   return resolved;
+}
+
+/**
+ * 優先記相符的子程序。重試後仍無 child、且 pane comm 本身就是 worker
+ * （測試 hold.js / production harness 注入的 node 腳本）才記 pane。
+ * 不得在第一次 snapshot 就把 bootstrap pane 當 worker。
+ */
+function processIdentityAfterLaunch(
+  resolved: Readonly<ProviderChildResolutionV1>,
+  expectedBasenames: readonly string[],
+): { pid: number; startMarker: string } {
+  const matched = providerChildProcessMarker(resolved);
+  if (matched !== undefined) return matched;
+  const pane = resolved.pane;
+  if (
+    pane !== undefined
+    && resolved.children.length === 0
+    && providerCommMatchesAnyBasename(pane.comm, expectedBasenames)
+  ) {
+    return { pid: pane.pid, startMarker: pane.startMarker };
+  }
+  return { pid: 0, startMarker: '' };
 }
 
 function inferSessionName(

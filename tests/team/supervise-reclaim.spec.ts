@@ -4,6 +4,7 @@ import { TeamOrchestrator, listReadyTaskSpecs } from '../../src/team/orchestrato
 import { TeamStateStore } from '../../src/team/state';
 import { resolveGitWorktreeIdentity } from '../../src/team/worktree';
 import { parseTeamCommand, teamCommand } from '../../src/team/commands';
+import { processLivenessForReclaim } from '../../src/team/liveness';
 import { requireDeadProof } from '../../src/team/reclaim';
 import { GitFixture } from '../helpers/git-fixture';
 import { TmuxFixture } from '../helpers/tmux-fixture';
@@ -17,6 +18,12 @@ describe('supervise and reclaim', () => {
     expect(requireDeadProof('dead', 'alive').ok).toBe(false);
     expect(requireDeadProof('dead', 'unknown').ok).toBe(false);
     expect(requireDeadProof('dead', 'dead').ok).toBe(true);
+  });
+
+  test('unproven launch placeholder is dead for reclaim once the pane is dead', () => {
+    expect(processLivenessForReclaim({ pid: 0, startMarker: '' }, 'dead')).toBe('dead');
+    expect(processLivenessForReclaim({ pid: 0, startMarker: '' }, 'alive')).toBe('unknown');
+    expect(requireDeadProof('dead', processLivenessForReclaim({ pid: 0, startMarker: '' }, 'dead')).ok).toBe(true);
   });
 
   test('parse team reclaim and supervise flags', () => {
