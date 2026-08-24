@@ -8,6 +8,7 @@ import {
   assertSha256,
   assertStringArray,
 } from './state-schemas';
+import { inspectOmaRolePosture, type OmaRoleV1 } from '../team/roles';
 
 export type WorkerProvider = 'antigravity_native' | 'agy_headless' | 'tmux_agy';
 
@@ -46,7 +47,7 @@ export interface WorkerEnvelopeV1 {
   provider_profile_digest?: string;
   /** Selector-issued HostRouteReceiptV1 digest. Required for newly constructed Team envelopes. */
   route_receipt_digest?: string;
-  native_role: string;
+  native_role: OmaRoleV1;
   capability_mode: 'read-only' | 'read-write';
   deadline_ms: number;
 }
@@ -105,7 +106,7 @@ export function validateWorkerEnvelope(value: unknown): WorkerEnvelopeV1 {
   if (!['antigravity_native', 'agy_headless', 'tmux_agy'].includes(envelope.provider as string)) {
     throw new ContractViolation('E_WORKER_ENVELOPE', 'Worker provider is not allowed');
   }
-  if (!['read-only', 'read-write'].includes(envelope.capability_mode as string)) {
+  if (envelope.capability_mode !== 'read-only' && envelope.capability_mode !== 'read-write') {
     throw new ContractViolation('E_WORKER_ENVELOPE', 'Worker capability mode is not allowed');
   }
   if (!Array.isArray(envelope.write_scope) || !Array.isArray(envelope.verification_argv)
@@ -114,6 +115,16 @@ export function validateWorkerEnvelope(value: unknown): WorkerEnvelopeV1 {
   }
   if (envelope.capability_mode === 'read-only' && envelope.write_scope.length !== 0) {
     throw new ContractViolation('E_WORKER_ENVELOPE', 'Read-only worker cannot receive write paths');
+  }
+  // 設計概念映射：OMG posture 由 native_role 推導；envelope 一律視為 child worker。
+  const rolePosture = inspectOmaRolePosture({
+    role: envelope.native_role,
+    capabilityMode: envelope.capability_mode,
+    writeScopeNone: envelope.write_scope.length === 0,
+    asChild: true,
+  });
+  if (!rolePosture.ok) {
+    throw new ContractViolation('E_WORKER_ENVELOPE', rolePosture.message, rolePosture.details);
   }
   assertStringArray(envelope.write_scope, 'write_scope', { nonEmptyValues: true, unique: true });
   envelope.write_scope.forEach((entry, index) => assertSafeRepositoryWritePath(entry, `write_scope[${index}]`));

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  ContractViolation,
   RepositoryWorkflowV1,
   WORKFLOW_CAPABILITY_TIERS_V1,
   WORKFLOW_TERMINALS_V1,
@@ -22,6 +23,17 @@ function redigest(definition: RepositoryWorkflowV1): RepositoryWorkflowV1 {
   const next = JSON.parse(JSON.stringify(definition)) as RepositoryWorkflowV1;
   next.definition_digest = repositoryWorkflowDigest(next);
   return next;
+}
+
+function capturedWorkflowPermission(definition: RepositoryWorkflowV1): string {
+  let captured: unknown;
+  try {
+    validateRepositoryWorkflow(definition);
+  } catch (error: unknown) {
+    captured = error;
+  }
+  expect(captured).toBeInstanceOf(ContractViolation);
+  return (captured as ContractViolation).code;
 }
 
 describe('OMA W0 repository-workflow/v1 contract', () => {
@@ -88,7 +100,7 @@ describe('OMA W0 repository-workflow/v1 contract', () => {
     expect(() => validateRepositoryWorkflow(redigest(interpolation))).toThrow('shell');
 
     const nested = JSON.parse(JSON.stringify(workflow)) as RepositoryWorkflowV1;
-    nested.stages[0].native_role = 'supervisor';
+    nested.stages[0].native_role = 'supervisor' as RepositoryWorkflowV1['stages'][number]['native_role'];
     expect(() => validateRepositoryWorkflow(redigest(nested))).toThrow('Nested');
 
     const release = JSON.parse(JSON.stringify(workflow)) as RepositoryWorkflowV1;
@@ -110,6 +122,22 @@ describe('OMA W0 repository-workflow/v1 contract', () => {
 
     const extra = { ...workflow, extra: true } as any;
     expect(() => validateRepositoryWorkflow(redigest(extra))).toThrow('keys');
+  });
+
+  test('native_role verifier cannot elevate to read-write; matching read-only passes', () => {
+    const workflow = fixture('production-safety-review-v1.json') as RepositoryWorkflowV1;
+    const elevated = JSON.parse(JSON.stringify(workflow)) as RepositoryWorkflowV1;
+    const verifier = elevated.stages.find((stage) => stage.kind === 'verifier');
+    expect(verifier).toBeDefined();
+    if (verifier === undefined) return;
+    verifier.capability_mode = 'read-write';
+    expect(capturedWorkflowPermission(redigest(elevated))).toBe('E_WORKFLOW_PERMISSION');
+    expect(() => validateRepositoryWorkflow(redigest(elevated))).toThrow('read-only role floor');
+
+    const verifierStage = workflow.stages.find((stage) => stage.kind === 'verifier');
+    expect(verifierStage?.native_role).toBe('verifier');
+    expect(verifierStage?.capability_mode).toBe('read-only');
+    expect(() => validateRepositoryWorkflow(workflow)).not.toThrow();
   });
 
   test('history is immutable per version and changed fixed stages require reviewed supersedes metadata', () => {

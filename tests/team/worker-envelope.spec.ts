@@ -58,7 +58,7 @@ describe('complete WorkerEnvelopeV1 construction', () => {
         stateEndpoint: 'oma://team/team-1/task/implement', cancellationTokenHash: sha256('cancel-token'),
         profile: route.profile, receipt: route.receipt,
         validation: { now, contextDigest, identityDigest: route.profile.identityDigest, fallbackPreconditionsSatisfied: true },
-        nativeRole: 'oma-executor', deadlineMs: 300_000,
+        nativeRole: 'executor', deadlineMs: 300_000,
       });
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -80,7 +80,7 @@ describe('complete WorkerEnvelopeV1 construction', () => {
         repositoryRoot: root, runId: 'run', teamId: 'team', task, taskText: 'Write result', dependencyResults: [],
         artifactContract: { proposal_root: 'artifacts/out', required_files: ['result.ts'], terminal_receipt_path: 'artifacts/out/terminal.json' },
         contributorGuidancePaths: ['AGENTS.md'], mailboxCursor: 0, claimId: 'claim', generation: 2,
-        stateEndpoint: 'oma://state', cancellationTokenHash: sha256('cancel'), nativeRole: 'executor', deadlineMs: 1,
+        stateEndpoint: 'oma://state', cancellationTokenHash: sha256('cancel'), nativeRole: 'executor' as const, deadlineMs: 1,
         profile: route.profile, receipt: route.receipt,
         validation: { now, contextDigest, identityDigest: route.profile.identityDigest, fallbackPreconditionsSatisfied: true },
       };

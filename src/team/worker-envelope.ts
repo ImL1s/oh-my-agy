@@ -14,6 +14,7 @@ import {
 } from '../native/capability-profile';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
+import { inspectOmaRolePosture, type OmaRoleV1 } from './roles';
 import { CanonicalTeamTaskV1 } from './types';
 
 export interface ContributorGuidanceHashV1 {
@@ -43,7 +44,7 @@ export interface BuildWorkerEnvelopeInputV1 {
     identityDigest: string;
     fallbackPreconditionsSatisfied: boolean;
   };
-  nativeRole: string;
+  nativeRole: OmaRoleV1;
   deadlineMs: number;
 }
 
@@ -85,6 +86,15 @@ export function buildWorkerEnvelope(
     ? []
     : input.task.write_scope.map((entry) => entry.path);
   const capabilityMode = input.task.write_scope === 'none' ? 'read-only' : 'read-write';
+  const rolePosture = inspectOmaRolePosture({
+    role: input.nativeRole,
+    capabilityMode,
+    writeScopeNone: writeScope.length === 0,
+    asChild: true,
+  });
+  if (!rolePosture.ok) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', rolePosture.message, rolePosture.details));
+  }
   const verificationArgv = input.task.verification.commands.map((command) => [
     command.command,
     ...command.argv,
