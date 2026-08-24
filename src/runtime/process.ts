@@ -439,7 +439,7 @@ export async function countProcessGroupAsync(
   return countPosixProbeSnapshot(listed.stdout, rootPid, stopAfter, lineage, listed.pid);
 }
 
-/** 在 probe spawn 前非阻塞擷取 POSIX PID/start baseline，供 root 退出後保守追蹤新程序。 */
+/** 在 probe spawn 前非阻塞擷取 POSIX PID/start baseline，供排除既有 pgid 碰撞。 */
 export async function capturePosixProcessBaselineAsync(
   timeoutMs = 1_000,
 ): Promise<ReadonlyMap<number, string> | null> {
@@ -466,7 +466,6 @@ export async function capturePosixProcessBaselineAsync(
 export interface PosixProcessLineageTracker {
   readonly baselineProcesses: ReadonlyMap<number, string>;
   readonly observedProcesses: Map<number, string>;
-  firstSnapshotCompleted: boolean;
 }
 
 /** 跨 snapshot 保留 PID/start 證實的 probe lineage，避免誤收 PID reuse。 */
@@ -476,7 +475,6 @@ export function createPosixProcessLineageTracker(
   return {
     baselineProcesses,
     observedProcesses: new Map<number, string>(),
-    firstSnapshotCompleted: false,
   };
 }
 
@@ -490,8 +488,14 @@ interface PosixProcessSnapshotRow {
 
 /**
  * 以單一 ps snapshot 同時計算 parent tree 與 root process group。
- * Stateful lineage 只保留由 parent/group 關係證實的 PID；首次 snapshot 另會保守納入
- * baseline 之後已 reparent 給 PID 1 的新程序，避免 root 尚存活時漏掉快速離群的子孫。
+ * Stateful lineage 只保留由 parent-tree 或 process-group 關係證實的 PID。
+ * 對應 OMG/OMC process-budget fail-closed：量測失敗回 null，但不得把
+ * baseline 之後出現、僅因 ppid=1 而無歸屬證明的程序算進 owned count，
+ * 否則高負載會假性 processCountOverflow（issue #67）。
+ * 已觀測的 PID+start 在 root 退出後仍保留。仍留在 probe process group 內的
+ * PID-1 reparent 經 rootGroup 計入；setsid 且在首次 snapshot 前就與 root
+ * 失去 parent/group 關係者無法證明歸屬，不採納。spawn 前已存在且 start
+ * 未變的 pgid 碰撞（PID reuse）也排除。
  */
 export function countPosixProbeSnapshot(
   output: string,
@@ -522,14 +526,12 @@ export function countPosixProbeSnapshot(
     ? rows
     : rows.filter(({ pid }) => pid !== inspectorPid);
   const root = eligibleRows.find(({ pid }) => pid === rootPid);
-  const rootGroup = eligibleRows.filter(({ pid, pgid }) => pid !== rootPid && pgid === rootPid);
-  const firstSnapshotDetached = lineage === undefined || lineage.firstSnapshotCompleted
-    ? []
-    : eligibleRows.filter((row) => {
-      if (row.pid === rootPid || row.ppid !== 1) return false;
-      const baselineStart = lineage.baselineProcesses.get(row.pid);
-      return baselineStart === undefined || baselineStart !== row.startMarker;
-    });
+  const rootGroup = eligibleRows.filter((row) => {
+    if (row.pid === rootPid || row.pgid !== rootPid) return false;
+    if (lineage === undefined) return true;
+    const baselineStart = lineage.baselineProcesses.get(row.pid);
+    return baselineStart === undefined || baselineStart !== row.startMarker;
+  });
   if (root === undefined && lineage === undefined) {
     const historicalCount = 1 + rootGroup.length;
     return historicalCount > stopAfter ? historicalCount : null;
@@ -540,7 +542,6 @@ export function countPosixProbeSnapshot(
     if (observedRootStart !== undefined && observedRootStart !== root.startMarker) return null;
     lineage?.observedProcesses.set(rootPid, root.startMarker);
   }
-  if (lineage !== undefined) lineage.firstSnapshotCompleted = true;
 
   const children = new Map<number, PosixProcessSnapshotRow[]>();
   for (const row of eligibleRows) {
@@ -556,7 +557,6 @@ export function countPosixProbeSnapshot(
   const queue = [
     ...(root === undefined ? [] : [root]),
     ...rootGroup,
-    ...firstSnapshotDetached,
     ...previouslyObserved,
   ];
   while (queue.length > 0) {

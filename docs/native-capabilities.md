@@ -43,10 +43,10 @@ oma doctor --native
   marker baseline before spawn, then retains a cross-snapshot lineage proven by
   parent-tree or process-group relationships. Observed detached children
   therefore remain counted after their root exits, while unrelated, reused, and
-  zombie PIDs are excluded. The first snapshot also retains new
-  PID-1-reparented baseline-delta candidates while the root remains alive, so a
-  rapid double-fork cannot escape before lineage is established; later
-  snapshots do not adopt unrelated new processes. Enumeration is asynchronous
+  zombie PIDs are excluded. Unproven PID-1 baseline-delta processes are not
+  adopted; only parent-tree or process-group evidence can own a PID, so
+  unrelated post-baseline load cannot create a false processCountOverflow.
+  Enumeration is asynchronous
   and shares the probe's remaining deadline, so a slow Windows CIM query cannot
   block the wall-clock timer. Timeout/overflow termination
   includes the Windows

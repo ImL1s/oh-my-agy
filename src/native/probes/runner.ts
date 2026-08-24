@@ -12,6 +12,8 @@ const PROCESS_COUNT_SCAN_TIMEOUT_MS = 1_000;
 
 export interface BoundedProbeRunnerDependencies {
   countProcesses?: (rootPid: number, stopAfter: number, timeoutMs: number) => Promise<number | null>;
+  /** POSIX baseline 完成後、probe spawn 前呼叫；測試可注入高負載無關程序。 */
+  afterBaselineCaptured?: () => Promise<void> | void;
 }
 
 /** 僅接受 argv 的 bounded runner，同時限制輸出、程序數與牆鐘時間。 */
@@ -30,6 +32,9 @@ export async function runBoundedProbe(
     : await capturePosixProcessBaselineAsync(Math.min(PROCESS_COUNT_SCAN_TIMEOUT_MS, request.timeoutMs));
   if (dependencies.countProcesses === undefined && process.platform !== 'win32' && processBaseline === null) {
     return failedProcessCountOutcome();
+  }
+  if (dependencies.afterBaselineCaptured !== undefined) {
+    await dependencies.afterBaselineCaptured();
   }
   if (Date.now() >= deadlineAt) {
     return { ...failedProcessCountOutcome(), timedOut: true };

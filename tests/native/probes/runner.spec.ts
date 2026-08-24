@@ -132,13 +132,20 @@ describe('bounded probe runner', () => {
       "setTimeout(()=>process.stdout.write('ok'),750);",
     ].join('');
     try {
-      const outcomePromise = runBoundedProbe({
-        command: process.execPath,
-        argv: ['-e', script],
-        timeoutMs: 5_000,
-        maximumOutputBytes: 64,
-        maximumProcesses: 1,
-      });
+      const outcomePromise = runBoundedProbe(
+        {
+          command: process.execPath,
+          argv: ['-e', script],
+          timeoutMs: 5_000,
+          maximumOutputBytes: 64,
+          maximumProcesses: 1,
+        },
+        {
+          afterBaselineCaptured: async () => {
+            await spawnUnrelatedPid1Orphans(unrelatedPids, 9);
+          },
+        },
+      );
       const markerDeadline = Date.now() + 2_000;
       while (!fs.existsSync(markerPath) && Date.now() < markerDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -162,7 +169,7 @@ describe('bounded probe runner', () => {
       await killAndWait(unrelatedPids);
       fs.rmSync(root, { recursive: true, force: true });
     }
-  }, 10_000);
+  }, 15_000);
 
   it('never accepts success after detached descendants escape a dead root parent', async () => {
     if (process.platform === 'win32') return;
@@ -198,6 +205,48 @@ describe('bounded probe runner', () => {
     }
   }, 10_000);
 });
+
+/** 雙重 fork 後讓無關程序 reparent 到 PID 1，重現首次 snapshot 的高負載誤收。 */
+async function spawnUnrelatedPid1Orphans(pids: number[], count: number): Promise<void> {
+  const started = await Promise.all(Array.from({ length: count }, () => spawnPid1Orphan()));
+  pids.push(...started);
+}
+
+function spawnPid1Orphan(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const starter = spawn(
+      process.execPath,
+      [
+        '-e',
+        [
+          "const {spawn}=require('child_process');",
+          "const child=spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{detached:true,stdio:'ignore'});",
+          'if (child.pid === undefined) process.exit(1);',
+          'process.stdout.write(String(child.pid));',
+          'child.unref();',
+        ].join(''),
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    if (starter.stdout === null) {
+      reject(new Error('failed to spawn unrelated PID-1 orphan'));
+      return;
+    }
+    let output = '';
+    starter.stdout.on('data', (chunk: Buffer) => {
+      output += chunk.toString('utf8');
+    });
+    starter.once('error', reject);
+    starter.once('close', (status) => {
+      const pid = Number(output.trim());
+      if (status !== 0 || !Number.isSafeInteger(pid) || pid <= 0) {
+        reject(new Error('failed to spawn unrelated PID-1 orphan'));
+        return;
+      }
+      resolve(pid);
+    });
+  });
+}
 
 async function killAndWait(pids: readonly number[]): Promise<void> {
   for (const pid of pids) {
