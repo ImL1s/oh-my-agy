@@ -24,6 +24,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 - README Troubleshooting (EN / zh / zh-TW) plus an operator environment-variable
   table bound to `src/`/`bin/` usage and `CLI_HELP`. Does not claim
   `oma hooks status`. (#64)
+- Read-only Team pane observation: `oma team panes --team <id>`,
+  `oma team capture --team <id> --task <id> [--lines 1..2000]`, and
+  `oma team view --team <id> [--task <id>] --print-argv`. Captures strip ANSI
+  then run `redactDiagnostic`; owner-nonce mismatch returns
+  `E_TMUX_OWNER_MISMATCH` with no pane content; `--print-argv` prints argv
+  and never spawns tmux. No `--raw` bypass. (#62)
 
 - New in-session skill **`trace`** (`/oh-my-agy:trace`): competing-hypothesis
   causal tracking with evidence for/against and a next probe. No `oma trace`
