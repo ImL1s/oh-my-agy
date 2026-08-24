@@ -26,12 +26,19 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team supervise');
     expect(r.stdout).toContain('team deliver');
     expect(r.stdout).toContain('team tick');
+    expect(r.stdout).toContain('team wait');
     expect(r.stdout).toContain('autopilot drive');
     expect(r.stdout).toContain('skill list');
     expect(r.stdout).toContain('skill search');
     expect(r.stdout).toContain('oma session list');
     expect(r.stdout).toContain('oma resume --list');
     expect(r.stdout).toContain('oma explain <E_CODE> [--json]');
+  });
+
+  test('TC-S-01e: oma team wait unknown id is E_NOT_FOUND', async () => {
+    const r = await runOma(['team', 'wait', '--team', 'no-such-team', '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('E_NOT_FOUND');
   });
 
   test('TC-S-01b: oma skill list --json returns JSON skill catalog', async () => {

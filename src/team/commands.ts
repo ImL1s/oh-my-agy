@@ -15,7 +15,11 @@ import {
   RecoveryForkSelectionEvidenceV1,
   RecoveryTaskAggregateV1,
 } from './recovery-fork';
-import { TeamOrchestrator, TeamOrchestratorOptions } from './orchestrator';
+import {
+  HUD_WATCH_INTERVAL_MS_MAX,
+  HUD_WATCH_INTERVAL_MS_MIN,
+} from '../hud/watch';
+import { TeamOrchestrator, TeamOrchestratorOptions, TeamWaitOptionsV1 } from './orchestrator';
 import { isCanonicalTeamIdentifier, readTeamManifest } from './manifest';
 import {
   DEFAULT_CAPTURE_LINES,
@@ -81,6 +85,13 @@ export type ParsedTeamCommand =
       maxParallel?: number;
     }
   | {
+      kind: 'wait';
+      teamId: string;
+      timeoutMs?: number;
+      pollIntervalMs?: number;
+      json: boolean;
+    }
+  | {
       kind: 'api';
       operation: string;
       inputJson: string;
@@ -105,7 +116,7 @@ export type ParsedTeamCommand =
 
 /**
  * 設計概念映射：Lane B 只做 argv→typed API 轉接；
- * start/status/stop 委派 TeamOrchestrator；resolve-fork 委派 RecoveryForkResolver。
+ * start/status/stop/wait 委派 TeamOrchestrator；resolve-fork 委派 RecoveryForkResolver。
  */
 export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
   const subcommand = argv[0];
@@ -241,6 +252,9 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
       worktreePath: flags.value.get('--worktree')!,
     });
   }
+  if (subcommand === 'wait') {
+    return parseTeamWaitCommand(argv.slice(1));
+  }
   if (subcommand === 'tick') {
     const flags = parseStrictFlags(argv.slice(1));
     if (!flags.ok) return flags;
@@ -313,6 +327,76 @@ function parseTeamApiCommand(argv: readonly string[]): Result<ParsedTeamCommand,
     return err(runtimeError('E_VALIDATOR_REJECTED', 'team api requires --input JSON'));
   }
   return ok({ kind: 'api', operation, inputJson, json });
+}
+
+/**
+ * 設計概念映射：OMC `omc team wait [--timeout-ms] [--json]`。
+ * `--json` 為布林旗標，不可走 parseStrictFlags 的 name/value 成對解析。
+ */
+function parseTeamWaitCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  let teamId: string | undefined;
+  let timeoutMs: number | undefined;
+  let pollIntervalMs: number | undefined;
+  let json = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--json') {
+      if (json) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --json'));
+      }
+      json = true;
+      continue;
+    }
+    if (token === '--team' || token === '--timeout-ms' || token === '--poll-interval-ms') {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith('--')) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', `team wait ${token} requires a value`));
+      }
+      index += 1;
+      if (token === '--team') {
+        if (teamId !== undefined) {
+          return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --team'));
+        }
+        teamId = value;
+        continue;
+      }
+      const parsed = Number(value);
+      if (token === '--timeout-ms') {
+        if (timeoutMs !== undefined) {
+          return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --timeout-ms'));
+        }
+        if (!Number.isSafeInteger(parsed) || parsed < 1) {
+          return err(runtimeError('E_VALIDATOR_REJECTED', 'timeout-ms must be a positive integer'));
+        }
+        timeoutMs = parsed;
+        continue;
+      }
+      if (pollIntervalMs !== undefined) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --poll-interval-ms'));
+      }
+      if (!Number.isSafeInteger(parsed)
+        || parsed < HUD_WATCH_INTERVAL_MS_MIN
+        || parsed > HUD_WATCH_INTERVAL_MS_MAX) {
+        return err(runtimeError(
+          'E_VALIDATOR_REJECTED',
+          `poll-interval-ms must be between ${HUD_WATCH_INTERVAL_MS_MIN} and ${HUD_WATCH_INTERVAL_MS_MAX}`,
+        ));
+      }
+      pollIntervalMs = parsed;
+      continue;
+    }
+    return err(runtimeError('E_VALIDATOR_REJECTED', `Unknown team wait flag: ${token}`));
+  }
+  if (teamId === undefined) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team wait requires --team'));
+  }
+  return ok({
+    kind: 'wait',
+    teamId,
+    json,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(pollIntervalMs === undefined ? {} : { pollIntervalMs }),
+  });
 }
 
 function parseTeamPanesCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
@@ -402,6 +486,13 @@ export interface TeamCommandOptions {
    * 設計概念映射：OMG operator adapter；observe 路徑不得 send-keys。
    */
   tmuxSpawn?: TmuxSpawnFn;
+  /**
+   * 測試注入：wait 的有界輪詢時鐘 / sleep / AbortSignal。
+   * production 以 SIGINT 轉 AbortSignal，不得留下 timer 或 listener。
+   */
+  waitRuntime?: Pick<TeamWaitOptionsV1, 'sleep' | 'nowMs' | 'signal' | 'maxIterations'> & {
+    attachAbort?: (abort: () => void) => () => void;
+  };
 }
 
 function defaultOrchestrator(
@@ -543,6 +634,10 @@ export async function teamCommand(
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-delivered', ...result.value })}\n`);
     return 0;
+  }
+
+  if (parsed.value.kind === 'wait') {
+    return runTeamWaitCommand(parsed.value, options, stdout, stderr);
   }
 
   if (parsed.value.kind === 'tick') {
@@ -733,6 +828,60 @@ function parseStrictFlags(argv: readonly string[]): Result<Map<string, string>, 
     flags.set(key, value);
   }
   return ok(flags);
+}
+
+function defaultWaitSigintAttach(abort: () => void): () => void {
+  const handler = () => abort();
+  process.on('SIGINT', handler);
+  return () => {
+    process.off('SIGINT', handler);
+  };
+}
+
+async function runTeamWaitCommand(
+  parsed: Extract<ParsedTeamCommand, { kind: 'wait' }>,
+  options: Readonly<TeamCommandOptions>,
+  stdout: (value: string) => void,
+  stderr: (value: string) => void,
+): Promise<number> {
+  const orchestrator = options.orchestratorFactory?.(options.context)
+    ?? defaultOrchestrator(options.context, options.providerProfileFactory);
+  const controller = new AbortController();
+  const signal = options.waitRuntime?.signal ?? controller.signal;
+  const detach = options.waitRuntime?.signal !== undefined
+    ? () => undefined
+    : (options.waitRuntime?.attachAbort ?? defaultWaitSigintAttach)(() => controller.abort());
+  try {
+    const result = await orchestrator.waitForConvergence(parsed.teamId, {
+      signal,
+      ...(parsed.timeoutMs === undefined ? {} : { timeoutMs: parsed.timeoutMs }),
+      ...(parsed.pollIntervalMs === undefined ? {} : { pollIntervalMs: parsed.pollIntervalMs }),
+      ...(options.waitRuntime?.sleep === undefined ? {} : { sleep: options.waitRuntime.sleep }),
+      ...(options.waitRuntime?.nowMs === undefined ? {} : { nowMs: options.waitRuntime.nowMs }),
+      ...(options.waitRuntime?.maxIterations === undefined
+        ? {}
+        : { maxIterations: options.waitRuntime.maxIterations }),
+    });
+    if (!result.ok) {
+      stderr(formatCliError(result.error.code, result.error.message));
+      return result.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
+    }
+    stdout(`${JSON.stringify({
+      ok: result.value.stopped_by === 'converged',
+      kind: 'team-wait',
+      teamId: result.value.teamId,
+      revision: result.value.revision,
+      stopped_by: result.value.stopped_by,
+      iterations: result.value.iterations,
+      elapsed_ms: result.value.elapsed_ms,
+      tasks: result.value.tasks,
+    })}\n`);
+    if (result.value.stopped_by === 'converged') return 0;
+    if (result.value.stopped_by === 'aborted') return 130;
+    return 1;
+  } finally {
+    detach();
+  }
 }
 
 function observeErrorExit(code: string): number {

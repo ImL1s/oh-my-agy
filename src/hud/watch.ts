@@ -2,6 +2,12 @@ import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { collectHudSnapshot, HudQueryV1, HudSnapshotV1 } from './status';
 
+/** 設計概念映射：OMC/OMG 有界 watch；interval 過短會空轉、過長會卡住 leader。 */
+export const HUD_WATCH_INTERVAL_MS_MIN = 50;
+export const HUD_WATCH_INTERVAL_MS_MAX = 60_000;
+export const HUD_WATCH_INTERVAL_MS_DEFAULT = 1_000;
+export const HUD_WATCH_MAX_ITERATIONS = 10_000;
+
 export interface HudWatchOptionsV1 {
   interval_ms?: number;
   max_iterations?: number;
@@ -20,10 +26,14 @@ export async function watchHud(
   query: Readonly<HudQueryV1>,
   options: Readonly<HudWatchOptionsV1>,
 ): Promise<Result<HudWatchResultV1, RuntimeError>> {
-  const intervalMs = options.interval_ms ?? 1000;
-  const maximum = options.max_iterations ?? 10_000;
-  if (!Number.isSafeInteger(intervalMs) || intervalMs < 50 || intervalMs > 60_000
-    || !Number.isSafeInteger(maximum) || maximum < 1 || maximum > 10_000) {
+  const intervalMs = options.interval_ms ?? HUD_WATCH_INTERVAL_MS_DEFAULT;
+  const maximum = options.max_iterations ?? HUD_WATCH_MAX_ITERATIONS;
+  if (!Number.isSafeInteger(intervalMs)
+    || intervalMs < HUD_WATCH_INTERVAL_MS_MIN
+    || intervalMs > HUD_WATCH_INTERVAL_MS_MAX
+    || !Number.isSafeInteger(maximum)
+    || maximum < 1
+    || maximum > HUD_WATCH_MAX_ITERATIONS) {
     return err(runtimeError('E_CORRUPT_STATE', 'HUD watch bounds are invalid'));
   }
   const sleep = options.sleep ?? boundedSleep;
@@ -56,7 +66,8 @@ export async function watchHud(
   return ok({ iterations, stopped_by: 'max_iterations' });
 }
 
-function boundedSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
+/** AbortSignal 必須清掉 setTimeout，避免 wait/watch 在 SIGINT 後留下背景計時器。 */
+export function boundedSleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const finish = () => {
       if (signal !== undefined) signal.removeEventListener('abort', abort);
