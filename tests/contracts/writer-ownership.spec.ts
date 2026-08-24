@@ -32,6 +32,15 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     expect(() => validateChangedPathOwnership(['src/setup/doctor.ts'], 'OMA-W0')).toThrow('OMA-W1');
   });
 
+  test('#50 doctor nextAction / --fix files map to install owner', () => {
+    expect(ownershipForPath('src/setup/doctor-fix.ts')).toEqual({
+      wave: 'OMA-W1', owner: 'oma-install-owner',
+    });
+    expect(ownershipForPath('tests/setup/doctor-next-action.spec.ts')).toEqual({
+      wave: 'OMA-W1', owner: 'oma-install-owner',
+    });
+  });
+
   test('#49 MCP registration files map to install and composition owners', () => {
     expect(ownershipForPath('tests/setup/mcp-registration.spec.ts')).toEqual({
       wave: 'OMA-W1', owner: 'oma-install-owner',

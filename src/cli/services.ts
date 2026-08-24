@@ -8,8 +8,23 @@ import { Result, err, ok } from '../runtime/types';
 import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { verifyPluginActive, PluginCommandAdapter } from '../setup/plugin';
-import { PluginSetupTransaction } from '../setup/transaction';
-import { doctorReportToLines, runDoctor } from '../setup/doctor';
+import { agyPluginListArgs, PluginSetupTransaction } from '../setup/transaction';
+import {
+  DoctorReportV1,
+  doctorReportToJsonValue,
+  doctorReportToLines,
+  runDoctor,
+} from '../setup/doctor';
+import {
+  applyOwnedDoctorFix,
+  assertNoGitSpawn,
+  buildDoctorFixPlan,
+  doctorAgyMissing,
+  doctorFixDiffToLines,
+  doctorFixPlanToLines,
+  doctorFixResultToJsonValue,
+  doctorStatusDiff,
+} from '../setup/doctor-fix';
 import { HostCliAdapter } from '../setup/host-install';
 import { teamCommand as runTeamCommand } from '../team/commands';
 import { RuntimeContext } from '../team/types';
@@ -23,10 +38,11 @@ import { CliServices } from './application';
 import { guardDangerousArgv } from './dangerous-launch';
 import { canonicalBytesV1 } from '../contracts/state-schemas';
 
-interface DoctorCliOptions {
+export interface DoctorCliOptions {
   readonly asJson: boolean;
   readonly native: boolean;
   readonly strictPlugin: boolean;
+  readonly fix: boolean;
 }
 
 class DoctorCliUsageError extends Error {}
@@ -64,12 +80,14 @@ export function createDefaultServices(
   const packageRoot = options.packageRoot ?? findPackageRoot(__dirname);
   const agyCommand = options.agyCommand ?? 'agy';
   const version = options.version ?? readPackageVersion(packageRoot);
-  const stdout = options.stdout ?? ((value) => process.stdout.write(value));
+  const writeStdout = options.stdout ?? ((value) => process.stdout.write(value));
+  let stdoutSink = writeStdout;
+  const stdout = (value: string) => stdoutSink(value);
   const stderr = options.stderr ?? ((value) => process.stderr.write(value));
   const environment = options.environment ?? process.env;
   const runner = options.processRunner ?? new ProcessRunner();
 
-  return {
+  const services: CliServices = {
     version,
     async launchMode(mode, task) {
       // managed mode 本身不帶 --madmax；仍防 task 字串外的未來 argv 擴充
@@ -361,13 +379,17 @@ export function createDefaultServices(
         agyCommand,
         NATIVE_PLUGIN_PROBE_LIMITS,
       );
-      const report = await runDoctor({
+      const runDoctorOnce = () => runDoctor({
         packageRoot,
         packageVersion: version,
         agyCommand,
         adapter,
         strictPlugin: doctorOptions.strictPlugin,
         includeNativeCapabilities: doctorOptions.native,
+        homeDir: options.homeDir,
+        stateRoot: options.stateRoot,
+        antigravityConfigRoot: options.antigravityConfigRoot,
+        environment,
         nativeCapabilitiesProbe: doctorOptions.native ? async () => {
           try {
             const inspected = await inspectNativeCapabilities({
@@ -393,16 +415,82 @@ export function createDefaultServices(
           }
         } : undefined,
       });
-      if (!report.ok) {
-        stderr(formatCliError(report.error.code, report.error.message));
+      const writeDoctorReport = (reportValue: DoctorReportV1): void => {
+        if (doctorOptions.asJson) {
+          stdout(`${JSON.stringify(doctorReportToJsonValue(reportValue), null, 2)}\n`);
+        } else {
+          stdout(`${doctorReportToLines(reportValue).join('\n')}\n`);
+        }
+      };
+      const before = await runDoctorOnce();
+      if (!before.ok) {
+        stderr(formatCliError(before.error.code, before.error.message));
         return 1;
       }
-      if (doctorOptions.asJson) {
-        stdout(`${JSON.stringify(report.value, null, 2)}\n`);
-      } else {
-        stdout(`${doctorReportToLines(report.value).join('\n')}\n`);
+      if (!doctorOptions.fix) {
+        writeDoctorReport(before.value);
+        return before.value.exitCode;
       }
-      return report.value.exitCode;
+
+      // `--fix`：先印計畫，再一次性 setupCommand + plugin readback，永不 git、不重試。
+      const plan = buildDoctorFixPlan({
+        agyCommand,
+        agyMissing: doctorAgyMissing(before.value),
+      });
+      if (!doctorOptions.asJson) {
+        stdout(`${doctorFixPlanToLines(plan).join('\n')}\n`);
+        stdout('\n=== before ===\n');
+        stdout(`${doctorReportToLines(before.value).join('\n')}\n`);
+      }
+      let setupOutput = '';
+      const applied = await applyOwnedDoctorFix({
+        plan,
+        runSetup: async (setupArgv) => {
+          if (!doctorOptions.asJson) return services.setupCommand(setupArgv);
+          // `--json` 消費者只能拿到一份 envelope；setup 的 JSON 改捕獲進 setupOutput。
+          const previousStdout = stdoutSink;
+          stdoutSink = (value) => { setupOutput += value; };
+          try {
+            return await services.setupCommand(setupArgv);
+          } finally {
+            stdoutSink = previousStdout;
+          }
+        },
+        pluginReadback: async () => {
+          const listArgv = [...agyPluginListArgs()];
+          assertNoGitSpawn([agyCommand, ...listArgv]);
+          const listed = await adapter.run(listArgv);
+          assertNoGitSpawn([agyCommand, ...listed.argv]);
+          return {
+            argv: [agyCommand, ...listed.argv],
+            code: listed.code,
+            stdout: listed.stdout,
+            stderr: listed.stderr,
+          };
+        },
+      });
+      const after = await runDoctorOnce();
+      if (!after.ok) {
+        stderr(formatCliError(after.error.code, after.error.message));
+        return 1;
+      }
+      const changed = doctorStatusDiff(before.value, after.value);
+      if (doctorOptions.asJson) {
+        stdout(`${JSON.stringify(doctorFixResultToJsonValue({
+          plan,
+          setupExitCode: applied.setupExitCode,
+          setupOutput,
+          before: doctorReportToJsonValue(before.value),
+          after: doctorReportToJsonValue(after.value),
+          changed,
+          retried: false,
+        }), null, 2)}\n`);
+      } else {
+        stdout('\n=== after ===\n');
+        stdout(`${doctorReportToLines(after.value).join('\n')}\n`);
+        stdout(`${doctorFixDiffToLines(changed).join('\n')}\n`);
+      }
+      return after.value.exitCode;
     },
     async skillCommand(argv) {
       // 設計概念映射：`oma doctor` 的雙路徑輸出（預設人類可讀，`--json` 才機器格式）。
@@ -485,10 +573,12 @@ export function createDefaultServices(
       });
     },
   };
+  return services;
 }
 
-function parseDoctorCliOptions(argv: readonly string[]): DoctorCliOptions {
-  const allowed = new Set(['--json', '--native', '--no-strict-plugin']);
+/** `--fix` 為 #50 安全修復旗標；重複或未知旗標仍 fail-closed。 */
+export function parseDoctorCliOptions(argv: readonly string[]): DoctorCliOptions {
+  const allowed = new Set(['--json', '--native', '--no-strict-plugin', '--fix']);
   const seen = new Set<string>();
   for (const arg of argv) {
     if (!allowed.has(arg)) {
@@ -503,6 +593,7 @@ function parseDoctorCliOptions(argv: readonly string[]): DoctorCliOptions {
     asJson: seen.has('--json'),
     native: seen.has('--native'),
     strictPlugin: !seen.has('--no-strict-plugin'),
+    fix: seen.has('--fix'),
   };
 }
 
