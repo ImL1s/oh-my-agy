@@ -42,6 +42,17 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- Session skill discovery now reads SKILL.md YAML frontmatter (`name`,
+  `description`, `argument-hint`) via a deterministic YAML subset parser
+  (`src/modes/skill-frontmatter.ts`; OMC keyword-detector / OMX `$skill`
+  mapping). `oma skill list --json` each row includes `name`, `path`,
+  `description`, and `argumentHint` (`null` when matter is missing or
+  corrupt — fail-open, never fails the command). Text list prints those
+  fields under each path. New `oma skill search <query>` matches name and
+  description, sorts stably by UTF-8 name, and returns an empty list with
+  exit 0 for empty or unmatched queries. `oma skill show` output is
+  unchanged. No new npm dependency. (#53)
+
 - Claude Code plugin MCP wiring: `.claude-plugin/.mcp.json` uses
   `${CLAUDE_PLUGIN_ROOT}` (not Antigravity `${extensionPath}`), and
   `.claude-plugin/plugin.json` `mcpServers` points at that file. Grok host

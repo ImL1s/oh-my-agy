@@ -1,8 +1,14 @@
 /**
- * 設計概念映射：OMC/OMX 的 skill 發現面；OMA 以 `oma skill list|show` 供 session 內 agent 使用。
+ * 設計概念映射：OMC/OMX 的 skill 發現面；OMA 以 `oma skill list|show|search`
+ * 供 session 內 agent 使用（#53 讀出 frontmatter，對齊 OMX `$skill` search）。
  * list 預設隱藏 catalog `visibility: internal`（OMX catalog-manifest status=internal）。
  */
 import { isInternalCatalogSkill } from '../modes/skill-catalog';
+import {
+  searchSkillDiscoveryRows,
+  skillDiscoveryRowFromMarkdown,
+  type SkillDiscoveryRowV1,
+} from '../modes/skill-frontmatter';
 import { listWorkflowSkillNames, loadSkillMarkdown, OmaWorkflowSkill } from '../modes/skill-loader';
 import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
@@ -21,15 +27,25 @@ export const DEFAULT_SKILL_RENDER_FORMAT: SkillRenderFormat = 'text';
 export type ParsedSkillCommand =
   | { readonly kind: 'list'; readonly format?: SkillRenderFormat; readonly includeInternal?: boolean }
   | { readonly kind: 'show'; readonly name: string; readonly format?: SkillRenderFormat }
+  | { readonly kind: 'search'; readonly query: string; readonly format?: SkillRenderFormat }
   | { readonly kind: 'help'; readonly format?: SkillRenderFormat };
 
 const SKILL_USAGE =
-  'Usage: oma skill list [--json|--text] [--all] | oma skill show <name> [--json|--text] | oma skill help';
+  'Usage: oma skill list [--json|--text] [--all] | oma skill show <name> [--json|--text] | oma skill search <query> [--json|--text] | oma skill help';
 
 function listDiscoverableSkillNames(packageRoot: string, includeInternal: boolean): string[] {
   const names = listWorkflowSkillNames(packageRoot);
   if (includeInternal) return names;
   return names.filter((name) => !isInternalCatalogSkill(name));
+}
+
+function discoveryRowsForNames(packageRoot: string, names: readonly string[]): SkillDiscoveryRowV1[] {
+  return names.map((name) =>
+    skillDiscoveryRowFromMarkdown(
+      name,
+      loadSkillMarkdown(packageRoot, name as OmaWorkflowSkill),
+    ),
+  );
 }
 
 /** 由旗標解析明確指定的呈現格式與 `--all`；未指定時回傳 undefined，由呼叫端套用預設值。 */
@@ -93,6 +109,10 @@ export function parseSkillCommand(argv: readonly string[]): Result<ParsedSkillCo
   if (rest[0] === 'show' && rest.length === 2 && rest[1].trim() !== '') {
     return ok(withFormat({ kind: 'show' as const, name: rest[1].trim() }));
   }
+  // 空 query 合法：search 視為 miss、回空清單 exit 0（不得當 usage 錯誤）。
+  if (rest[0] === 'search') {
+    return ok(withFormat({ kind: 'search' as const, query: rest.slice(1).join(' ') }));
+  }
   return err(runtimeError('E_VALIDATOR_REJECTED', SKILL_USAGE));
 }
 
@@ -105,19 +125,25 @@ export function runSkillCommand(
       usage: [
         'oma skill list [--json|--text] [--all]',
         'oma skill show <name> [--json|--text]',
+        'oma skill search <query> [--json|--text]',
         'oma skill help',
       ],
-      note: 'Session skills ship under package skills/. Managed launches inject protocol for the active phase. Internal skills are omitted from list unless --all is passed.',
+      note: 'Session skills ship under package skills/. Managed launches inject protocol for the active phase. Internal skills are omitted from list unless --all is passed. search matches name and description; an empty query is a miss.',
     });
   }
   if (command.kind === 'list') {
     const names = listDiscoverableSkillNames(packageRoot, command.includeInternal === true);
     return ok({
       packageRoot,
-      skills: names.map((name) => ({
-        name,
-        path: `skills/${name}/SKILL.md`,
-      })),
+      skills: discoveryRowsForNames(packageRoot, names),
+    });
+  }
+  if (command.kind === 'search') {
+    const names = listDiscoverableSkillNames(packageRoot, false);
+    return ok({
+      packageRoot,
+      query: command.query,
+      skills: searchSkillDiscoveryRows(discoveryRowsForNames(packageRoot, names), command.query),
     });
   }
   const body = loadSkillMarkdown(packageRoot, command.name as OmaWorkflowSkill);
@@ -135,7 +161,13 @@ export function runSkillCommand(
 
 export interface SkillListViewV1 {
   readonly packageRoot: string;
-  readonly skills: ReadonlyArray<{ readonly name: string; readonly path: string }>;
+  readonly skills: ReadonlyArray<SkillDiscoveryRowV1>;
+}
+
+export interface SkillSearchViewV1 {
+  readonly packageRoot: string;
+  readonly query: string;
+  readonly skills: ReadonlyArray<SkillDiscoveryRowV1>;
 }
 
 export interface SkillShowViewV1 {
@@ -147,6 +179,18 @@ export interface SkillShowViewV1 {
 export interface SkillHelpViewV1 {
   readonly usage: readonly string[];
   readonly note: string;
+}
+
+function renderDiscoveryEntryLines(entry: SkillDiscoveryRowV1, nameWidth: number): string[] {
+  const lines = [`  ${entry.name.padEnd(nameWidth)}  ${entry.path}`];
+  const indent = `  ${' '.repeat(nameWidth)}  `;
+  if (entry.description !== null) {
+    lines.push(`${indent}${entry.description}`);
+  }
+  if (entry.argumentHint !== null) {
+    lines.push(`${indent}argument-hint: ${entry.argumentHint}`);
+  }
+  return lines;
 }
 
 /**
@@ -180,7 +224,29 @@ export function renderSkillCommandText(command: ParsedSkillCommand, value: unkno
       `oma skill list (${listed.skills.length} skills)`,
       `packageRoot: ${listed.packageRoot}`,
       '',
-      ...listed.skills.map((entry) => `  ${entry.name.padEnd(width)}  ${entry.path}`),
+      ...listed.skills.flatMap((entry) => renderDiscoveryEntryLines(entry, width)),
+      '',
+      'Show one: oma skill show <name>',
+      'Search: oma skill search <query>',
+    ];
+    return `${lines.join('\n')}\n`;
+  }
+  if (command.kind === 'search') {
+    const searched = value as SkillSearchViewV1;
+    if (searched.skills.length === 0) {
+      return [
+        'oma skill search — no matching skills',
+        `query: ${searched.query}`,
+        `packageRoot: ${searched.packageRoot}`,
+      ].join('\n').concat('\n');
+    }
+    const width = searched.skills.reduce((longest, entry) => Math.max(longest, entry.name.length), 0);
+    const lines = [
+      `oma skill search (${searched.skills.length} skills)`,
+      `query: ${searched.query}`,
+      `packageRoot: ${searched.packageRoot}`,
+      '',
+      ...searched.skills.flatMap((entry) => renderDiscoveryEntryLines(entry, width)),
       '',
       'Show one: oma skill show <name>',
     ];

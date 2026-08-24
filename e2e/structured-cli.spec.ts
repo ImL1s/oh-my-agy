@@ -28,6 +28,7 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('autopilot drive');
     expect(r.stdout).toContain('skill list');
+    expect(r.stdout).toContain('skill search');
     expect(r.stdout).toContain('oma session list');
     expect(r.stdout).toContain('oma resume --list');
     expect(r.stdout).toContain('oma explain <E_CODE> [--json]');
@@ -42,6 +43,17 @@ describe('Structured CLI e2e baseline', () => {
     expect(names).toEqual(expect.arrayContaining([
       'autopilot', 'deep-interview', 'ralplan', 'ultragoal', 'code-review', 'ultraqa',
     ]));
+    for (const skill of body.skills as Array<Record<string, unknown>>) {
+      expect(Object.keys(skill)).toEqual(['name', 'path', 'description', 'argumentHint']);
+      expect(typeof skill.name).toBe('string');
+      expect(skill.path).toBe(`skills/${skill.name}/SKILL.md`);
+      expect(skill.description === null || typeof skill.description === 'string').toBe(true);
+      expect(skill.argumentHint === null || typeof skill.argumentHint === 'string').toBe(true);
+    }
+    const verify = (body.skills as Array<{ name: string; description: string | null }>)
+      .find((skill) => skill.name === 'verify');
+    expect(verify).toBeDefined();
+    expect((verify?.description ?? '').length).toBeGreaterThan(0);
   });
 
   // 設計概念映射：`oma doctor` 的預設人類可讀輸出；skill 面自本變更起對齊同一慣例。
@@ -78,6 +90,29 @@ describe('Structured CLI e2e baseline', () => {
     const help = await runOma(['skill', 'help']);
     expect(help.code).toBe(0);
     expect(help.stdout).not.toMatch(/piped|terminal/i);
+    expect(help.stdout).toContain('oma skill search <query>');
+  });
+
+  test('TC-S-01e: oma skill search matches name/description, is byte-stable, and misses empty', async () => {
+    const hit = await runOma(['skill', 'search', 'verify', '--json']);
+    expect(hit.code).toBe(0);
+    const body = JSON.parse(hit.stdout) as { skills: Array<{ name: string }> };
+    expect(body.skills.map((skill) => skill.name)).toContain('verify');
+    const again = await runOma(['skill', 'search', 'verify', '--json']);
+    expect(again.code).toBe(0);
+    expect(again.stdout).toBe(hit.stdout);
+
+    const miss = await runOma(['skill', 'search', 'no-such-skill-zzzxxyy-issue-53']);
+    expect(miss.code).toBe(0);
+    expect(miss.stdout).toMatch(/no matching skills/);
+
+    const missJson = await runOma(['skill', 'search', 'no-such-skill-zzzxxyy-issue-53', '--json']);
+    expect(missJson.code).toBe(0);
+    expect(JSON.parse(missJson.stdout).skills).toEqual([]);
+
+    const empty = await runOma(['skill', 'search', '--json']);
+    expect(empty.code).toBe(0);
+    expect(JSON.parse(empty.stdout).skills).toEqual([]);
   });
 
   // 設計概念映射：OMX `omx hud --preset=…`。這三條守的是 CLI wiring 而非 renderer ——
