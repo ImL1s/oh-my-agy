@@ -44,6 +44,7 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 | Deterministic repository workflow runner | `/oh-my-agy:workflow` | `skills/workflow/SKILL.md` | `oma workflow run <name> --input <json>` |
 | Internal discovery canary (do not use as a workflow) | `/oh-my-agy:discovery-proof` | `skills/discovery-proof/SKILL.md` | none — machine-verification token only |
 | This index | `/oh-my-agy:oma-runtime` | (this file) | `oma skill list` / `oma skill show <name>` |
+| In-session OMA light planning — invoke /oh-my-agy:plan; bounded step list wit... | `/oh-my-agy:plan` | `skills/plan/SKILL.md` | (none) |
 <!-- OMA-SKILL-CATALOG:END -->
 
 ### Autopilot phase cycle (canonical OMX)
