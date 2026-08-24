@@ -112,11 +112,11 @@ oma ralph -- "Reply with exactly one word: pong"
 
 Registry 发布**未配置**：不要从 npmjs.org 安装无关的未 scoped `oh-my-agy` package，也不要假设 `@iml1s/oh-my-agy` 存在于 registry。从 GitHub Release 安装，其中包含 package tarball 与 `SHA256SUMS`。
 
-便捷一行（最新已验证 release 为 `v0.5.2`）：
+便捷一行（最新已验证 release 为 `v0.6.0`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh \
-  | bash -s -- --github --tag v0.5.2
+  | bash -s -- --github --tag v0.6.0
 ```
 
 手动 / 可复现选项：
@@ -125,11 +125,11 @@ curl -fsSL https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/instal
 # 先下载 installer，再解析 pinned release。
 curl -fsSLo /tmp/oma-install.sh \
   https://raw.githubusercontent.com/ImL1s/oh-my-agy/main/scripts/install.sh
-bash /tmp/oma-install.sh --github --tag v0.5.2
+bash /tmp/oma-install.sh --github --tag v0.6.0
 
 # 完全离线：验证并安装精确文件，无网络/npm/build 步骤。
 bash /tmp/oma-install.sh \
-  --asset ./iml1s-oh-my-agy-0.5.2.tgz \
+  --asset ./iml1s-oh-my-agy-0.6.0.tgz \
   --checksums ./SHA256SUMS
 ```
 
@@ -348,8 +348,8 @@ Tag 示例：
 ```bash
 # 仅在确定性检查、live evidence、independent review 与 UltraQA 通过后。
 # Tag 必须匹配 package.json / plugin.json / .claude-plugin version。
-git tag -a v0.5.2 -m "v0.5.2"
-git push origin v0.5.2
+git tag -a v0.6.0 -m "v0.6.0"
+git push origin v0.6.0
 ```
 
 Changelog：**[CHANGELOG.md](../../CHANGELOG.md)**。  

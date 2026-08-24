@@ -1,6 +1,6 @@
 {
   "name": "@iml1s/oh-my-agy",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "description": "OMA — session slash skills (agy /autopilot; Claude/Grok /oh-my-agy:autopilot) + optional oma CLI ledger",
   "main": "dist/bin/oma.js",
   "exports": {

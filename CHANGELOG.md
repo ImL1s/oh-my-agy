@@ -6,6 +6,8 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-08-24
+
 ### Changed
 
 - PreInvocation managed skill inject now renders every `visibility: 'public'`
@@ -584,6 +586,7 @@ Antigravity 1.1.5 host for this release.
 
 ---
 
+[0.6.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.6.0
 [0.5.2]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.2
 [0.5.1]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.1
 [0.5.0]: https://github.com/ImL1s/oh-my-agy/releases/tag/v0.5.0
