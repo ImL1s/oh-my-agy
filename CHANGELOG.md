@@ -21,6 +21,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- New in-session skill **`trace`** (`/oh-my-agy:trace`): competing-hypothesis
+  causal tracking with evidence for/against and a next probe. No `oma trace`
+  CLI. (#39)
+
 - New in-session skill **`plan`** (`/oh-my-agy:plan`): light planning under
   `ralplan`, with verifiable per-step completion and artifacts in `.agy/plans/`.
   No `oma plan` CLI verb. (#40)

@@ -41,6 +41,7 @@ describe('OMA session skill surface', () => {
       'wiki',
       'hud',
       'plan',
+      'trace',
     ];
     const present = listWorkflowSkillNames(packageRoot);
     for (const name of required) {
@@ -88,7 +89,7 @@ describe('OMA session skill surface', () => {
   // `OmaWorkflowSkill` union 若少了某個出貨中的 skill，這個 typed literal 會在 tsc 階段就失敗；
   // 其他測試都走 `as any`，無法保護 union 本身。設計概念映射：OMC/OMX 的 skill 名稱型別化。
   test('shipped skill names are members of the OmaWorkflowSkill union', () => {
-    const typed: OmaWorkflowSkill[] = ['ask', 'wiki', 'hud', 'plan', 'workflow', 'oma-runtime', 'verify'];
+    const typed: OmaWorkflowSkill[] = ['ask', 'wiki', 'hud', 'plan', 'trace', 'workflow', 'oma-runtime', 'verify'];
     for (const name of typed) {
       expect(listWorkflowSkillNames(packageRoot)).toContain(name);
       expect(loadSkillMarkdown(packageRoot, name)).not.toBeNull();
@@ -137,6 +138,10 @@ describe('OMA session skill surface', () => {
     expect(planBody).toMatch(/no `oma plan` CLI/i);
     expect(planBody).toMatch(/upgrade to `ralplan`/i);
     expect(planBody).toMatch(/\.agy\/plans\//);
+    const traceBody = loadSkillMarkdown(packageRoot, 'trace');
+    expect(traceBody).toMatch(/compet/i);
+    expect(traceBody).toMatch(/no `oma trace` CLI/i);
+    expect(traceBody).toMatch(/\.agy\/trace\//);
   });
 
   test('catalog generator write targets are only the two authorized catalog files', () => {
