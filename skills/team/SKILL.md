@@ -45,6 +45,7 @@ Coordinated multi-worker execution (tmux + worktrees + delivery). **Explicit onl
 - AuthorityLease blocks overlapping write scopes.
 - Dirty worktrees are preserved — never force-clean user work.
 - No `git reset --hard` / `git clean -fd`.
+- Recycle terminal worktrees with `oma team cleanup --dry-run` first; `oma team stop` is tmux-only.
 - Deliver requires clean porcelain after OMA runtime files are removed (orchestrator does this).
 
 ## Do not
@@ -54,6 +55,8 @@ Coordinated multi-worker execution (tmux + worktrees + delivery). **Explicit onl
 - Deliver with dirty unrelated files
 - Kill sessions without owner nonce proof
 - Imply team from ralph/ultrawork without user opt-in
+- Recycle worktrees via `oma team stop` (stop does not delete worktrees or mailbox bodies)
+- Skip `--dry-run` on the first cleanup of a team you still care about
 
 ## Final checklist
 
@@ -61,6 +64,7 @@ Coordinated multi-worker execution (tmux + worktrees + delivery). **Explicit onl
 - [ ] Claim tokens / worktrees recorded
 - [ ] Deliver only from clean worktrees
 - [ ] Stop/reclaim used safely; no destructive git
+- [ ] Prefer `oma team cleanup --dry-run` before a real cleanup; unintegrated commits remain
 
 ---
 
@@ -79,6 +83,10 @@ oma team deliver --team <id> --task <id> --claim-token <tok> --generation <n> --
 oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> …
 oma team stop --team <id>
+oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]
+  # Prefer --dry-run first. Recycles terminal-task worktrees/branches/mailbox-bodies.
+  # Never destructive git restore/clean. Unintegrated commits are preserved with a reason.
+  # stop remains tmux-only and does not imply cleanup.
 oma team resolve-fork …
 # CLI-first messaging / claims (P0 OMX-shaped subset — prefer over tmux send-keys):
 oma team api send-message --input '{"team_name":"<id>","from_worker":"leader","to_worker":"<task>","body":"…"}' --json

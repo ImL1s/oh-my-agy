@@ -923,6 +923,39 @@ export class TeamStateStore {
     });
   }
 
+  /**
+   * 終局 cleanup 把 aggregate 標為 retired，並刪除已落地的 mailbox 索引。
+   * 已退役且無需刪信時不 bump revision（idempotent）。
+   * 設計概念映射：OMX cleanupTeamState 退役、OMC team cleanup 保留 status 可讀。
+   */
+  async retireAfterCleanup(input: {
+    expectedRevision: number;
+    ownerNonce: string;
+    dropMailboxIds: readonly string[];
+    nowMs: number;
+  }): Promise<Result<Snapshot<TeamAggregateV1>, RuntimeError>> {
+    const before = this.requireRevision(input.expectedRevision);
+    if (!before.ok) return before;
+    if (before.value.value.ownerNonce !== input.ownerNonce) {
+      return err(runtimeError('E_LOCK_NOT_OWNER', 'Team cleanup owner does not match'));
+    }
+    const mailbox = before.value.value.mailbox;
+    const needsDrop = input.dropMailboxIds.some((id) => mailbox[id] !== undefined);
+    if (before.value.value.retired === true && !needsDrop) {
+      return before;
+    }
+    return this.store.compareAndSwap(this.key, input.expectedRevision, (current) => {
+      const nextMailbox = { ...current.mailbox };
+      for (const id of input.dropMailboxIds) delete nextMailbox[id];
+      return {
+        ...current,
+        mailbox: nextMailbox,
+        retired: true,
+        retiredAtMs: input.nowMs,
+      };
+    });
+  }
+
   /** Absolute directory for this team's durable partition (aggregate sibling). */
   teamDirectory(): string {
     return path.join(this.stateRoot, path.dirname(this.key));

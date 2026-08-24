@@ -152,18 +152,38 @@ export class GitWorktreeManager {
     return ok(undefined);
   }
 
-  /** Abort a newly-created launch without preserving its disposable branch. */
-  rollbackLaunch(
-    descriptor: Readonly<ManagedWorktreeV1>,
-    ownerNonce: string,
-  ): Result<void> {
-    const removed = this.removeIfSafe(descriptor, { ownerNonce, integrated: true });
-    if (!removed.ok) return removed;
-    const branch = git(this.leaderRepo, ['branch', '-D', descriptor.branchName]);
-    return branch.ok ? ok(undefined) : branch;
+  /**
+   * 列出 team 名下 owner marker 描述的 managed worktree。
+   * 設計概念映射：OMC teleport / OMX team worktree inventory；只認 owner.json。
+   */
+  listOwned(teamId: string): readonly ManagedWorktreeV1[] {
+    if (!isCanonicalTeamIdentifier(teamId)) return [];
+    const teamDir = path.resolve(this.managedRoot, teamId);
+    if (!isContained(this.managedRoot, teamDir) || !fs.existsSync(teamDir)) return [];
+    let names: string[] = [];
+    try {
+      names = fs.readdirSync(teamDir);
+    } catch (_) {
+      return [];
+    }
+    const found: ManagedWorktreeV1[] = [];
+    for (const name of names) {
+      if (!name.endsWith('.owner.json')) continue;
+      const markerPath = path.resolve(teamDir, name);
+      if (!isContained(teamDir, markerPath)) continue;
+      const descriptor = readDescriptor(markerPath);
+      if (descriptor === null || descriptor.teamId !== teamId) continue;
+      if (!isContained(this.managedRoot, descriptor.path)) continue;
+      found.push(descriptor);
+    }
+    return found;
   }
 
-  removeIfSafe(
+  /**
+   * 與 removeIfSafe 同一安全判定，供 dry-run 零變更預覽。
+   * 未整合 commit / dirty tree 回傳 E_DELIVERY_UNINTEGRATED。
+   */
+  assessOwnedRemoval(
     descriptor: Readonly<ManagedWorktreeV1>,
     options: Readonly<{ ownerNonce: string; integrated: boolean }>,
   ): Result<void> {
@@ -184,6 +204,39 @@ export class GitWorktreeManager {
         return err(runtimeError('E_DELIVERY_UNINTEGRATED', 'Unintegrated commits require worktree preservation'));
       }
     }
+    return ok(undefined);
+  }
+
+  /**
+   * 在 worktree 已安全移除後刪除 managed 分支。分支不存在視為成功（idempotent）。
+   */
+  deleteManagedBranch(branchName: string): Result<void> {
+    if (!/^[A-Za-z0-9._/-]+$/.test(branchName) || branchName.includes('..')) {
+      return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'Managed branch name is invalid'));
+    }
+    const listed = git(this.leaderRepo, ['branch', '--list', branchName]);
+    if (!listed.ok) return listed;
+    if (listed.value.stdout.trim() === '') return ok(undefined);
+    const deleted = git(this.leaderRepo, ['branch', '-D', branchName]);
+    return deleted.ok ? ok(undefined) : deleted;
+  }
+
+  /** Abort a newly-created launch without preserving its disposable branch. */
+  rollbackLaunch(
+    descriptor: Readonly<ManagedWorktreeV1>,
+    ownerNonce: string,
+  ): Result<void> {
+    const removed = this.removeIfSafe(descriptor, { ownerNonce, integrated: true });
+    if (!removed.ok) return removed;
+    return this.deleteManagedBranch(descriptor.branchName);
+  }
+
+  removeIfSafe(
+    descriptor: Readonly<ManagedWorktreeV1>,
+    options: Readonly<{ ownerNonce: string; integrated: boolean }>,
+  ): Result<void> {
+    const assessed = this.assessOwnedRemoval(descriptor, options);
+    if (!assessed.ok) return assessed;
     const removed = git(this.leaderRepo, ['worktree', 'remove', descriptor.path]);
     if (!removed.ok) return removed;
     fs.rmSync(descriptor.markerPath, { force: true });

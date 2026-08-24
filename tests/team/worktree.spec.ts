@@ -48,6 +48,27 @@ describe('safe Git worktree lifecycle', () => {
     expect(fs.existsSync(`${created.value.markerPath}.seal.json`)).toBe(false);
   });
 
+  test('assessOwnedRemoval is read-only and matches removeIfSafe rejection', () => {
+    const manager = new GitWorktreeManager(fixture.repo, fixture.managedWorktreesRoot);
+    const created = manager.create({
+      teamId: 'alpha', workerId: 'worker-2', generation: 1, branchName: 'oma-team/alpha/assess',
+      baseSha: fixture.head(), ownerNonce: 'owner-a',
+    });
+    expect(created.ok).toBe(true);
+    if (!created.ok) return;
+    fixture.commitFile('result.ts', 'unintegrated\n', 'unintegrated', created.value.path);
+    const before = fixture.git(['worktree', 'list', '--porcelain']).stdout;
+    const assessed = manager.assessOwnedRemoval(created.value, {
+      ownerNonce: 'owner-a',
+      integrated: false,
+    });
+    expect(assessed.ok).toBe(false);
+    if (assessed.ok) return;
+    expect(assessed.error.code).toBe('E_DELIVERY_UNINTEGRATED');
+    expect(fs.existsSync(created.value.path)).toBe(true);
+    expect(fixture.git(['worktree', 'list', '--porcelain']).stdout).toBe(before);
+  });
+
   test('cancel preserves an owned worktree with unintegrated commits', () => {
     const manager = new GitWorktreeManager(fixture.repo, fixture.managedWorktreesRoot);
     const created = manager.create({

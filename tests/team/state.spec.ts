@@ -69,6 +69,73 @@ describe('Team state, claims, heartbeat, progress, and mailbox', () => {
     expect(progress.value.value.tasks.first.claim?.leasedUntilMs).toBe(6600);
   });
 
+  test('retireAfterCleanup is CAS-fenced, owner-bound, and idempotent', async () => {
+    const retired = await store.retireAfterCleanup({
+      expectedRevision: 0,
+      ownerNonce: 'owner-nonce',
+      dropMailboxIds: [],
+      nowMs: 9,
+    });
+    expect(retired.ok).toBe(true);
+    if (!retired.ok) return;
+    expect(retired.value.value.retired).toBe(true);
+    expect(retired.value.value.retiredAtMs).toBe(9);
+    expect(retired.value.revision).toBe(1);
+
+    const replay = await store.retireAfterCleanup({
+      expectedRevision: retired.value.revision,
+      ownerNonce: 'owner-nonce',
+      dropMailboxIds: [],
+      nowMs: 10,
+    });
+    expect(replay.ok).toBe(true);
+    if (!replay.ok) return;
+    expect(replay.value.revision).toBe(retired.value.revision);
+    expect(replay.value.value.retiredAtMs).toBe(9);
+
+    const cas = await store.retireAfterCleanup({
+      expectedRevision: 0,
+      ownerNonce: 'owner-nonce',
+      dropMailboxIds: [],
+      nowMs: 11,
+    });
+    expect(cas.ok).toBe(false);
+    if (cas.ok) return;
+    expect(cas.error.code).toBe('E_REVISION_CONFLICT');
+
+    const owner = await store.retireAfterCleanup({
+      expectedRevision: retired.value.revision,
+      ownerNonce: 'foreign',
+      dropMailboxIds: [],
+      nowMs: 12,
+    });
+    expect(owner.ok).toBe(false);
+    if (owner.ok) return;
+    expect(owner.error.code).toBe('E_LOCK_NOT_OWNER');
+  });
+
+  test('retireAfterCleanup drops mailbox index entries', async () => {
+    const sent = await store.sendMailbox(0, {
+      schemaVersion: 1,
+      id: 'm-drop',
+      sender: 'leader',
+      recipient: 'first',
+      bodyDigest: sha256('x'),
+      createdAtMs: 1,
+    });
+    if (!sent.ok) throw new Error(sent.error.message);
+    const retired = await store.retireAfterCleanup({
+      expectedRevision: sent.value.revision,
+      ownerNonce: 'owner-nonce',
+      dropMailboxIds: ['m-drop'],
+      nowMs: 5,
+    });
+    expect(retired.ok).toBe(true);
+    if (!retired.ok) return;
+    expect(retired.value.value.mailbox['m-drop']).toBeUndefined();
+    expect(retired.value.value.retired).toBe(true);
+  });
+
   test('TEAM-10 mailbox IDs are idempotent and recipient reads are isolated', async () => {
     const first = await store.sendMailbox(0, {
       schemaVersion: 1, id: 'm1', sender: 'leader', recipient: 'worker-a', bodyDigest: sha256('a'), createdAtMs: 1,

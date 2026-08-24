@@ -116,6 +116,9 @@ describe('CLI application wiring', () => {
     expect(output().stdout).toContain(
       'oma team resume --team <id> --expected-revision <n> [--json]',
     );
+    expect(output().stdout).toContain(
+      'oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]',
+    );
     expect(output().stdout).toContain('oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]');
     expect(output().stdout).toContain('oma doctor [--json] [--no-strict-plugin] [--native] [--fix]');
     expect(output().stdout).toContain('oma update [--release] [--bin-dir <dir>] [--check]');

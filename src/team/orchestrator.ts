@@ -45,7 +45,10 @@ import {
   WorkerPaneReceiptV1,
 } from './types';
 import { AuthorityLeaseStore, pathKeysFromWriteScope } from './authority-lease';
+import { cleanupTeam, TeamCleanupView } from './cleanup';
 import { GitWorktreeManager, ManagedWorktreeV1, resolveGitWorktreeIdentity } from './worktree';
+
+export type { TeamCleanupView };
 import {
   TmuxReadinessReceiptV1,
   preflightTeamWorkerProviderRoute,
@@ -175,6 +178,7 @@ export interface TeamStatusView {
   teamId: string;
   revision: number;
   ownerNonce: string;
+  retired: boolean;
   tasks: Readonly<Record<string, TeamTaskRuntimeV1>>;
   heartbeats: TeamAggregateV1['heartbeats'];
   tmux: Readonly<Record<string, { alive: boolean; paneId?: string }>>;
@@ -402,9 +406,29 @@ export class TeamOrchestrator {
       teamId: aggregate.teamId,
       revision: snapshot.value.revision,
       ownerNonce: aggregate.ownerNonce,
+      retired: aggregate.retired === true,
       tasks: aggregate.tasks,
       heartbeats: aggregate.heartbeats,
       tmux: tmuxView,
+    });
+  }
+
+  /**
+   * 終局 worktree / 分支 / mailbox-bodies 回收。`stop` 仍只殺 tmux，不隱含 cleanup。
+   * 設計概念映射：OMC `omc team cleanup`；OMX cleanup 生命週期 verb（非 team api op）。
+   */
+  async cleanup(
+    teamId: string,
+    expectedRevision: number,
+    options: Readonly<{ dryRun?: boolean }> = {},
+  ): Promise<Result<TeamCleanupView, RuntimeError>> {
+    const store = new TeamStateStore(this.stateRoot, this.repoKey, this.workspaceKey, teamId);
+    return cleanupTeam({
+      store,
+      worktrees: this.worktrees,
+      expectedRevision,
+      dryRun: options.dryRun === true,
+      nowMs: this.nowMs(),
     });
   }
 
