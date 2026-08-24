@@ -64,7 +64,7 @@ Usage:
   oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
   oma autopilot reset-breaker --session <id> --expected-revision <n>
   oma autopilot doctor --session <id>
-  oma team start --manifest <file> [--worker-mode interactive|headless]
+  oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]
   oma team status --team <id>
   oma team stop --team <id>
   oma team supervise --team <id>

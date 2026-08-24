@@ -12,7 +12,7 @@ import { Result, err, ok } from '../runtime/types';
 import { createDeliveryEvidence, DeliveryValidator } from './delivery';
 import { IntegrationManager } from './integration';
 import { probeProcessPid, probeTmuxSession } from './liveness';
-import { validateTeamManifest } from './manifest';
+import { readTeamManifest } from './manifest';
 import { FastForwardPublisherV1 } from './publisher';
 import { requireDeadProof } from './reclaim';
 import { TeamStateStore } from './state';
@@ -190,19 +190,7 @@ export class TeamOrchestrator {
     manifestPath: string,
     workerMode: 'interactive' | 'headless',
   ): Promise<Result<StartTeamView, RuntimeError>> {
-    if (!fs.existsSync(manifestPath)) {
-      return err(runtimeError('E_MANIFEST_INVALID', `manifest not found: ${manifestPath}`));
-    }
-    let raw: unknown;
-    try {
-      raw = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    } catch (error) {
-      return err(runtimeError(
-        'E_MANIFEST_INVALID',
-        `cannot parse manifest: ${error instanceof Error ? error.message : String(error)}`,
-      ));
-    }
-    const validated = validateTeamManifest(raw, this.workspaceRoot);
+    const validated = readTeamManifest(manifestPath, this.workspaceRoot);
     if (!validated.ok) return validated;
 
     const ownerNonce = this.tokenFactory();
