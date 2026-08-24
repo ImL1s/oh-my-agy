@@ -6,6 +6,11 @@ import { acquireOwnerLock, releaseOwnerLock } from '../runtime/lock';
 import { StateStore } from '../runtime/state-store';
 import { Result, Snapshot, err, ok } from '../runtime/types';
 import {
+  isWorkerReadinessPhaseV1,
+  readinessPhaseForExecutionState,
+  withMonotonicReadinessPhase,
+} from './provider-readiness';
+import {
   AgentProgressV1,
   CanonicalTeamManifestV1,
   CommandEvidenceV1,
@@ -251,15 +256,21 @@ export class TeamStateStore {
         generation: input.generation,
       }));
     }
+    const nextPhase = readinessPhaseForExecutionState(input.nextState);
+    const nextBinding: WorkerAuthorityBindingV1 = {
+      ...binding!,
+      state: input.nextState,
+      transitionSequence: input.expectedSequence + 1,
+    };
+    // 僅對已有合法 phase 的 binding 單調推進；legacy（無欄位）保持省略。
+    const phased = isWorkerReadinessPhaseV1(binding!.readinessPhase) && nextPhase !== undefined
+      ? withMonotonicReadinessPhase(nextBinding, nextPhase)
+      : nextBinding;
     return this.store.compareAndSwap(this.key, input.expectedRevision, (current) => ({
       ...current,
       workerBindings: {
         ...(current.workerBindings ?? {}),
-        [input.taskId]: {
-          ...binding!,
-          state: input.nextState,
-          transitionSequence: input.expectedSequence + 1,
-        },
+        [input.taskId]: phased,
       },
     }));
   }
@@ -283,23 +294,31 @@ export class TeamStateStore {
       return err(runtimeError('E_REVISION_CONFLICT', 'Worker heartbeat identity is stale or foreign'));
     }
     // Deliberately does not renew task.claim.leasedUntilMs.
-    return this.store.compareAndSwap(this.key, expectedRevision, (current) => ({
-      ...current,
-      heartbeats: {
-        ...current.heartbeats,
-        [receipt.taskId]: {
-          schemaVersion: 1,
-          workerId: receipt.taskId,
-          ownerNonce: current.ownerNonce,
-          workerNonce: receipt.pane?.workerNonce ?? receipt.providerReceiptHash,
-          process: receipt.process ?? { pid: 0, startMarker: `native:${receipt.providerReceiptHash}` },
-          paneId: receipt.pane?.paneId ?? '',
-          recordedAtMs: receipt.recordedAtMs,
-          generation: receipt.generation,
-          providerReceiptHash: receipt.providerReceiptHash,
+    // startMarker 不再編碼 `tmux:<session>`，必須沿用 pane/既有心跳的 sessionName。
+    return this.store.compareAndSwap(this.key, expectedRevision, (current) => {
+      const prior = current.heartbeats[receipt.taskId];
+      const sessionName = receipt.pane?.sessionName ?? prior?.sessionName;
+      const providerBasename = prior?.providerBasename;
+      return {
+        ...current,
+        heartbeats: {
+          ...current.heartbeats,
+          [receipt.taskId]: {
+            schemaVersion: 1,
+            workerId: receipt.taskId,
+            ownerNonce: current.ownerNonce,
+            workerNonce: receipt.pane?.workerNonce ?? receipt.providerReceiptHash,
+            process: receipt.process ?? { pid: 0, startMarker: `native:${receipt.providerReceiptHash}` },
+            paneId: receipt.pane?.paneId ?? '',
+            recordedAtMs: receipt.recordedAtMs,
+            generation: receipt.generation,
+            providerReceiptHash: receipt.providerReceiptHash,
+            ...(sessionName === undefined ? {} : { sessionName }),
+            ...(providerBasename === undefined ? {} : { providerBasename }),
+          },
         },
-      },
-    }));
+      };
+    });
   }
 
   async completeReadOnlyTask(
@@ -1000,7 +1019,9 @@ function validateWorkerBinding(
       : binding.provider === 'tmux_agy'
         ? binding.conversation === undefined && binding.process !== undefined && binding.pane !== undefined
         : false;
-  return common && processValid && paneValid && providerValid
+  const phaseValid = binding.readinessPhase === undefined
+    || isWorkerReadinessPhaseV1(binding.readinessPhase);
+  return common && processValid && paneValid && providerValid && phaseValid
     ? null
     : runtimeError('E_CORRUPT_STATE', 'Worker authority binding is invalid or provider-inconsistent');
 }

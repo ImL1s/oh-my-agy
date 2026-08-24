@@ -19,13 +19,18 @@ import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
 import { createDeliveryEvidence, DeliveryValidator } from './delivery';
 import { IntegrationManager } from './integration';
-import { probeProcessPid, probeTmuxSession } from './liveness';
+import { probeRecordedWorkerProcess, probeTmuxSession } from './liveness';
 import { readTeamManifest } from './manifest';
 import { FastForwardPublisherV1 } from './publisher';
 import { requireDeadProof } from './reclaim';
 import { TeamStateStore } from './state';
 import { assessWorker, SupervisorAssessment } from './supervisor';
-import { TmuxController } from './tmux';
+import {
+  providerChildProcessMarker,
+  providerLivenessFromResolution,
+  resolveProviderChild,
+  TmuxController,
+} from './tmux';
 import {
   CanonicalTeamManifestV1,
   CanonicalTeamTaskV1,
@@ -372,7 +377,15 @@ export class TeamOrchestrator {
         ? undefined
         : inferSessionName(this.sessionNamePrefix, aggregate.teamId, task.id, hb);
       const paneLiveness = sessionName === undefined ? 'unknown' : probeTmuxSession(sessionName);
-      const processLiveness = hb === undefined ? 'unknown' : probeProcessPid(hb.process.pid);
+      // pane 存活時必須再證明路由執行檔子程序；失敗為 unknown（不得把 pane shell 當 alive）。
+      // session 已死則改探 recorded process，才能組成 DeadProof。
+      let processLiveness = hb === undefined ? 'unknown' : probeRecordedWorkerProcess(hb.process);
+      const expectedBasename = hb?.providerBasename?.trim() ?? '';
+      if (sessionName !== undefined && hb !== undefined && paneLiveness === 'alive' && expectedBasename !== '') {
+        processLiveness = providerLivenessFromResolution(
+          resolveProviderChild(sessionName, { expectedBasename }),
+        ).processLiveness;
+      }
       const assessment = assessWorker(task, hb, this.nowMs(), paneLiveness, processLiveness);
       assessments[task.id] = assessment;
       if (assessment.status === 'awaiting_interaction') {
@@ -414,7 +427,7 @@ export class TeamOrchestrator {
       ? probeTmuxSession(sessionName)
       : (paneLiveness ?? 'unknown');
     const proc = hb !== undefined
-      ? probeProcessPid(hb.process.pid)
+      ? probeRecordedWorkerProcess(hb.process)
       : (processLiveness ?? 'unknown');
     // 若重探結果與呼叫端矛盾且呼叫端宣稱 dead，仍以重探為準
     const proof = requireDeadProof(pane, proc);
@@ -981,17 +994,20 @@ export class TeamOrchestrator {
       return pane;
     }
 
-    const panePid = readPanePid(sessionName);
+    // 記錄 provider 子程序 pid + ps lstart（PID-reuse-safe）；禁止合成 `tmux:` 標記。
+    const expectedBasename = path.basename(routeReceipt.resolvedExecutable);
+    const resolvedChild = resolveProviderChild(sessionName, { expectedBasename });
+    const processIdentity = providerChildProcessMarker(resolvedChild)
+      ?? paneProcessFallback(sessionName);
     const heartbeat: SupervisorHeartbeatV1 = {
       schemaVersion: 1,
       workerId,
       ownerNonce: input.ownerNonce,
       workerNonce,
-      process: {
-        pid: panePid ?? process.pid,
-        startMarker: `tmux:${sessionName}`,
-      },
+      process: processIdentity,
       paneId: pane.value.paneId,
+      sessionName,
+      providerBasename: expectedBasename,
       recordedAtMs: this.nowMs(),
     };
     const hb = await input.store.recordHeartbeat(claimed.value.revision, heartbeat);
@@ -1151,11 +1167,27 @@ function inferSessionName(
   workerId: string,
   heartbeat: SupervisorHeartbeatV1,
 ): string {
+  if (heartbeat.sessionName !== undefined && /^[A-Za-z0-9_.-]+$/.test(heartbeat.sessionName)) {
+    return heartbeat.sessionName;
+  }
   if (heartbeat.process.startMarker.startsWith('tmux:')) {
     return heartbeat.process.startMarker.slice('tmux:'.length);
   }
   const base = prefix ?? `oma-${teamId}`;
   return sanitizeSession(`${base}-${workerId}-g1`);
+}
+
+function paneProcessFallback(sessionName: string): { pid: number; startMarker: string } {
+  const panePid = readPanePid(sessionName);
+  if (panePid === null) {
+    return { pid: 0, startMarker: '' };
+  }
+  const start = spawnSync('ps', ['-o', 'lstart=', '-p', String(panePid)], {
+    encoding: 'utf8',
+    shell: false,
+  });
+  const startMarker = start.status === 0 ? start.stdout.trim() : '';
+  return { pid: panePid, startMarker };
 }
 
 function gitHead(cwd: string): Result<string, RuntimeError> {
@@ -1192,7 +1224,7 @@ function readPanePid(sessionName: string): number | null {
   const result = spawnSync(
     'tmux',
     ['list-panes', '-t', sessionName, '-F', '#{pane_pid}'],
-    { encoding: 'utf8' },
+    { encoding: 'utf8', shell: false },
   );
   if (result.status !== 0) return null;
   const line = result.stdout.trim().split('\n')[0];

@@ -75,6 +75,16 @@ export interface ProcessMarkerV1 {
   startMarker: string;
 }
 
+/**
+ * tmux worker 就緒階段（對齊 OMG StartupPhase）。
+ * 單調不倒退；舊 binding 省略此欄視為 legacy。
+ */
+export type WorkerReadinessPhaseV1 =
+  | 'pane_created'
+  | 'provider_spawned'
+  | 'provider_ready'
+  | 'task_dispatched';
+
 export interface TmuxPaneIdentityV1 {
   sessionName: string;
   paneId: string;
@@ -131,6 +141,8 @@ export interface WorkerAuthorityBindingV1 {
   conversation?: NativeConversationReceiptV1;
   process?: ProcessMarkerV1;
   pane?: WorkerPaneReceiptV1;
+  /** 省略時視為 legacy（不得當 provider-ready）。 */
+  readinessPhase?: WorkerReadinessPhaseV1;
   state: WorkerExecutionStateV1;
   transitionSequence: number;
   boundAtMs: number;
@@ -189,6 +201,10 @@ export interface SupervisorHeartbeatV1 {
   recordedAtMs: number;
   generation?: number;
   providerReceiptHash?: string;
+  /** 新心跳寫入 session 名；舊資料仍可能只靠 startMarker `tmux:` 前綴。 */
+  sessionName?: string;
+  /** 路由執行檔 basename；supervise 在 pane 存活時用來比對 provider 子程序。 */
+  providerBasename?: string;
 }
 
 export interface AgentProgressV1 {

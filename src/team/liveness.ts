@@ -17,7 +17,7 @@ export function probeProcessPid(pid: number): ProcessLiveness {
   }
 }
 
-/** PID reuse-safe process probe used by persistent supervisor adoption. */
+/** PID-reuse-safe：pid + startMarker（ps lstart）必須同時相符。 */
 export function probeProcessMarker(marker: Readonly<ProcessMarkerV1>): ProcessLiveness {
   if (!Number.isSafeInteger(marker.pid) || marker.pid <= 0 || marker.startMarker.trim() === '') {
     return 'unknown';
@@ -33,8 +33,17 @@ export function probeProcessMarker(marker: Readonly<ProcessMarkerV1>): ProcessLi
 
 export function probeTmuxSession(sessionName: string): ProcessLiveness {
   if (sessionName.trim() === '') return 'unknown';
-  const result = spawnSync('tmux', ['has-session', '-t', sessionName], { encoding: 'utf8' });
+  const result = spawnSync('tmux', ['has-session', '-t', sessionName], { encoding: 'utf8', shell: false });
   if (result.status === 0) return 'alive';
   if (result.status === 1) return 'dead';
   return 'unknown';
+}
+
+/**
+ * 舊心跳 `startMarker = tmux:<session>` 無法做 start-time 比對，只探 PID。
+ * 新標記含 ps lstart，走 PID-reuse-safe probe。
+ */
+export function probeRecordedWorkerProcess(marker: Readonly<ProcessMarkerV1>): ProcessLiveness {
+  if (marker.startMarker.startsWith('tmux:')) return probeProcessPid(marker.pid);
+  return probeProcessMarker(marker);
 }

@@ -620,6 +620,7 @@ export class TeamWorkerRuntimeHost implements WorkerLoopHost {
         ?? sha256(`oma-worker:${this.options.teamId}:${this.options.taskId}:${this.options.generation}`),
       process: processMarker,
       ...(this.options.pane === undefined ? {} : { pane: this.options.pane }),
+      ...(provider === 'tmux_agy' ? { readinessPhase: 'pane_created' as const } : {}),
       state: 'claimed',
       transitionSequence: 0,
       boundAtMs: this.nowMs(),

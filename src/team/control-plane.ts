@@ -14,6 +14,7 @@ import {
   TeamAggregateV1,
   WorkerAuthorityBindingV1,
   WorkerPaneReceiptV1,
+  WorkerReadinessPhaseV1,
 } from './types';
 
 export interface PrepareWorkerControlInputV1 {
@@ -32,6 +33,7 @@ export interface PrepareWorkerControlInputV1 {
   pane?: WorkerPaneReceiptV1;
   conversationId?: string;
   boundedDuration?: string;
+  readinessPhase?: WorkerReadinessPhaseV1;
 }
 
 export interface PreparedWorkerControlV1 {
@@ -86,6 +88,9 @@ export function prepareWorkerControl(
     providerReceiptHash: receipt.receiptDigest,
     ...(input.process === undefined ? {} : { process: input.process }),
     ...(input.pane === undefined ? {} : { pane: input.pane }),
+    ...(input.readinessPhase !== undefined
+      ? { readinessPhase: input.readinessPhase }
+      : envelope.provider === 'tmux_agy' ? { readinessPhase: 'pane_created' as const } : {}),
     state: 'claimed',
     transitionSequence: 0,
     boundAtMs: input.boundAtMs,

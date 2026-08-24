@@ -205,6 +205,9 @@ export function sessionNameFromHeartbeat(
   teamId: string,
   heartbeat: SupervisorHeartbeatV1,
 ): string {
+  if (heartbeat.sessionName !== undefined && SESSION_NAME.test(heartbeat.sessionName)) {
+    return heartbeat.sessionName;
+  }
   if (heartbeat.process.startMarker.startsWith('tmux:')) {
     return heartbeat.process.startMarker.slice('tmux:'.length);
   }
