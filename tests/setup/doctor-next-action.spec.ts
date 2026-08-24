@@ -312,12 +312,18 @@ describe('oma doctor --fix (#50)', () => {
       native: false,
       strictPlugin: true,
       fix: true,
+      strict: false,
+      conflicts: false,
+      pluginDir: undefined,
     });
     expect(parseDoctorCliOptions(['--json', '--native', '--no-strict-plugin', '--fix'])).toEqual({
       asJson: true,
       native: true,
       strictPlugin: false,
       fix: true,
+      strict: false,
+      conflicts: false,
+      pluginDir: undefined,
     });
     expect(() => parseDoctorCliOptions(['--fix', '--fix'])).toThrow(/duplicate option --fix/);
     expect(() => parseDoctorCliOptions(['--unknown'])).toThrow(/unexpected argument/);

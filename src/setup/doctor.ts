@@ -867,7 +867,12 @@ function checkSkillManifestDrift(packageRoot: string): DoctorCheckV1 {
   );
 }
 
-function checkOmcAutopilotCollision(homeDir: string): DoctorCheckV1 {
+/**
+ * OMC 裸 `/autopilot` 碰撞列。`oma doctor conflicts` 的 `competing_plugin_autopilot`
+ * 必須重用此實作，不得另寫一套路徑邏輯（#65）。
+ * 設計概念映射：OMC 佔用 bare `/autopilot`；OMA 主路徑為 `/oh-my-agy:autopilot`。
+ */
+export function checkOmcAutopilotCollision(homeDir: string): DoctorCheckV1 {
   const omcPaths = [
     path.join(homeDir, '.claude', 'skills', 'autopilot', 'SKILL.md'),
     path.join(homeDir, '.claude', 'plugins', 'cache', 'omc'),
@@ -1077,4 +1082,16 @@ export function doctorReportToJsonValue(report: DoctorReportV1): DoctorReportV1 
     json.nativeCapabilities = report.nativeCapabilities;
   }
   return json;
+}
+
+/**
+ * `--strict`：把「僅 warn」的 exit 2 升級為 1。未加旗標時既有 exit code 不變。
+ * 設計概念映射：OMG `omg doctor --strict` 把 soft/compat WARN 升級為 FAIL。
+ */
+export function applyDoctorStrictExit(
+  report: DoctorReportV1,
+  strict: boolean,
+): DoctorReportV1 {
+  if (!strict || report.exitCode !== 2) return report;
+  return { ...report, exitCode: 1 };
 }

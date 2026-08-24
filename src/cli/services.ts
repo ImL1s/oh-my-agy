@@ -11,10 +11,12 @@ import { verifyPluginActive, PluginCommandAdapter } from '../setup/plugin';
 import { agyPluginListArgs, PluginSetupTransaction } from '../setup/transaction';
 import {
   DoctorReportV1,
+  applyDoctorStrictExit,
   doctorReportToJsonValue,
   doctorReportToLines,
   runDoctor,
 } from '../setup/doctor';
+import { runDoctorConflicts } from '../setup/doctor-conflicts';
 import {
   applyOwnedDoctorFix,
   assertNoGitSpawn,
@@ -43,6 +45,11 @@ export interface DoctorCliOptions {
   readonly native: boolean;
   readonly strictPlugin: boolean;
   readonly fix: boolean;
+  /** `oma doctor --strict`：warn 列升級為 exit 1（#65）。 */
+  readonly strict: boolean;
+  /** `oma doctor conflicts` 唯讀共存子指令。 */
+  readonly conflicts: boolean;
+  readonly pluginDir: string | undefined;
 }
 
 class DoctorCliUsageError extends Error {}
@@ -374,6 +381,23 @@ export function createDefaultServices(
         }
         return 2;
       }
+      if (doctorOptions.conflicts) {
+        const conflictsReport = runDoctorConflicts({
+          packageRoot,
+          packageVersion: version,
+          pluginDir: doctorOptions.pluginDir,
+          homeDir: options.homeDir,
+          cwd,
+          strict: doctorOptions.strict,
+          antigravityConfigRoot: options.antigravityConfigRoot,
+        });
+        if (doctorOptions.asJson) {
+          stdout(`${JSON.stringify(doctorReportToJsonValue(conflictsReport), null, 2)}\n`);
+        } else {
+          stdout(`${doctorReportToLines(conflictsReport).join('\n')}\n`);
+        }
+        return conflictsReport.exitCode;
+      }
       const adapter = options.pluginAdapter ?? defaultAgyPluginAdapter(agyCommand);
       const nativeAdapter = options.pluginAdapter ?? defaultAgyPluginAdapter(
         agyCommand,
@@ -428,8 +452,9 @@ export function createDefaultServices(
         return 1;
       }
       if (!doctorOptions.fix) {
-        writeDoctorReport(before.value);
-        return before.value.exitCode;
+        const report = applyDoctorStrictExit(before.value, doctorOptions.strict);
+        writeDoctorReport(report);
+        return report.exitCode;
       }
 
       // `--fix`：先印計畫，再一次性 setupCommand + plugin readback，永不 git、不重試。
@@ -474,23 +499,24 @@ export function createDefaultServices(
         stderr(formatCliError(after.error.code, after.error.message));
         return 1;
       }
-      const changed = doctorStatusDiff(before.value, after.value);
+      const afterReport = applyDoctorStrictExit(after.value, doctorOptions.strict);
+      const changed = doctorStatusDiff(before.value, afterReport);
       if (doctorOptions.asJson) {
         stdout(`${JSON.stringify(doctorFixResultToJsonValue({
           plan,
           setupExitCode: applied.setupExitCode,
           setupOutput,
           before: doctorReportToJsonValue(before.value),
-          after: doctorReportToJsonValue(after.value),
+          after: doctorReportToJsonValue(afterReport),
           changed,
           retried: false,
         }), null, 2)}\n`);
       } else {
         stdout('\n=== after ===\n');
-        stdout(`${doctorReportToLines(after.value).join('\n')}\n`);
+        stdout(`${doctorReportToLines(afterReport).join('\n')}\n`);
         stdout(`${doctorFixDiffToLines(changed).join('\n')}\n`);
       }
-      return after.value.exitCode;
+      return afterReport.exitCode;
     },
     async skillCommand(argv) {
       // 設計概念映射：`oma doctor` 的雙路徑輸出（預設人類可讀，`--json` 才機器格式）。
@@ -576,12 +602,38 @@ export function createDefaultServices(
   return services;
 }
 
-/** `--fix` 為 #50 安全修復旗標；重複或未知旗標仍 fail-closed。 */
+/**
+ * doctor argv：既有 `--json --native --no-strict-plugin --fix` 外，#65 新增
+ * `conflicts` 子指令、`--plugin-dir <path>`、`--strict`。未知／重複仍 fail-closed。
+ */
 export function parseDoctorCliOptions(argv: readonly string[]): DoctorCliOptions {
-  const allowed = new Set(['--json', '--native', '--no-strict-plugin', '--fix']);
+  const booleanFlags = new Set(['--json', '--native', '--no-strict-plugin', '--fix', '--strict']);
   const seen = new Set<string>();
-  for (const arg of argv) {
-    if (!allowed.has(arg)) {
+  let conflicts = false;
+  let pluginDir: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index] ?? '';
+    if (arg === 'conflicts') {
+      if (conflicts) {
+        throw new DoctorCliUsageError('doctor: duplicate option conflicts');
+      }
+      conflicts = true;
+      continue;
+    }
+    if (arg === '--plugin-dir') {
+      if (seen.has('--plugin-dir')) {
+        throw new DoctorCliUsageError('doctor: duplicate option --plugin-dir');
+      }
+      seen.add('--plugin-dir');
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith('--') || value.includes('\0') || value.trim() === '') {
+        throw new DoctorCliUsageError('doctor: --plugin-dir requires a path');
+      }
+      pluginDir = value;
+      index += 1;
+      continue;
+    }
+    if (!booleanFlags.has(arg)) {
       throw new DoctorCliUsageError(`doctor: unexpected argument ${JSON.stringify(arg)}`);
     }
     if (seen.has(arg)) {
@@ -589,11 +641,26 @@ export function parseDoctorCliOptions(argv: readonly string[]): DoctorCliOptions
     }
     seen.add(arg);
   }
+  if (pluginDir !== undefined && !conflicts) {
+    throw new DoctorCliUsageError('doctor: --plugin-dir is only valid with conflicts');
+  }
+  if (conflicts && seen.has('--fix')) {
+    throw new DoctorCliUsageError('doctor: conflicts is read-only; do not combine with --fix');
+  }
+  if (conflicts && seen.has('--native')) {
+    throw new DoctorCliUsageError('doctor: conflicts does not accept --native');
+  }
+  if (conflicts && seen.has('--no-strict-plugin')) {
+    throw new DoctorCliUsageError('doctor: conflicts does not accept --no-strict-plugin');
+  }
   return {
     asJson: seen.has('--json'),
     native: seen.has('--native'),
     strictPlugin: !seen.has('--no-strict-plugin'),
     fix: seen.has('--fix'),
+    strict: seen.has('--strict'),
+    conflicts,
+    pluginDir,
   };
 }
 

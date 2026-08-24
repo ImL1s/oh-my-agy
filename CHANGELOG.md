@@ -53,6 +53,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `oma doctor conflicts [--json] [--plugin-dir <path>]`: read-only coexistence
+  checks for duplicate hook registration (`hooks.json` vs `.agents/hooks.json`
+  and cross-plugin manifests), MCP server name collisions, duplicate slash
+  skill names, and competing-plugin autopilot (reuses `slash_collision`).
+  Conflicts default to warn with exit 0. `oma doctor --strict` (and
+  `oma doctor conflicts --strict`) upgrades warn-only results to exit 1.
+  A missing `--plugin-dir` path prints a readable message and does not
+  crash or mutate plugin/hook config. `--json` uses the existing
+  `DoctorCheckV1` shape. (#65)
+
 - Session skill discovery now reads SKILL.md YAML frontmatter (`name`,
   `description`, `argument-hint`) via a deterministic YAML subset parser
   (`src/modes/skill-frontmatter.ts`; OMC keyword-detector / OMX `$skill`
