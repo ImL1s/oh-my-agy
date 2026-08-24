@@ -11,7 +11,7 @@ Multi-worker Team orchestration: manifest DAG, claims, worktrees, tmux panes, he
 
 | File | Description |
 |------|-------------|
-| `orchestrator.ts` | start → claim → worktree → tmux → tick |
+| `orchestrator.ts` | start → claim → worktree → tmux → tick → wait |
 | `api-interop.ts` | OMX-shaped `team api` P0 dispatch (mailbox/claim) |
 | `manifest.ts` | Manifest validation / cycles / scope |
 | `commands.ts` | Typed team CLI surface |

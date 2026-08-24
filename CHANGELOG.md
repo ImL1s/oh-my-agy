@@ -58,6 +58,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   description, sorts stably by UTF-8 name, and returns an empty list with
   exit 0 for empty or unmatched queries. `oma skill show` output is
   unchanged. No new npm dependency. (#53)
+- `oma team wait --team <id> [--timeout-ms <n>] [--poll-interval-ms <n>] [--json]`:
+  read-only convergence poll via `TeamOrchestrator.waitForConvergence()`.
+  Bounded like HUD watch (interval 50–60000ms, hard iteration cap, AbortSignal).
+  `stopped_by` is `converged` (exit 0), `timeout` (non-zero, workers untouched),
+  or `aborted` (SIGINT; no leftover timers). Out-of-range `--poll-interval-ms`
+  is `E_VALIDATOR_REJECTED`. Wait never ticks or cancels workers. (#55)
 
 - Claude Code plugin MCP wiring: `.claude-plugin/.mcp.json` uses
   `${CLAUDE_PLUGIN_ROOT}` (not Antigravity `${extensionPath}`), and

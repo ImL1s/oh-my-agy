@@ -1,11 +1,19 @@
 /**
- * 設計概念映射：TeamOrchestrator 對齊 OMC/OMX Team 編排（start → claim → worktree → tmux → heartbeat → supervise/reclaim → deliver → tick）。
+ * 設計概念映射：TeamOrchestrator 對齊 OMC/OMX Team 編排
+ * （start → claim → worktree → tmux → heartbeat → supervise/reclaim → deliver → tick → wait）。
  */
 import { spawnSync } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { sha256 } from '../runtime/atomic';
+import {
+  HUD_WATCH_INTERVAL_MS_DEFAULT,
+  HUD_WATCH_INTERVAL_MS_MAX,
+  HUD_WATCH_INTERVAL_MS_MIN,
+  HUD_WATCH_MAX_ITERATIONS,
+  boundedSleep,
+} from '../hud/watch';
 import { HostCapabilityProfileV1 } from '../native/capability-profile';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
@@ -24,6 +32,7 @@ import {
   SupervisorHeartbeatV1,
   TeamAggregateV1,
   TeamTaskRuntimeV1,
+  TeamTaskStatus,
 } from './types';
 import { AuthorityLeaseStore, pathKeysFromWriteScope } from './authority-lease';
 import { GitWorktreeManager, ManagedWorktreeV1, resolveGitWorktreeIdentity } from './worktree';
@@ -139,6 +148,46 @@ export interface TickView {
   teamId: string;
   aggregateRevision: number;
   started: StartedWorkerView[];
+}
+
+/** 與 HUD `TERMINAL_TEAM_STATUSES` / cancel `TEAM_TERMINAL_STATUSES` 同一終局集合。 */
+const TEAM_WAIT_TERMINAL_STATUSES: ReadonlySet<TeamTaskStatus> = new Set([
+  'completed',
+  'blocked_permission',
+  'failed',
+  'cancelled',
+  'fenced_superseded',
+]);
+
+export type TeamWaitStoppedByV1 = 'converged' | 'timeout' | 'aborted';
+
+export interface TeamWaitOptionsV1 {
+  timeoutMs?: number;
+  pollIntervalMs?: number;
+  maxIterations?: number;
+  signal?: AbortSignal;
+  nowMs?: () => number;
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
+}
+
+export interface TeamWaitView {
+  teamId: string;
+  revision: number;
+  stopped_by: TeamWaitStoppedByV1;
+  iterations: number;
+  elapsed_ms: number;
+  tasks: Readonly<Record<string, TeamTaskRuntimeV1>>;
+}
+
+export function isTeamWaitTerminalStatus(status: TeamTaskStatus): boolean {
+  return TEAM_WAIT_TERMINAL_STATUSES.has(status);
+}
+
+function teamTasksHaveConverged(
+  tasks: Readonly<Record<string, TeamTaskRuntimeV1>>,
+): boolean {
+  const values = Object.values(tasks);
+  return values.every((task) => TEAM_WAIT_TERMINAL_STATUSES.has(task.status));
 }
 
 export class TeamOrchestrator {
@@ -545,6 +594,85 @@ export class TeamOrchestrator {
       revision = one.value.revision;
     }
     return ok({ teamId, aggregateRevision: revision, started });
+  }
+
+  /**
+   * 設計概念映射：OMC `omc team wait` / OMX `omx team await` / OMG `omg job wait`
+   * （逾時不取消 worker）。有界輪詢沿用 HUD `watchHud`：interval 50–60000ms、
+   * 迭代上限 10000、AbortSignal 清 timer。wait 唯讀，禁止 tick/stop。
+   */
+  async waitForConvergence(
+    teamId: string,
+    options: Readonly<TeamWaitOptionsV1> = {},
+  ): Promise<Result<TeamWaitView, RuntimeError>> {
+    const intervalMs = options.pollIntervalMs ?? HUD_WATCH_INTERVAL_MS_DEFAULT;
+    const maximum = options.maxIterations ?? HUD_WATCH_MAX_ITERATIONS;
+    if (!Number.isSafeInteger(intervalMs)
+      || intervalMs < HUD_WATCH_INTERVAL_MS_MIN
+      || intervalMs > HUD_WATCH_INTERVAL_MS_MAX) {
+      return err(runtimeError(
+        'E_VALIDATOR_REJECTED',
+        `poll-interval-ms must be between ${HUD_WATCH_INTERVAL_MS_MIN} and ${HUD_WATCH_INTERVAL_MS_MAX}`,
+      ));
+    }
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > HUD_WATCH_MAX_ITERATIONS) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'wait iteration cap is invalid'));
+    }
+    if (options.timeoutMs !== undefined
+      && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 1)) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'timeout-ms must be a positive integer'));
+    }
+    const store = new TeamStateStore(this.stateRoot, this.repoKey, this.workspaceKey, teamId);
+    const nowMs = options.nowMs ?? (() => Date.now());
+    const sleep = options.sleep ?? boundedSleep;
+    const startedAt = nowMs();
+    const deadlineMs = options.timeoutMs === undefined ? undefined : startedAt + options.timeoutMs;
+    let iterations = 0;
+    let lastRevision = 0;
+    let lastTasks: Readonly<Record<string, TeamTaskRuntimeV1>> = {};
+    const view = (stoppedBy: TeamWaitStoppedByV1): TeamWaitView => ({
+      teamId,
+      revision: lastRevision,
+      stopped_by: stoppedBy,
+      iterations,
+      elapsed_ms: Math.max(0, nowMs() - startedAt),
+      tasks: lastTasks,
+    });
+    const refresh = (): Result<void, RuntimeError> => {
+      const snapshot = store.read();
+      if (!snapshot.ok) return err(snapshot.error);
+      lastRevision = snapshot.value.revision;
+      lastTasks = snapshot.value.value.tasks;
+      return ok(undefined);
+    };
+
+    while (iterations < maximum) {
+      if (options.signal?.aborted === true) {
+        if (iterations === 0) {
+          const loaded = refresh();
+          if (!loaded.ok) return err(loaded.error);
+        }
+        return ok(view('aborted'));
+      }
+      const loaded = refresh();
+      if (!loaded.ok) return err(loaded.error);
+      iterations += 1;
+      if (teamTasksHaveConverged(lastTasks)) return ok(view('converged'));
+      if (deadlineMs !== undefined && nowMs() >= deadlineMs) return ok(view('timeout'));
+      if (iterations >= maximum) return ok(view('timeout'));
+      const remainingMs = deadlineMs === undefined ? intervalMs : deadlineMs - nowMs();
+      if (remainingMs <= 0) return ok(view('timeout'));
+      const waitMs = remainingMs < intervalMs ? remainingMs : intervalMs;
+      try {
+        await sleep(waitMs, options.signal);
+      } catch (error) {
+        if (options.signal !== undefined && options.signal.aborted) return ok(view('aborted'));
+        return err(runtimeError('E_RETRYABLE_BLOCKER', 'Team wait poll failed', {
+          cause: error instanceof Error ? error.message : String(error),
+        }));
+      }
+    }
+    return ok(view('timeout'));
   }
 
   setMaxParallelWorkers(value: number): void {
