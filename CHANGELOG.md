@@ -62,6 +62,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   of only reporting `E_NOT_FOUND`. Documented exit codes are unchanged (`1` for
   `E_NOT_FOUND`, `2` for usage rejection, `0` on success).
 
+- Legacy magic spawn (`oma ralph` / `oma uw` / `oma search` without `--`) now
+  TTY-gates child `agy` stdio: interactive terminals inherit host output
+  (OMX/OMG interactive vs headless policy); non-TTY e2e/CI stays silent.
+  Explicit `OMA_LEGACY_STDIO=inherit` or `ignore` still overrides; unknown
+  values fall back to the TTY gate.
+
 ### Fixed
 
 - **Hook diagnostics no longer write to the install directory, and are off by
@@ -76,6 +82,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   state root resolves, and keeps the file bounded by trimming whole lines from
   the head. Redaction behaviour is unchanged — the launch nonce is still only
   ever recorded as a fingerprint.
+
+- Interactive terminals no longer appear hung after `[ralph-mode]` because
+  child stdio was unconditionally ignored unless `OMA_LEGACY_STDIO=inherit`.
 
 ## [0.5.2] — 2026-08-16
 
