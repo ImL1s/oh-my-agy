@@ -37,7 +37,8 @@ Coordinated multi-worker execution (tmux + worktrees + delivery). **Explicit onl
 4. On task complete: commit in worktree → deliver → leader integrates FF.
 5. Tick starts ready dependents after deps complete.
 6. Hung workers: supervise + DeadProof reclaim only.
-7. Stop when done or cancelled (`cancel` skill).
+7. After leader crash/compaction: `oma team resume --team <id> --expected-revision <n>` (adopt healthy workers, fence unproven identity; never restart).
+8. Stop when done or cancelled (`cancel` skill).
 
 ## Safety
 
@@ -72,6 +73,7 @@ oma team start --manifest <path> [--mode headless|interactive]
 oma team status --team <id>
 oma team tick --team <id>
 oma team wait --team <id> [--timeout-ms <n>] [--poll-interval-ms <n>] [--json]
+oma team resume --team <id> --expected-revision <n> [--json]
 oma team worker run --team <id> --task <id> --claim-token <tok> --generation <n>
 oma team deliver --team <id> --task <id> --claim-token <tok> --generation <n> --worktree <path> --expected-revision <n>
 oma team supervise --team <id>

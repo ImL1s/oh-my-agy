@@ -66,6 +66,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `oma team resume --team <id> --expected-revision <n> [--json]`: rebind a
+  returning leader to an existing team via `TeamOrchestrator.resume()`.
+  Acquires (or keeps) the generation-fenced supervisor lease, reconciles each
+  bound worker (`reconcileWorkerObservation`: adopt healthy, fence unproven
+  identity, never restart), and writes a bounded redacted
+  `leader-context.json` beside the aggregate. Repeat resume is idempotent
+  (no extra workers, no generation bump). A live lease held by another
+  supervisor, or a stale `--expected-revision`, is `E_REVISION_CONFLICT`
+  with no state change. Unknown team id is `E_NOT_FOUND`. No destructive
+  git restore/clean. (#60)
 - `oma doctor conflicts [--json] [--plugin-dir <path>]`: read-only coexistence
   checks for duplicate hook registration (`hooks.json` vs `.agents/hooks.json`
   and cross-plugin manifests), MCP server name collisions, duplicate slash

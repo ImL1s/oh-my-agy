@@ -1,12 +1,12 @@
 /**
  * 設計概念映射：TeamOrchestrator 對齊 OMC/OMX Team 編排
- * （start → claim → worktree → tmux → heartbeat → supervise/reclaim → deliver → tick → wait）。
+ * （start → claim → worktree → tmux → heartbeat → supervise/reclaim → deliver → tick → wait → resume）。
  */
 import { spawnSync } from 'child_process';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { sha256 } from '../runtime/atomic';
+import { canonicalJson, sha256 } from '../runtime/atomic';
 import {
   HUD_WATCH_INTERVAL_MS_DEFAULT,
   HUD_WATCH_INTERVAL_MS_MAX,
@@ -27,6 +27,7 @@ import { TeamStateStore } from './state';
 import { assessWorker, SupervisorAssessment } from './supervisor';
 import { teamWorkerLivenessBasenames } from './provider-readiness';
 import {
+  observeTmuxWorkerIdentity,
   providerChildProcessMarker,
   providerLivenessFromResolution,
   resolveProviderChild,
@@ -35,10 +36,13 @@ import {
 import {
   CanonicalTeamManifestV1,
   CanonicalTeamTaskV1,
+  ProcessMarkerV1,
   SupervisorHeartbeatV1,
   TeamAggregateV1,
   TeamTaskRuntimeV1,
   TeamTaskStatus,
+  WorkerAuthorityBindingV1,
+  WorkerPaneReceiptV1,
 } from './types';
 import { AuthorityLeaseStore, pathKeysFromWriteScope } from './authority-lease';
 import { GitWorktreeManager, ManagedWorktreeV1, resolveGitWorktreeIdentity } from './worktree';
@@ -52,11 +56,53 @@ import {
   workerRouteAuthorityPath,
   writeWorkerRouteAuthority,
 } from './route-authority';
+import {
+  LEADER_CONTEXT_MAX_BYTES,
+  TeamLeaderContextV1,
+  leaderContextPath,
+  writeBoundedLeaderContext,
+} from './leader-context';
+import {
+  PersistentTeamSupervisor,
+  WorkerRuntimeObservationV1,
+  reconcileWorkerObservation,
+} from './supervisor-control';
 
 export interface ProviderProfileAuthorityV1 {
   profile: HostCapabilityProfileV1;
   resolvedExecutable: string;
   tmuxReadiness?: TmuxReadinessReceiptV1;
+}
+
+export interface TeamResumeObservationInputV1 {
+  aggregate: TeamAggregateV1;
+  binding: WorkerAuthorityBindingV1;
+  heartbeat?: SupervisorHeartbeatV1;
+}
+
+export type TeamResumeObserverV1 = (
+  input: Readonly<TeamResumeObservationInputV1>,
+) => WorkerRuntimeObservationV1;
+
+export interface TeamResumeWorkerRefV1 {
+  taskId: string;
+  generation: number;
+}
+
+export interface TeamResumeFencedRefV1 extends TeamResumeWorkerRefV1 {
+  reason: 'block_identity_unproven' | 'fence_stale_observation';
+}
+
+export interface TeamResumeView {
+  teamId: string;
+  revision: number;
+  supervisorGeneration: number;
+  adopted: readonly TeamResumeWorkerRefV1[];
+  fenced: readonly TeamResumeFencedRefV1[];
+  reclaimable: readonly TeamResumeWorkerRefV1[];
+  leaderContextPath: string;
+  leaderContextBytes: number;
+  leaderContextTruncated: boolean;
 }
 
 export interface TeamOrchestratorOptions {
@@ -91,6 +137,17 @@ export interface TeamOrchestratorOptions {
     selectedAt: string;
   }>) => Result<ProviderProfileAuthorityV1, RuntimeError>
     | Promise<Result<ProviderProfileAuthorityV1, RuntimeError>>;
+  /**
+   * 測試注入：resume 對已綁定 worker 的 runtime observation。
+   * production 以 process/pane probe 組 observation，不得盲目採納。
+   */
+  resumeObserver?: TeamResumeObserverV1;
+  /** 測試注入：supervisor lease owner token；預設使用 team ownerNonce。 */
+  supervisorOwnerToken?: string;
+  /** 測試注入：supervisor process 身分；預設為本行程。 */
+  supervisorProcess?: ProcessMarkerV1;
+  /** leader-context.json 位元組上限；預設 LEADER_CONTEXT_MAX_BYTES。 */
+  leaderContextMaxBytes?: number;
 }
 
 export interface StartedWorkerView {
@@ -212,6 +269,10 @@ export class TeamOrchestrator {
   private readonly workerExecutablePath: string;
   private readonly workerBootstrapArgv: readonly string[];
   private readonly providerProfileFactory: TeamOrchestratorOptions['providerProfileFactory'];
+  private readonly resumeObserver: TeamResumeObserverV1 | undefined;
+  private readonly supervisorOwnerToken: string | undefined;
+  private readonly supervisorProcess: ProcessMarkerV1 | undefined;
+  private readonly leaderContextMaxBytes: number;
 
   constructor(options: Readonly<TeamOrchestratorOptions>) {
     this.stateRoot = options.stateRoot;
@@ -230,6 +291,10 @@ export class TeamOrchestrator {
       ?? new GitWorktreeManager(this.workspaceRoot, options.managedWorktreesRoot);
     this.workerExecutablePath = options.workerExecutablePath ?? process.execPath;
     this.providerProfileFactory = options.providerProfileFactory;
+    this.resumeObserver = options.resumeObserver;
+    this.supervisorOwnerToken = options.supervisorOwnerToken;
+    this.supervisorProcess = options.supervisorProcess;
+    this.leaderContextMaxBytes = options.leaderContextMaxBytes ?? LEADER_CONTEXT_MAX_BYTES;
     if (options.workerBootstrapArgv !== undefined) {
       this.workerBootstrapArgv = options.workerBootstrapArgv;
     } else if (options.workerHoldEntryPath !== undefined) {
@@ -694,8 +759,149 @@ export class TeamOrchestrator {
     return ok(view('timeout'));
   }
 
+  /**
+   * 設計概念映射：OMC `omc team resume` / OMX `omx team resume`（preflight-context.json）
+   * / OMG `omg team resume`。取得 generation-fenced supervisor lease 後，對每個已綁定
+   * worker 執行 `reconcileWorkerObservation`：健康者採納不重啟，身分無法證明則圍籬。
+   * 重複 resume 為幂等（不產生 worker、不遞增 worker/supervisor generation）。
+   * 禁止 git reset / git clean。
+   */
+  async resume(
+    teamId: string,
+    expectedRevision: number,
+  ): Promise<Result<TeamResumeView, RuntimeError>> {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      return err(runtimeError('E_VALIDATOR_REJECTED', 'expected-revision must be a non-negative integer'));
+    }
+    const store = new TeamStateStore(this.stateRoot, this.repoKey, this.workspaceKey, teamId);
+    const snapshot = store.read();
+    if (!snapshot.ok) return snapshot;
+    if (snapshot.value.revision !== expectedRevision) {
+      return err(runtimeError('E_REVISION_CONFLICT', 'Team state revision changed', {
+        expectedRevision,
+        actualRevision: snapshot.value.revision,
+      }));
+    }
+
+    const nowMs = this.nowMs();
+    const ownerToken = this.supervisorOwnerToken ?? snapshot.value.value.ownerNonce;
+    const processMarker = this.supervisorProcess ?? {
+      pid: process.pid,
+      startMarker: `${process.pid}:${Math.floor(nowMs - process.uptime() * 1000)}`,
+    };
+    const supervisor = new PersistentTeamSupervisor({
+      store,
+      ownerToken,
+      process: processMarker,
+      leaseMs: this.leaseMs,
+    });
+    const ownerTokenDigest = sha256(ownerToken);
+    const currentSupervisor = snapshot.value.value.supervisor;
+    const heldByUs = currentSupervisor !== undefined
+      && currentSupervisor.ownerTokenDigest === ownerTokenDigest
+      && currentSupervisor.leasedUntilMs > nowMs;
+    const leased = heldByUs
+      ? snapshot
+      : await supervisor.acquire(expectedRevision, nowMs);
+    if (!leased.ok) return leased;
+
+    let revision = leased.value.revision;
+    let aggregate = leased.value.value;
+    const adopted: TeamResumeWorkerRefV1[] = [];
+    const fenced: TeamResumeFencedRefV1[] = [];
+    const reclaimable: TeamResumeWorkerRefV1[] = [];
+    const bindings = aggregate.workerBindings ?? {};
+    for (const taskId of Object.keys(bindings).sort()) {
+      const binding = bindings[taskId]!;
+      const observation = this.observeBoundWorker(aggregate, binding);
+      const reconciliation = reconcileWorkerObservation(aggregate, observation);
+      if (reconciliation.action === 'adopt' || reconciliation.action === 'terminal_reconciled') {
+        adopted.push({ taskId, generation: binding.generation });
+        continue;
+      }
+      if (reconciliation.action === 'reclaim_generation_plus_one') {
+        reclaimable.push({ taskId, generation: binding.generation });
+        continue;
+      }
+      if (reconciliation.action !== 'block_identity_unproven'
+        && reconciliation.action !== 'fence_stale_observation') {
+        continue;
+      }
+      fenced.push({
+        taskId,
+        generation: binding.generation,
+        reason: reconciliation.action,
+      });
+      const status = aggregate.tasks[taskId]?.status;
+      if (status !== 'in_progress' && status !== 'awaiting_interaction') continue;
+      const updated = await store.setTaskStatus(taskId, revision, 'orphan_identity_unproven');
+      if (!updated.ok) return updated;
+      revision = updated.value.revision;
+      aggregate = updated.value.value;
+    }
+
+    const contextPath = leaderContextPath(store.teamDirectory());
+    const stateRootResolved = path.resolve(this.stateRoot);
+    const resolvedContext = path.resolve(contextPath);
+    if (resolvedContext !== stateRootResolved
+      && !resolvedContext.startsWith(`${stateRootResolved}${path.sep}`)) {
+      return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'leader-context.json escapes the state root'));
+    }
+    const context: TeamLeaderContextV1 = {
+      schemaVersion: 1,
+      store_kind: 'team_leader_context',
+      teamId,
+      revision,
+      supervisorGeneration: aggregate.supervisor?.generation ?? 0,
+      recordedAtMs: nowMs,
+      adopted,
+      fenced,
+      reclaimable,
+    };
+    const written = writeBoundedLeaderContext(contextPath, context, this.leaderContextMaxBytes);
+    if (!written.ok) return written;
+
+    return ok({
+      teamId,
+      revision,
+      supervisorGeneration: aggregate.supervisor?.generation ?? 0,
+      adopted,
+      fenced,
+      reclaimable,
+      leaderContextPath: contextPath,
+      leaderContextBytes: written.value.bytes,
+      leaderContextTruncated: written.value.truncated,
+    });
+  }
+
   setMaxParallelWorkers(value: number): void {
     this.maxParallelWorkers = Math.max(1, value);
+  }
+
+  /**
+   * 對已綁定 worker 組 runtime observation。測試可注入 resumeObserver。
+   * 設計概念映射：OMC/OMX resume 採納前必須核對 process/pane 身分，PID reuse 不得視為健康。
+   */
+  private observeBoundWorker(
+    aggregate: TeamAggregateV1,
+    binding: WorkerAuthorityBindingV1,
+  ): WorkerRuntimeObservationV1 {
+    if (this.resumeObserver !== undefined) {
+      return this.resumeObserver({
+        aggregate,
+        binding,
+        ...(aggregate.heartbeats[binding.taskId] === undefined
+          ? {}
+          : { heartbeat: aggregate.heartbeats[binding.taskId] }),
+      });
+    }
+    return defaultObserveBoundWorker(
+      aggregate,
+      binding,
+      this.tmux,
+      this.sessionNamePrefix,
+      this.workerExecutablePath,
+    );
   }
 
   private async releaseLeasesForTask(
@@ -1108,6 +1314,79 @@ export class TeamOrchestrator {
     if (!leases.ok && cleanupError === undefined) cleanupError = leases.error;
     return cleanupError === undefined ? ok(undefined) : err(cleanupError);
   }
+}
+
+/**
+ * production resume observation：tmux 必須證明 worker 子程序（#59），
+ * 不得只因 pane shell 存活就 adopt。設計概念映射：OMC/OMX resume fence。
+ */
+function defaultObserveBoundWorker(
+  aggregate: TeamAggregateV1,
+  binding: WorkerAuthorityBindingV1,
+  tmux: TmuxController,
+  sessionNamePrefix: string | undefined,
+  workerExecutablePath: string,
+): WorkerRuntimeObservationV1 {
+  const heartbeat = aggregate.heartbeats[binding.taskId];
+  const observedProcess = binding.process ?? heartbeat?.process;
+  let processLiveness = observedProcess === undefined
+    ? 'unknown' as const
+    : probeRecordedWorkerProcess(observedProcess);
+
+  let paneLiveness = 'unknown' as ReturnType<typeof probeTmuxSession>;
+  let observedPane = binding.pane;
+  let providerIdentityMatched: boolean | undefined;
+  if (binding.pane !== undefined) {
+    paneLiveness = probeTmuxSession(binding.pane.sessionName);
+    if (paneLiveness === 'alive') {
+      const inspected = tmux.inspectOwnedPane(binding.pane.sessionName);
+      if (!inspected.ok) {
+        paneLiveness = 'unknown';
+      } else {
+        const livePane: WorkerPaneReceiptV1 = {
+          schemaVersion: 1,
+          sessionName: inspected.value.sessionName,
+          paneId: inspected.value.paneId,
+          ownerNonce: inspected.value.ownerNonce,
+          workerNonce: inspected.value.workerNonce,
+        };
+        if (canonicalJson(livePane) !== canonicalJson(binding.pane)) {
+          observedPane = livePane;
+        }
+      }
+      const expectedBasenames = teamWorkerLivenessBasenames(
+        workerExecutablePath,
+        heartbeat?.providerBasename,
+      );
+      if (expectedBasenames.length > 0) {
+        const observed = observeTmuxWorkerIdentity(
+          binding.pane.sessionName,
+          expectedBasenames,
+        );
+        providerIdentityMatched = observed.providerIdentityMatched;
+        processLiveness = observed.processLiveness;
+      }
+    }
+  } else if (heartbeat !== undefined) {
+    paneLiveness = probeTmuxSession(
+      inferSessionName(sessionNamePrefix, aggregate.teamId, binding.taskId, heartbeat),
+    );
+  }
+
+  const observation: WorkerRuntimeObservationV1 = {
+    taskId: binding.taskId,
+    generation: binding.generation,
+    providerReceiptHash: binding.providerReceiptHash,
+    processLiveness,
+    paneLiveness,
+    ...(observedProcess === undefined ? {} : { process: observedProcess }),
+    ...(observedPane === undefined ? {} : { pane: observedPane }),
+    ...(providerIdentityMatched === undefined ? {} : { providerIdentityMatched }),
+  };
+  if (binding.provider === 'antigravity_native') {
+    return { ...observation, nativeConversationHealthy: false };
+  }
+  return observation;
 }
 
 /** deps 皆 completed 且 task claimable 的規格列 */

@@ -93,6 +93,12 @@ export type ParsedTeamCommand =
       json: boolean;
     }
   | {
+      kind: 'resume';
+      teamId: string;
+      expectedRevision: number;
+      json: boolean;
+    }
+  | {
       kind: 'api';
       operation: string;
       inputJson: string;
@@ -124,7 +130,7 @@ export type ParsedTeamCommand =
 
 /**
  * 設計概念映射：Lane B 只做 argv→typed API 轉接；
- * start/status/stop/wait 委派 TeamOrchestrator；resolve-fork 委派 RecoveryForkResolver。
+ * start/status/stop/wait/resume 委派 TeamOrchestrator；resolve-fork 委派 RecoveryForkResolver。
  */
 export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
   const subcommand = argv[0];
@@ -263,6 +269,9 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
   if (subcommand === 'wait') {
     return parseTeamWaitCommand(argv.slice(1));
   }
+  if (subcommand === 'resume') {
+    return parseTeamResumeCommand(argv.slice(1));
+  }
   if (subcommand === 'tick') {
     const flags = parseStrictFlags(argv.slice(1));
     if (!flags.ok) return flags;
@@ -338,6 +347,54 @@ function parseTeamApiCommand(argv: readonly string[]): Result<ParsedTeamCommand,
     return err(runtimeError('E_VALIDATOR_REJECTED', 'team api requires --input JSON'));
   }
   return ok({ kind: 'api', operation, inputJson, json });
+}
+
+/**
+ * 設計概念映射：OMC `omc team resume` / OMX `omx team resume`。
+ * `--json` 為布林旗標，不可走 parseStrictFlags 的 name/value 成對解析。
+ */
+function parseTeamResumeCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  let teamId: string | undefined;
+  let expectedRevision: number | undefined;
+  let json = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--json') {
+      if (json) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --json'));
+      }
+      json = true;
+      continue;
+    }
+    if (token === '--team' || token === '--expected-revision') {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith('--')) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', `team resume ${token} requires a value`));
+      }
+      index += 1;
+      if (token === '--team') {
+        if (teamId !== undefined) {
+          return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --team'));
+        }
+        teamId = value;
+        continue;
+      }
+      if (expectedRevision !== undefined) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --expected-revision'));
+      }
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed) || parsed < 0) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'expected-revision must be a non-negative integer'));
+      }
+      expectedRevision = parsed;
+      continue;
+    }
+    return err(runtimeError('E_VALIDATOR_REJECTED', `Unknown team resume flag: ${token}`));
+  }
+  if (teamId === undefined || expectedRevision === undefined) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'team resume requires --team and --expected-revision'));
+  }
+  return ok({ kind: 'resume', teamId, expectedRevision, json });
 }
 
 /**
@@ -681,6 +738,10 @@ export async function teamCommand(
     return runTeamWaitCommand(parsed.value, options, stdout, stderr);
   }
 
+  if (parsed.value.kind === 'resume') {
+    return runTeamResumeCommand(parsed.value, options, stdout, stderr);
+  }
+
   if (parsed.value.kind === 'tick') {
     const orch = getOrchestrator();
     if (parsed.value.maxParallel !== undefined) {
@@ -881,6 +942,35 @@ function defaultWaitSigintAttach(abort: () => void): () => void {
   return () => {
     process.off('SIGINT', handler);
   };
+}
+
+async function runTeamResumeCommand(
+  parsed: Extract<ParsedTeamCommand, { kind: 'resume' }>,
+  options: Readonly<TeamCommandOptions>,
+  stdout: (value: string) => void,
+  stderr: (value: string) => void,
+): Promise<number> {
+  const orchestrator = options.orchestratorFactory?.(options.context)
+    ?? defaultOrchestrator(options.context, options.providerProfileFactory);
+  const result = await orchestrator.resume(parsed.teamId, parsed.expectedRevision);
+  if (!result.ok) {
+    stderr(formatCliError(result.error.code, result.error.message));
+    return result.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
+  }
+  stdout(`${JSON.stringify({
+    ok: true,
+    kind: 'team-resumed',
+    teamId: result.value.teamId,
+    revision: result.value.revision,
+    supervisorGeneration: result.value.supervisorGeneration,
+    adopted: result.value.adopted,
+    fenced: result.value.fenced,
+    reclaimable: result.value.reclaimable,
+    leaderContextPath: result.value.leaderContextPath,
+    leaderContextBytes: result.value.leaderContextBytes,
+    leaderContextTruncated: result.value.leaderContextTruncated,
+  })}\n`);
+  return 0;
 }
 
 async function runTeamWaitCommand(

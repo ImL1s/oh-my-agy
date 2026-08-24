@@ -27,6 +27,7 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team deliver');
     expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('team wait');
+    expect(r.stdout).toContain('team resume');
     expect(r.stdout).toContain('team worker run');
     expect(r.stdout).toContain('autopilot drive');
     expect(r.stdout).toContain('skill list');
@@ -41,6 +42,14 @@ describe('Structured CLI e2e baseline', () => {
 
   test('TC-S-01e: oma team wait unknown id is E_NOT_FOUND', async () => {
     const r = await runOma(['team', 'wait', '--team', 'no-such-team', '--json']);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('E_NOT_FOUND');
+  });
+
+  test('TC-S-01f: oma team resume unknown id is E_NOT_FOUND', async () => {
+    const r = await runOma([
+      'team', 'resume', '--team', 'no-such-team', '--expected-revision', '0', '--json',
+    ]);
     expect(r.code).toBe(1);
     expect(r.stderr).toContain('E_NOT_FOUND');
   });

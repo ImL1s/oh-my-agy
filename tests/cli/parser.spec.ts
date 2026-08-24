@@ -17,6 +17,11 @@ describe('CLI parser', () => {
     expect(parseCliArguments(['team', ...args])).toEqual({ kind: 'team', args });
   });
 
+  test('routes team resume argv unchanged to the typed team surface', () => {
+    const args = ['resume', '--team', 'alpha', '--expected-revision', '3', '--json'];
+    expect(parseCliArguments(['team', ...args])).toEqual({ kind: 'team', args });
+  });
+
   test.each([
     ['autopilot', 'start', '--', 'ship safely'],
     ['autopilot', 'status', '--session', 's1'],
