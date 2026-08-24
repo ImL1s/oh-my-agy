@@ -27,6 +27,7 @@
     "tests/fixtures/workflow",
     "assets",
     "README.md",
+    "docs/readme",
     "CHANGELOG.md",
     "docs/RELEASE.md",
     "docs/capabilities.md",

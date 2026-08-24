@@ -315,8 +315,8 @@ OMA 的失敗模式幾乎都是刻意的 **fail-closed** 或 **靜默 fail-open*
 | `OMA_SKIP_HOOKS` | 未設定 | 逗號分隔的邏輯 hook 名：`pre-invocation`、`stop`、`session-start`、`post-invocation`（忽略空白與大小寫）。 |
 | `OMA_HOOK_DEBUG` | 未設定（關） | `1` 或 `true` 把已脫敏診斷追加到 `<OMA_STATE_ROOT>/logs/hook-debug.jsonl`（上限 1 MiB）。預設關閉；絕不寫入安裝目錄。未設 `OMA_STATE_ROOT` 時不寫。 |
 | `OMA_LEGACY_STDIO` | TTY 閘門 | Legacy magic spawn 的 stdio。未設定：TTY 上 `inherit`，否則 `ignore`。顯式 `inherit` 或 `ignore` 覆寫；未知值退回 TTY 閘門。 |
-| `OMA_TIMEOUT_MS` | 依路徑 | 正的毫秒數。Managed headless（`oma ralph --` / `OMA_MANAGED_HEADLESS=1`）：預設 `3600000`。Autopilot `drive` 有界 spawn：預設 `30000`。Legacy 透傳：未設定則無逾時。 |
-| `OMA_LAUNCH_POLICY` | `auto` | 裸 host-launch 傳輸：`auto`、`direct`、`tmux` 或 `detached-tmux`（後者對應 `tmux`）。CLI `--direct` / `--tmux` 覆寫（後者優先）。 |
+| `OMA_TIMEOUT_MS` | 依路徑 | 正的毫秒數。有界 headless（`oma search --`，或任一 managed 模式搭配 `OMA_MANAGED_HEADLESS=1`）：預設 `3600000`。預設 `oma ralph --` 為互動式，除非設了該 env 否則忽略此變數。Autopilot `drive` 有界 spawn：預設 `30000`。Legacy 透傳：未設定則無逾時。 |
+| `OMA_LAUNCH_POLICY` | `auto` | 裸 host-launch 傳輸：`auto`、`direct`、`tmux` 或 `detached-tmux`（最後這個對應 `tmux`）。CLI `--direct` / `--tmux` 覆寫（最後一個旗標勝出）。 |
 | `OMA_STATE_ROOT` | 平台預設 | 持久 state root（session aggregate、hook debug log）。macOS：`~/Library/Application Support/oh-my-agy/state`。Windows：`%LOCALAPPDATA%/oh-my-agy/state`。其它：`${XDG_STATE_HOME:-~/.local/state}/oh-my-agy`。 |
 
 ---

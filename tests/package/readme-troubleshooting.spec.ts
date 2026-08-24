@@ -189,4 +189,9 @@ describe('README troubleshooting / env table stay bound to shipped code', () => 
     expect(skill).toMatch(/## Troubleshooting/);
     expect(skill).toMatch(/verb is not shipped/);
   });
+
+  test('translated READMEs ship in the npm package because setup skill links them', () => {
+    const pkg = JSON.parse(readRepoFile('package.json')) as { files: string[] };
+    expect(pkg.files).toEqual(expect.arrayContaining(['README.md', 'docs/readme']));
+  });
 });

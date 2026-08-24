@@ -350,7 +350,7 @@ There is no `OMA_STATE_DIR`; the shipped name is `OMA_STATE_ROOT`.
 | `OMA_SKIP_HOOKS` | unset | Comma-separated logical names to skip: `pre-invocation`, `stop`, `session-start`, `post-invocation` (whitespace and case ignored). |
 | `OMA_HOOK_DEBUG` | unset (off) | `1` or `true` appends redacted diagnostics to `<OMA_STATE_ROOT>/logs/hook-debug.jsonl` (bounded 1 MiB). Off by default; never writes into the install directory. No-ops if `OMA_STATE_ROOT` is unset. |
 | `OMA_LEGACY_STDIO` | TTY-gated | Legacy magic spawn stdio. Unset: `inherit` on TTY, `ignore` otherwise. Explicit `inherit` or `ignore` overrides; unknown values fall back to the TTY gate. |
-| `OMA_TIMEOUT_MS` | path-specific | Positive milliseconds. Managed headless (`oma ralph --` / `OMA_MANAGED_HEADLESS=1`): default `3600000`. Autopilot `drive` bounded spawn: default `30000`. Legacy pass-through: no timeout unless set. |
+| `OMA_TIMEOUT_MS` | path-specific | Positive milliseconds. Bounded headless (`oma search --`, or any managed mode with `OMA_MANAGED_HEADLESS=1`): default `3600000`. Default `oma ralph --` is interactive and ignores this unless that env is set. Autopilot `drive` bounded spawn: default `30000`. Legacy pass-through: no timeout unless set. |
 | `OMA_LAUNCH_POLICY` | `auto` | Bare host-launch transport: `auto`, `direct`, `tmux`, or `detached-tmux` (the last maps to `tmux`). CLI `--direct` / `--tmux` override (last flag wins). |
 | `OMA_STATE_ROOT` | platform default | Durable state root (session aggregate, hook debug log). macOS: `~/Library/Application Support/oh-my-agy/state`. Windows: `%LOCALAPPDATA%/oh-my-agy/state`. Else `${XDG_STATE_HOME:-~/.local/state}/oh-my-agy`. |
 
