@@ -25,6 +25,7 @@ import { FastForwardPublisherV1 } from './publisher';
 import { requireDeadProof } from './reclaim';
 import { TeamStateStore } from './state';
 import { assessWorker, SupervisorAssessment } from './supervisor';
+import { teamWorkerLivenessBasenames } from './provider-readiness';
 import {
   providerChildProcessMarker,
   providerLivenessFromResolution,
@@ -377,13 +378,18 @@ export class TeamOrchestrator {
         ? undefined
         : inferSessionName(this.sessionNamePrefix, aggregate.teamId, task.id, hb);
       const paneLiveness = sessionName === undefined ? 'unknown' : probeTmuxSession(sessionName);
-      // pane 存活時必須再證明路由執行檔子程序；失敗為 unknown（不得把 pane shell 當 alive）。
+      // pane 存活時必須再證明 worker 子程序（#45 後是 node + oma team worker run，
+      // 不是裸 agy）。失敗為 unknown（不得把 pane shell 當 alive）。
       // session 已死則改探 recorded process，才能組成 DeadProof。
       let processLiveness = hb === undefined ? 'unknown' : probeRecordedWorkerProcess(hb.process);
-      const expectedBasename = hb?.providerBasename?.trim() ?? '';
-      if (sessionName !== undefined && hb !== undefined && paneLiveness === 'alive' && expectedBasename !== '') {
+      const expectedBasenames = teamWorkerLivenessBasenames(
+        this.workerExecutablePath,
+        hb?.providerBasename,
+      );
+      if (sessionName !== undefined && hb !== undefined && paneLiveness === 'alive'
+        && expectedBasenames.length > 0) {
         processLiveness = providerLivenessFromResolution(
-          resolveProviderChild(sessionName, { expectedBasename }),
+          resolveProviderChild(sessionName, { expectedBasenames }),
         ).processLiveness;
       }
       const assessment = assessWorker(task, hb, this.nowMs(), paneLiveness, processLiveness);
@@ -994,9 +1000,13 @@ export class TeamOrchestrator {
       return pane;
     }
 
-    // 記錄 provider 子程序 pid + ps lstart（PID-reuse-safe）；禁止合成 `tmux:` 標記。
-    const expectedBasename = path.basename(routeReceipt.resolvedExecutable);
-    const resolvedChild = resolveProviderChild(sessionName, { expectedBasename });
+    // 記錄實際 pane worker（execPath / oma CLI）與可選路由 agy 的聯集身分。
+    // 設計概念映射：#45 後主體是 `oma team worker run`，不是裸 agy（Codex PR94 P1）。
+    const expectedBasenames = teamWorkerLivenessBasenames(
+      this.workerExecutablePath,
+      routeReceipt.resolvedExecutable,
+    );
+    const resolvedChild = resolveProviderChild(sessionName, { expectedBasenames });
     const processIdentity = providerChildProcessMarker(resolvedChild)
       ?? paneProcessFallback(sessionName);
     const heartbeat: SupervisorHeartbeatV1 = {
@@ -1007,7 +1017,7 @@ export class TeamOrchestrator {
       process: processIdentity,
       paneId: pane.value.paneId,
       sessionName,
-      providerBasename: expectedBasename,
+      providerBasename: expectedBasenames[0],
       recordedAtMs: this.nowMs(),
     };
     const hb = await input.store.recordHeartbeat(claimed.value.revision, heartbeat);

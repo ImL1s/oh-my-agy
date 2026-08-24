@@ -9,6 +9,7 @@ import {
   foldWorkerReadinessPhases,
   providerCommMatchesBasename,
   readinessPhaseForExecutionState,
+  teamWorkerLivenessBasenames,
   workerReadinessFromBinding,
   withMonotonicReadinessPhase,
 } from '../../src/team/provider-readiness';
@@ -291,6 +292,26 @@ describe('resolveProviderChild', () => {
     expect(resolved.status).toBe('orphan');
     expect(resolved.matched).toBeUndefined();
     expect(providerChildProcessMarker(resolved)).toBeUndefined();
+  });
+
+  test('production worker is node team-worker-run, not routed agy', () => {
+    // #45 後 pane 主體是 process.execPath + oma team worker run；只找 agy 會把活 worker 判 orphan。
+    expect(teamWorkerLivenessBasenames('/usr/bin/node', '/opt/bin/agy')).toEqual(['node', 'agy']);
+    expect(teamWorkerLivenessBasenames('/usr/bin/node', '/usr/bin/node')).toEqual(['node']);
+    const fake = recordingSpawns({ psStdout: macosPsTable('node') });
+    const matched = resolveProviderChild(SESSION, {
+      expectedBasenames: teamWorkerLivenessBasenames('/usr/bin/node', '/opt/bin/agy'),
+      tmuxSpawn: fake.tmuxSpawn,
+      psSpawn: fake.psSpawn,
+    });
+    expect(matched.status).toBe('matched');
+    expect(matched.matched?.comm).toBe('node');
+    const agyOnly = resolveProviderChild(SESSION, {
+      expectedBasename: 'agy',
+      tmuxSpawn: fake.tmuxSpawn,
+      psSpawn: fake.psSpawn,
+    });
+    expect(agyOnly.status).toBe('orphan');
   });
 
   test('padded single-digit lstart day parses on macOS samples', () => {

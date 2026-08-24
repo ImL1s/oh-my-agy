@@ -113,6 +113,30 @@ export function providerCommMatchesBasename(comm: string, expectedBasename: stri
   return actual.length === DARWIN_COMM_MAX && expected.startsWith(actual);
 }
 
+/**
+ * 生產 pane 主體是 `workerExecutablePath`（#45：`node` + `oma team worker run`），
+ * 不是路由後的 `agy`。比對時兩者都算身分，避免 live worker 被誤判 orphan。
+ * 設計概念映射：OMG process_stable / Codex PR94 P1。
+ */
+export function teamWorkerLivenessBasenames(
+  workerExecutablePath: string,
+  routeExecutablePath?: string,
+): readonly string[] {
+  const names: string[] = [];
+  for (const raw of [workerExecutablePath, routeExecutablePath]) {
+    const token = basenameToken(raw ?? '');
+    if (token !== '' && !names.includes(token)) names.push(token);
+  }
+  return names;
+}
+
+export function providerCommMatchesAnyBasename(
+  comm: string,
+  expectedBasenames: readonly string[],
+): boolean {
+  return expectedBasenames.some((expected) => providerCommMatchesBasename(comm, expected));
+}
+
 function basenameToken(value: string): string {
   return path.basename(value.trim()).toLowerCase();
 }

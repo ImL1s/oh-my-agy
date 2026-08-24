@@ -4,7 +4,7 @@ import * as path from 'path';
 import { ProcessLiveness } from '../runtime/lock';
 import { runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
-import { providerCommMatchesBasename } from './provider-readiness';
+import { providerCommMatchesAnyBasename } from './provider-readiness';
 import { ProcessMarkerV1, TmuxPaneIdentityV1 } from './types';
 
 export interface StartTmuxWorkerInput {
@@ -114,7 +114,13 @@ export interface ArgvSpawnResult {
 export type ArgvSpawnFn = (argv: readonly string[]) => ArgvSpawnResult;
 
 export interface ResolveProviderChildOptionsV1 {
+  /** 單一期望 comm；與 `expectedBasenames` 聯集。 */
   expectedBasename?: string;
+  /**
+   * 多個合法 comm（#45 後含 `node`/`oma` worker 與可選路由 `agy`）。
+   * 空集合且無 `expectedBasename` 時視為無法證明身分。
+   */
+  expectedBasenames?: readonly string[];
   tmuxSpawn?: ArgvSpawnFn;
   psSpawn?: ArgvSpawnFn;
 }
@@ -181,14 +187,23 @@ export function resolveProviderChild(
   const descendants = collectDescendants(rows, panePid, PROVIDER_CHILD_MAX_DEPTH);
   const children: ProviderProcessIdentityV1[] = descendants.map(toIdentity);
   const pane = toIdentity(paneRow);
-  const expected = options.expectedBasename?.trim() ?? '';
-  const matched = expected === ''
+  const expected = collectExpectedBasenames(options);
+  const matched = expected.length === 0
     ? undefined
-    : [pane, ...children].find((entry) => providerCommMatchesBasename(entry.comm, expected));
+    : [pane, ...children].find((entry) => providerCommMatchesAnyBasename(entry.comm, expected));
   if (matched !== undefined) {
     return { status: 'matched', panePid, pane, children, matched };
   }
   return { status: 'orphan', panePid, pane, children };
+}
+
+function collectExpectedBasenames(options: Readonly<ResolveProviderChildOptionsV1>): string[] {
+  const names: string[] = [];
+  for (const raw of [...(options.expectedBasenames ?? []), options.expectedBasename ?? '']) {
+    const token = raw.trim();
+    if (token !== '' && !names.includes(token)) names.push(token);
+  }
+  return names;
 }
 
 /** 只回相符的 provider 子程序；孤兒 pane shell 不得當成 process 身分。 */
@@ -218,7 +233,7 @@ export function providerLivenessFromResolution(
  */
 export function observeTmuxWorkerIdentity(
   sessionName: string,
-  expectedBasename: string,
+  expectedBasename: string | readonly string[],
   options: Readonly<ResolveProviderChildOptionsV1> = {},
 ): {
   readonly resolution: ProviderChildResolutionV1;
@@ -228,7 +243,9 @@ export function observeTmuxWorkerIdentity(
 } {
   const resolution = resolveProviderChild(sessionName, {
     ...options,
-    expectedBasename,
+    ...(typeof expectedBasename === 'string'
+      ? { expectedBasename }
+      : { expectedBasenames: expectedBasename }),
   });
   const liveness = providerLivenessFromResolution(resolution);
   const process = providerChildProcessMarker(resolution);
