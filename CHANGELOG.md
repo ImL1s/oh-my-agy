@@ -62,6 +62,21 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   of only reporting `E_NOT_FOUND`. Documented exit codes are unchanged (`1` for
   `E_NOT_FOUND`, `2` for usage rejection, `0` on success).
 
+### Fixed
+
+- **Hook diagnostics no longer write to the install directory, and are off by
+  default.** `writeHookDebug` previously appended on *every* hook invocation to
+  three targets, two of which were derived from the package root — one via
+  `OMA_PACKAGE_ROOT`, one via `path.resolve(__dirname, '../../..')` so it fired
+  even with no environment set — under a directory named `.omx`, which is
+  oh-my-codex's convention, not OMA's. On a global npm or tarball install that
+  meant writing into the installation tree on every turn, and it fails outright
+  on read-only mounts and shared installs. It now requires `OMA_HOOK_DEBUG=1`,
+  writes only to `<state-root>/logs/hook-debug.jsonl`, writes nothing when no
+  state root resolves, and keeps the file bounded by trimming whole lines from
+  the head. Redaction behaviour is unchanged — the launch nonce is still only
+  ever recorded as a fingerprint.
+
 ## [0.5.2] — 2026-08-16
 
 ### Fixed
