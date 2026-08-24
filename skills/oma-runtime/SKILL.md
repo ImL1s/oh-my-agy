@@ -27,6 +27,7 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 |-------------|-----------------|------------|---------------------|
 | Full autonomous delivery (OMX five-phase) | `/oh-my-agy:autopilot` | `skills/autopilot/SKILL.md` | `oma autopilot …` (ledger only) |
 | Clarify requirements | `/oh-my-agy:deep-interview` | `skills/deep-interview/SKILL.md` | (phase of autopilot) |
+| Bounded step list with verifiable completion | `/oh-my-agy:plan` | `skills/plan/SKILL.md` | (none) |
 | Consensus-style plan gate | `/oh-my-agy:ralplan` | `skills/ralplan/SKILL.md` | `oma autopilot consensus` (optional) |
 | Durable implement + verify | `/oh-my-agy:ultragoal` | `skills/ultragoal/SKILL.md` | handoff/advance (optional); `oma team` explicit |
 | Merge-readiness review | `/oh-my-agy:code-review` | `skills/code-review/SKILL.md` | `oma autopilot review` (optional) |

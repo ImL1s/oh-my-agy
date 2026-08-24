@@ -35,6 +35,7 @@
     "./skills/workflow/",
     "./skills/ask/",
     "./skills/wiki/",
-    "./skills/hud/"
+    "./skills/hud/",
+    "./skills/plan/"
   ]
 }

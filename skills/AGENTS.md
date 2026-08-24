@@ -14,6 +14,7 @@ In-session skill playbooks shipped with the plugin. Each subdirectory has a `SKI
 |------|-------------|
 | `autopilot/SKILL.md` | Full OMX five-phase delivery loop |
 | `deep-interview/SKILL.md` | Clarify / specs |
+| `plan/SKILL.md` | Light planning under ralplan |
 | `ralplan/SKILL.md` | Plan + critic APPROVE gate |
 | `ultragoal/SKILL.md` | Implement + verify ledger |
 | `code-review/SKILL.md` | Merge readiness review |

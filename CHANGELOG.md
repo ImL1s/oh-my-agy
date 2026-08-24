@@ -21,6 +21,9 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- New in-session skill **`plan`** (`/oh-my-agy:plan`): light planning under
+  `ralplan`, with verifiable per-step completion and artifacts in `.agy/plans/`.
+  No `oma plan` CLI verb. (#40)
 - `oma setup --dry-run` prints a redacted JSON plan (hosts, full spawn argv,
   target paths, identity) and exits 0 with zero host/filesystem mutation.
   `oma update --check` prints installed vs candidate identity without

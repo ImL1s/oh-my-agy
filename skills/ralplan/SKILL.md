@@ -31,6 +31,7 @@ Planning gate with self-challenge (OMC/OMX `$ralplan` / `$plan --consensus` anal
 
 - Already implementing under `ralph` / `ultrawork` with an approved plan
 - User only wants research → `search`
+- Light, bounded, single-person plan without consensus → `/oh-my-agy:plan`
 
 ## Artifacts
 
