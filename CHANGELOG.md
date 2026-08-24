@@ -65,6 +65,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   `oma doctor` gains `skill_manifest_drift`, which fails when
   `.claude-plugin/plugin.json` `skills[]` and `skills/*/SKILL.md` disagree in
   either direction. (#41)
+- `oma hooks status [--json]`, `oma hooks tail [--limit <1..500>]`, and
+  `oma hooks test [--event pre-invocation|stop]` observe PreInvocation/Stop
+  evidence from `<state-root>/lifecycle/*.jsonl` and
+  `<state-root>/logs/hook-debug.jsonl`. Never-observed prints `未觀察到`
+  instead of all-green. `oma hooks test` feeds synthetic stdin through
+  `spawnSync` + argv into `dist/src/hooks/*.js` without writing lifecycle
+  records, and states that this is not proof the host will invoke the hook.
+  `oma doctor` adds warn-only `hooks_observed` using the same projection.
+  (#58)
 
 - Top-level `oma cancel [--session <id> --workspace-key <key>] [--team <id>]
   [--all] [--reason <text>] [--json]` CAS-fenced deactivation for managed

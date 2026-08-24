@@ -95,6 +95,9 @@ describe('CLI application wiring', () => {
     expect(await runCli(['--help'], services, io)).toBe(0);
     expect(output().stdout).toContain('autopilot resume --session <id> --conversation <id> --expected-revision <n>');
     expect(output().stdout).toContain('oma doctor');
+    expect(output().stdout).toContain('oma hooks status [--json]');
+    expect(output().stdout).toContain('oma hooks tail [--limit <1..500>]');
+    expect(output().stdout).toContain('oma hooks test [--event pre-invocation|stop]');
     expect(output().stdout).toContain('oma session list [--json] [--workspace-key <key>] [--limit <1..200>]');
     expect(output().stdout).toContain(
       'oma cancel [--session <id> --workspace-key <key>] [--team <id>] [--all] [--reason <text>] [--json]',
@@ -118,6 +121,8 @@ describe('CLI application wiring', () => {
     expect(services.extendedCommand).toHaveBeenCalledWith('session', ['list', '--json']);
     expect(await runCli(['cancel', '--all'], services, io)).toBe(0);
     expect(services.extendedCommand).toHaveBeenCalledWith('cancel', ['--all']);
+    expect(await runCli(['hooks', 'status', '--json'], services, io)).toBe(0);
+    expect(services.extendedCommand).toHaveBeenCalledWith('hooks', ['status', '--json']);
     expect(services.passThrough).not.toHaveBeenCalled();
   });
 
