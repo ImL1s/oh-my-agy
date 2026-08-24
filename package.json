@@ -46,6 +46,8 @@
     "test:unit": "jest --config jest.unit.config.js --runInBand",
     "test:e2e": "jest --config jest.config.js --runInBand",
     "test:package": "jest --config jest.unit.config.js --runInBand tests/package",
+    "catalog:generate": "node dist/scripts/generate-skill-catalog.js",
+    "catalog:check": "node dist/scripts/generate-skill-catalog.js --check",
     "test:production": "node dist/bin/oma.js production verify",
     "smoke": "bash scripts/smoke.sh",
     "install:local": "bash scripts/install.sh"
