@@ -1,6 +1,6 @@
 ---
 name: cancel
-description: "In-session OMA cancel — invoke /oh-my-agy:cancel; stop active modes HERE, leave resume-friendly state (CLI stop optional)"
+description: "In-session OMA cancel — invoke /oh-my-agy:cancel then oma cancel; stop active modes HERE, leave resume-friendly state"
 ---
 
 # cancel (OMA / in-session)
@@ -11,11 +11,11 @@ When invoked via **`/oh-my-agy:cancel`** (or user says cancel / abort / stop OMA
 
 - Do **not** require a terminal first for workspace ledger notes.
 - Canonical slash: **`/oh-my-agy:cancel`**.
-- Optional CLI stop/resume commands live in the [Appendix](#appendix-optional-oma-cli) when durable autopilot/team sessions were started via `oma`.
+- Durable CLI stop is **`oma cancel`** (CAS-fenced). Do **not** hand-write session or team aggregates.
 
 ## Purpose
 
-Stop active OMA workflows without destroying user work (OMC/OMX `$cancel` analogue).
+Stop active OMA workflows without destroying user work (OMC `$cancel` / OMX `omx cancel` / OMG `omg cancel` analogue).
 
 ## Use when
 
@@ -25,22 +25,27 @@ Stop active OMA workflows without destroying user work (OMC/OMX `$cancel` analog
 ## Steps (in-session)
 
 1. Identify active mode: autopilot / ralph / ultrawork / team / managed session.
-2. Persist a short cancellation note under `.agy/` (what was done, what remains) — e.g. `.agy/autopilot/state.json` → `active: false`, or a note in `.agy/ralph/progress.md`.
-3. Team: if a durable team is running, stop via CLI when available (see appendix); otherwise record that workers may still be live and how the user can stop them.
-4. Autopilot: mark workspace phase state inactive; do not delete evidence (specs/plans/reviews/qa).
-5. Do **not** run destructive git cleanups.
+2. Call **`oma cancel`** to persist the CAS-fenced stop. Optional flags:
+   `--session <id> --workspace-key <key>`, `--team <id>`, `--all`, `--reason <text>`, `--json`.
+   Also write a short remaining-work note under `.agy/` (for example `.agy/ralph/progress.md`).
+   The CLI verb is the only mutation path for managed session/team state.
+3. Team: `oma cancel --team <id>` (or `--all`) stops the durable team ledger. If workers may still be live, tell the user how to confirm with `oma team status`.
+4. Autopilot: `oma cancel --session <id> --workspace-key <key>` marks the session cancelled with reason + UTC timestamp (`oma session list` shows `terminal=true`). Do not delete evidence (specs/plans/reviews/qa).
+5. Do **not** run destructive git cleanups, and do **not** remove worktrees that still have unintegrated commits.
 6. Tell the user how to resume (re-invoke slash skill, or optional `oma autopilot resume` / `oma team status` if they used durable CLI).
 
 ## Forbidden
 
-- `git reset --hard`, `git clean -fd`
+- Destructive git restore / force-clean of the working tree
 - Deleting worktrees with unintegrated commits
 - Claiming "cancelled and cleaned everything" without listing what remains
 - Requiring SID/terminal before writing a cancel note in-session
+- Bypassing `oma cancel` by editing authoritative aggregates by hand
 
 ## Final checklist
 
 - [ ] Active mode identified and noted inactive
+- [ ] `oma cancel` invoked (or confirmed no active session/team)
 - [ ] Cancellation note with remaining work
 - [ ] No destructive git
 - [ ] Resume path stated
@@ -49,9 +54,10 @@ Stop active OMA workflows without destroying user work (OMC/OMX `$cancel` analog
 
 ## Appendix: optional `oma` CLI
 
-Use when durable sessions were started via CLI:
+Use when durable sessions were started via CLI. Prefer the top-level verb; keep the low-level autopilot cancel unchanged for callers that already have `--expected-revision`.
 
 ```bash
+oma cancel [--session <id> --workspace-key <key>] [--team <id>] [--all] [--reason <text>] [--json]
 oma team stop --team <id>
 oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot resume --session <id> --conversation <cid> --expected-revision <n>

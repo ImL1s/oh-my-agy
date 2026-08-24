@@ -68,7 +68,7 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
   if ([
     '--help', '-h', '--version', '-v',
     'autopilot', 'team', 'setup', 'doctor', 'skill',
-    'workflow', 'mcp-server', 'wiki', 'hud', 'session',
+    'workflow', 'mcp-server', 'wiki', 'hud', 'session', 'cancel',
     'native-status', 'lsp-status', 'sidecar-status', 'notify',
     'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
   ].includes(first)) {

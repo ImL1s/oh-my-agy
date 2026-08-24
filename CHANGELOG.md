@@ -66,6 +66,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   `.claude-plugin/plugin.json` `skills[]` and `skills/*/SKILL.md` disagree in
   either direction. (#41)
 
+- Top-level `oma cancel [--session <id> --workspace-key <key>] [--team <id>]
+  [--all] [--reason <text>] [--json]` CAS-fenced deactivation for managed
+  sessions and teams (durable cancel record with reason + UTC timestamp,
+  visible via `oma session list` terminal state). Concurrent/stale revision
+  returns the existing CAS error. No target and no active session is a
+  readable no-op with exit 0. `oma autopilot cancel` is unchanged.
+  `skills/cancel` now calls this verb instead of hand-editing state files.
+  (#48)
 - New in-session skill **`plan`** (`/oh-my-agy:plan`): light planning under
   `ralplan`, with verifiable per-step completion and artifacts in `.agy/plans/`.
   No `oma plan` CLI verb. (#40)
