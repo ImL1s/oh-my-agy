@@ -203,6 +203,8 @@ oma autopilot review|qa|reset-breaker …   # see oma --help
 oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]
   # Ready tasks (deps completed) up to max-parallel; managed worktree + tmux + agy bootstrap.
 oma team status --team <id>
+oma team resume --team <id> --expected-revision <n> [--json]
+  # Rebind a returning leader: supervisor lease + adopt/fence survivors; no worker restart.
 oma team stop --team <id>
 oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --process dead
