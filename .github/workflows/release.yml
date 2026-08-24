@@ -33,9 +33,13 @@ jobs:
           set -euo pipefail
           PKG="$(node -p "require('./package.json').version")"
           PLUGIN="$(node -p "require('./plugin.json').version")"
-          MARKET="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          CLAUDE="$(node -p "require('./.claude-plugin/plugin.json').version")"
+          MARKET="$(node -p "require('./.claude-plugin/marketplace.json').version")"
+          ENTRY="$(node -p "require('./.claude-plugin/marketplace.json').plugins.find(p => p.name === 'oh-my-agy').version")"
           test "$PKG" = "$PLUGIN"
+          test "$PKG" = "$CLAUDE"
           test "$PKG" = "$MARKET"
+          test "$PKG" = "$ENTRY"
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             test "${GITHUB_REF_NAME#v}" = "$PKG"
           fi

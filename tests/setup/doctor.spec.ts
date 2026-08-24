@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { runDoctor } from '../../src/setup/doctor';
+import { DoctorCheckV1, runDoctor } from '../../src/setup/doctor';
 import { PluginCommandAdapter } from '../../src/setup/plugin';
 import { assembleHostCapabilityProfile } from '../../src/native/capability-profile';
 import { ok } from '../../src/runtime/types';
@@ -23,6 +23,22 @@ function surface(root: string, version: string, marker = 'same'): void {
   fs.writeFileSync(path.join(root, 'plugin.json'), JSON.stringify({ name: 'oh-my-agy', version }));
   fs.writeFileSync(path.join(root, '.claude-plugin', 'plugin.json'), JSON.stringify({
     name: 'oh-my-agy', version, skills: ['./skills/autopilot/'],
+  }));
+  // 設計概念映射：OMC marketplace.json 頂層 + plugin 條目 version 必須與 package 同步
+  fs.writeFileSync(path.join(root, '.claude-plugin', 'marketplace.json'), JSON.stringify({
+    name: 'oh-my-agy',
+    version,
+    owner: { name: 'ImL1s' },
+    plugins: [{
+      name: 'oh-my-agy',
+      source: './',
+      description: 'fixture',
+      version,
+      category: 'productivity',
+      tags: ['antigravity', 'oma'],
+      author: { name: 'ImL1s' },
+      homepage: 'https://github.com/ImL1s/oh-my-agy#readme',
+    }],
   }));
   fs.writeFileSync(path.join(root, 'hooks.json'), JSON.stringify({
     'oh-my-agy-runtime': {
@@ -377,5 +393,77 @@ describe('oma doctor exact installed identity', () => {
       status: 'pass',
       message: expect.stringContaining('valid'),
     });
+  });
+});
+
+// 設計概念映射：OMC sync-version.sh 同步 marketplace 頂層 + plugin 條目；OMA 走 doctor version_sync。
+describe('oma doctor version_sync four-way marketplace compare', () => {
+  let scratch: string;
+  let source: string;
+
+  beforeEach(() => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-doctor-version-'));
+    source = path.join(scratch, 'source');
+    surface(source, '0.2.3');
+  });
+
+  afterEach(() => fs.rmSync(scratch, { recursive: true, force: true }));
+
+  async function versionSync(root: string): Promise<DoctorCheckV1 | undefined> {
+    const report = await runDoctor({
+      packageRoot: root,
+      packageVersion: '0.2.3',
+      adapter: adapter(JSON.stringify({ imports: [] })),
+      antigravityConfigRoot: path.join(scratch, 'gemini-config'),
+      homeDir: path.join(scratch, 'home'),
+      stateRoot: path.join(scratch, 'state'),
+      mode: 'development',
+      agyCommand: 'echo',
+    });
+    expect(report.ok).toBe(true);
+    if (!report.ok) return undefined;
+    return report.value.checks.find((check) => check.id === 'version_sync');
+  }
+
+  test('passes when package, plugin, claude plugin, and marketplace versions match', async () => {
+    await expect(versionSync(source)).resolves.toEqual(expect.objectContaining({
+      status: 'pass',
+      message: expect.stringContaining('marketplace.json'),
+    }));
+  });
+
+  test('fails when marketplace top-level version drifts', async () => {
+    const marketplacePath = path.join(source, '.claude-plugin', 'marketplace.json');
+    const marketplace = JSON.parse(fs.readFileSync(marketplacePath, 'utf8')) as {
+      version: string;
+    };
+    marketplace.version = '0.0.0';
+    fs.writeFileSync(marketplacePath, JSON.stringify(marketplace));
+    await expect(versionSync(source)).resolves.toEqual(expect.objectContaining({
+      status: 'fail',
+      message: expect.stringMatching(/marketplace\.json version 0\.0\.0 != package\.json 0\.2\.3/),
+    }));
+  });
+
+  test('fails when marketplace plugin entry version drifts', async () => {
+    const marketplacePath = path.join(source, '.claude-plugin', 'marketplace.json');
+    const marketplace = JSON.parse(fs.readFileSync(marketplacePath, 'utf8')) as {
+      version: string;
+      plugins: Array<{ version: string }>;
+    };
+    marketplace.plugins[0].version = '9.9.9';
+    fs.writeFileSync(marketplacePath, JSON.stringify(marketplace));
+    await expect(versionSync(source)).resolves.toEqual(expect.objectContaining({
+      status: 'fail',
+      message: expect.stringMatching(/marketplace\.json plugin oh-my-agy version 9\.9\.9 != package\.json 0\.2\.3/),
+    }));
+  });
+
+  test('fails when Claude plugin surface is present without marketplace.json', async () => {
+    fs.unlinkSync(path.join(source, '.claude-plugin', 'marketplace.json'));
+    await expect(versionSync(source)).resolves.toEqual(expect.objectContaining({
+      status: 'fail',
+      message: expect.stringContaining('.claude-plugin/marketplace.json missing'),
+    }));
   });
 });

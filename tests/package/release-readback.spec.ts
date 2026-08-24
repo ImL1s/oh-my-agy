@@ -10,9 +10,14 @@ describe('0.5.2 release readback', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const plugin = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
     const slash = JSON.parse(fs.readFileSync(path.join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
+    const marketplace = JSON.parse(
+      fs.readFileSync(path.join(root, '.claude-plugin', 'marketplace.json'), 'utf8'),
+    ) as { version?: string; plugins?: Array<{ name?: string; version?: string }> };
     expect(pkg.version).toBe('0.5.2');
     expect(plugin.version).toBe(pkg.version);
     expect(slash.version).toBe(pkg.version);
+    expect(marketplace.version).toBe(pkg.version);
+    expect(marketplace.plugins?.find((entry) => entry.name === 'oh-my-agy')?.version).toBe(pkg.version);
     expect(pkg.exports).toEqual({
       '.': './dist/bin/oma.js',
       './package.json': './package.json',

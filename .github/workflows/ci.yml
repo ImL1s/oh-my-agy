@@ -34,9 +34,17 @@ jobs:
             const fs = require("fs");
             const pkg = JSON.parse(fs.readFileSync("package.json","utf8"));
             const plug = JSON.parse(fs.readFileSync("plugin.json","utf8"));
-            const market = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json","utf8"));
-            if (pkg.version !== plug.version || pkg.version !== market.version) {
-              console.error("version mismatch", pkg.version, plug.version, market.version);
+            const claude = JSON.parse(fs.readFileSync(".claude-plugin/plugin.json","utf8"));
+            const market = JSON.parse(fs.readFileSync(".claude-plugin/marketplace.json","utf8"));
+            const entry = (market.plugins || []).find((p) => p.name === "oh-my-agy");
+            if (
+              pkg.version !== plug.version
+              || pkg.version !== claude.version
+              || pkg.version !== market.version
+              || !entry
+              || entry.version !== pkg.version
+            ) {
+              console.error("version mismatch", pkg.version, plug.version, claude.version, market.version, entry && entry.version);
               process.exit(1);
             }
             console.log("version", pkg.version);

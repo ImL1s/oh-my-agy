@@ -18,6 +18,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `.claude-plugin/marketplace.json` now carries `$schema`
+  (`https://json.schemastore.org/claude-code-marketplace.json`), a top-level
+  `version` matching `package.json`, and plugin-entry `version` / `category` /
+  `tags` / `author` / `homepage`. This is local Claude Code catalog metadata
+  (OMC `marketplace.json` + `scripts/sync-version.sh` mapping); it does not
+  publish to npmjs.org or GitHub Packages.
+- `oma doctor` `version_sync` four-way-compares `package.json`, root
+  `plugin.json`, `.claude-plugin/plugin.json`, and both marketplace versions
+  (top-level and the `oh-my-agy` plugin entry). Mutating either marketplace
+  version fails the check.
 - **Hook kill switch:** `DISABLE_OMA=1|true` (case-insensitive, trimmed) turns
   every Antigravity hook off, and `OMA_SKIP_HOOKS` skips named hooks
   (`pre-invocation`, `stop`, `session-start`, `post-invocation`). Mirrors OMC
