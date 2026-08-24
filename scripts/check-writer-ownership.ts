@@ -106,7 +106,7 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
       exact([
         'bin/oma.ts', 'src/cli/application.ts', 'src/cli/dangerous-launch.ts',
         'src/cli/managed-invocation.ts', 'src/cli/parser.ts', 'src/cli/runtime-adapter.ts',
-        'src/cli/services.ts', 'src/cli/skill-commands.ts', 'src/autopilot/commands.ts',
+        'src/cli/services.ts', 'src/cli/skill-commands.ts', 'src/cli/session-commands.ts', 'src/autopilot/commands.ts',
         'src/autopilot/phases.ts', 'src/autopilot/runtime.ts', 'src/enforcer.ts', 'src/types.ts',
         'package.json', 'package-lock.json', 'plugin.json', 'hooks.json', '.agents/hooks.json',
         '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.mcp.json',

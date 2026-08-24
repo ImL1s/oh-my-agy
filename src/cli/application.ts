@@ -37,11 +37,13 @@ Usage:
   oma workflow status|replay --run <run-id>
   oma mcp-server
   oma wiki index|list|search <query> [--limit <1..50>]
+  oma session list [--json] [--workspace-key <key>] [--limit <1..200>]
   oma hud [--json] [--watch] [--preset minimal|focused|full] [--session <id> --workspace-key <key>]
   oma native-status | lsp-status | sidecar-status
   oma native capabilities [--json]
   oma native probe --live [--json]
   oma notify status|test [--severity <level>] [--title <text>] [--message <text>]
+  oma resume --list
   oma resume --session <id> --conversation <id> --expected-revision <n>
   oma recovery --source <transcript.jsonl> [--recovery-root <dir>] [--include-prompt]
   oma update [--release] [--bin-dir <dir>]

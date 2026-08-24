@@ -1,12 +1,17 @@
 import * as fs from 'fs';
+import * as path from 'path';
+import { createDefaultServices } from '../../src/cli/services';
 import { createInitialSessionAggregate, SessionAggregateStore, sessionAggregateRelativePath } from '../../src/continuation/session-aggregate';
 import { collectHudSnapshot } from '../../src/hud/status';
 import { renderHud } from '../../src/hud/render';
 import { watchHud } from '../../src/hud/watch';
 import { sha256 } from '../../src/runtime/atomic';
+import { resolveWorkspaceIdentity } from '../../src/runtime/state-root';
 import { TeamStateStore } from '../../src/team/state';
 import { CanonicalTeamManifestV1 } from '../../src/team/types';
 import { createStateFixture } from '../helpers/state-fixture';
+
+const packageRoot = path.resolve(__dirname, '../..');
 
 const manifest: CanonicalTeamManifestV1 = {
   schema: 'oma.team-manifest/v1',
@@ -118,5 +123,66 @@ describe('read-only OMA HUD', () => {
         }),
       }));
     } finally { fixture.cleanup(); }
+  });
+
+  test('CLI --session without --workspace-key resolves cwd identity; explicit key is unchanged', async () => {
+    const fixture = createStateFixture('oma-hud-cli-session-');
+    try {
+      const identity = resolveWorkspaceIdentity(fixture.root);
+      expect(identity.ok).toBe(true);
+      if (!identity.ok) return;
+      const sessionPath = fixture.path(sessionAggregateRelativePath(identity.value.workspaceKey, 'hud-auto-session'));
+      const store = new SessionAggregateStore(sessionPath);
+      const seeded = await store.initialize(createInitialSessionAggregate({
+        sessionId: 'hud-auto-session',
+        repoKey: identity.value.repoKey,
+        workspaceKey: identity.value.workspaceKey,
+        launchNonceDigest: sha256('hud-auto-launch'),
+      }));
+      expect(seeded.ok).toBe(true);
+      const pluginAdapter = {
+        run: async (argv: readonly string[]) => ({ argv: [...argv], code: 1, stdout: '', stderr: '' }),
+      };
+      const runHud = async (argv: readonly string[], cwd = fixture.root) => {
+        let stdout = '';
+        let stderr = '';
+        const services = createDefaultServices({
+          packageRoot,
+          cwd,
+          stateRoot: fixture.root,
+          agyCommand: path.join(fixture.root, 'missing-agy'),
+          pluginAdapter,
+          environment: { PATH: fixture.root, HOME: fixture.root, OMA_STATE_ROOT: fixture.root },
+          stdout: (value) => { stdout += value; },
+          stderr: (value) => { stderr += value; },
+        });
+        const code = await services.extendedCommand('hud', argv);
+        return { code, stdout, stderr };
+      };
+
+      const auto = await runHud(['--json', '--session', 'hud-auto-session']);
+      expect(auto.code).toBe(0);
+      expect(auto.stderr).toBe('');
+      const autoBody = JSON.parse(auto.stdout) as { session: { status: string; phase: string } };
+      expect(autoBody.session).toEqual(expect.objectContaining({
+        status: 'available',
+        phase: 'deep-interview',
+      }));
+
+      const explicit = await runHud([
+        '--json', '--session', 'hud-auto-session', '--workspace-key', identity.value.workspaceKey,
+      ]);
+      expect(explicit.code).toBe(0);
+      expect(JSON.parse(explicit.stdout).session).toEqual(autoBody.session);
+
+      const missingCwd = await runHud(
+        ['--json', '--session', 'hud-auto-session'],
+        path.join(fixture.root, 'does-not-exist'),
+      );
+      expect(missingCwd.code).toBe(2);
+      expect(missingCwd.stderr).toContain('E_CLI_USAGE: --session requires --workspace-key');
+    } finally {
+      fixture.cleanup();
+    }
   });
 });

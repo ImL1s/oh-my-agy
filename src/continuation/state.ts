@@ -5,7 +5,11 @@ import { atomicWriteJson, canonicalJson, FaultInjector, NO_FAULTS, sha256 } from
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { acquireOwnerLock, ProcessLiveness, releaseOwnerLock } from '../runtime/lock';
 import { readProcessIdentity } from '../runtime/process';
-import { externalStatePathKey, platformWorkspaceSessionsRoot } from '../runtime/state-root';
+import {
+  ensureContainedPath,
+  externalStatePathKey,
+  platformWorkspaceSessionsRoot,
+} from '../runtime/state-root';
 import { ProcessIdentity, Result, err, ok } from '../runtime/types';
 import {
   SessionAggregateStore,
@@ -211,6 +215,96 @@ interface ManagedLaunchTransactionOptions {
   session: PendingSessionV1;
   now: () => number;
   faultInjector: FaultInjector;
+}
+
+/**
+ * 單一 workspace（或整個 state root）底下的 session aggregate 路徑庫存。
+ * 設計概念映射：OMC `session-search` / OMX `session-search` / OMG `session allocate`
+ * 的唯讀枚舉面；OMA 不另建第二份 inventory，只列出 SessionLocator 已在走的
+ * `{stateRoot}/workspaces/<key>/sessions/<id>/aggregate.json`。
+ */
+export interface WorkspaceSessionInventoryEntryV1 {
+  readonly workspacePathKey: string;
+  readonly sessionPathKey: string;
+  readonly aggregatePath: string;
+}
+
+/**
+ * 唯讀枚舉 platform workspace sessions。不做 CAS、不寫檔。
+ * `workspaceKey` 缺省時掃描整個 state root 的 workspaces/；未知 key 回空清單。
+ */
+export function listWorkspaceSessionInventory(
+  stateRoot: string,
+  workspaceKey?: string,
+): Result<readonly WorkspaceSessionInventoryEntryV1[], RuntimeError> {
+  const root = path.resolve(stateRoot);
+  if (!fs.existsSync(root)) return ok([]);
+  if (workspaceKey !== undefined) {
+    let sessionsRoot: string;
+    try {
+      sessionsRoot = platformWorkspaceSessionsRoot(root, workspaceKey);
+    } catch (error) {
+      return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'Workspace sessions root is unsafe', {
+        workspaceKey,
+        cause: error instanceof Error ? error.message : String(error),
+      }));
+    }
+    return listSessionEntries(sessionsRoot, externalStatePathKey(workspaceKey));
+  }
+  const workspaces = ensureContainedPath(root, 'workspaces');
+  if (!workspaces.ok) return workspaces;
+  const dirs = listChildDirectories(workspaces.value);
+  if (!dirs.ok) return dirs;
+  const entries: WorkspaceSessionInventoryEntryV1[] = [];
+  for (const workspacePathKey of dirs.value) {
+    const sessionsRelative = path.join('workspaces', workspacePathKey, 'sessions');
+    const sessionsRoot = ensureContainedPath(root, sessionsRelative);
+    if (!sessionsRoot.ok) continue;
+    const listed = listSessionEntries(sessionsRoot.value, workspacePathKey);
+    if (!listed.ok) return listed;
+    entries.push(...listed.value);
+  }
+  return ok(entries);
+}
+
+function listSessionEntries(
+  sessionsRoot: string,
+  workspacePathKey: string,
+): Result<readonly WorkspaceSessionInventoryEntryV1[], RuntimeError> {
+  const dirs = listChildDirectories(sessionsRoot);
+  if (!dirs.ok) return dirs;
+  const entries: WorkspaceSessionInventoryEntryV1[] = [];
+  for (const sessionPathKey of dirs.value) {
+    const aggregatePath = path.join(sessionsRoot, sessionPathKey, 'aggregate.json');
+    if (!fs.existsSync(aggregatePath)) continue;
+    entries.push({ workspacePathKey, sessionPathKey, aggregatePath });
+  }
+  return ok(entries);
+}
+
+function listChildDirectories(parent: string): Result<readonly string[], RuntimeError> {
+  if (!fs.existsSync(parent)) return ok([]);
+  try {
+    const stat = fs.lstatSync(parent);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      return err(runtimeError('E_CORRUPT_STATE', 'Session inventory parent is not a real directory', {
+        parent,
+      }));
+    }
+    const names: string[] = [];
+    for (const entry of fs.readdirSync(parent, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      if (entry.name.includes('/') || entry.name.includes('\\') || entry.name.includes('\0')) continue;
+      names.push(entry.name);
+    }
+    names.sort((left, right) => Buffer.from(left, 'utf8').compare(Buffer.from(right, 'utf8')));
+    return ok(names);
+  } catch (error) {
+    return err(runtimeError('E_CORRUPT_STATE', 'Session inventory could not be enumerated', {
+      parent,
+      cause: error instanceof Error ? error.message : String(error),
+    }));
+  }
 }
 
 /**
@@ -643,30 +737,24 @@ export class SessionLocator {
   }
 
   private findLivePending(): Result<SessionAggregateV1 | null, RuntimeError> {
-    const sessionsRoot = platformWorkspaceSessionsRoot(this.stateRoot, this.workspaceKey);
-    if (!fs.existsSync(sessionsRoot)) return ok(null);
-    try {
-      for (const entry of fs.readdirSync(sessionsRoot, { withFileTypes: true })) {
-        if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-        const aggregatePath = path.join(sessionsRoot, entry.name, 'aggregate.json');
-        if (!fs.existsSync(aggregatePath)) continue;
-        const aggregate = new SessionAggregateStore(aggregatePath).read();
-        if (!aggregate.ok) return aggregate;
-        const binding = aggregate.value.binding;
-        if (
-          ['launch_pending', 'resume_pending'].includes(binding.state)
-          && binding.expiresAtMs !== null
-          && binding.expiresAtMs >= this.now()
-          && binding.owner !== null
-          && this.processLiveness(binding.owner) === 'alive'
-        ) return ok(aggregate.value);
+    const inventory = listWorkspaceSessionInventory(this.stateRoot, this.workspaceKey);
+    if (!inventory.ok) return inventory;
+    for (const entry of inventory.value) {
+      const aggregate = new SessionAggregateStore(entry.aggregatePath).read();
+      if (!aggregate.ok) {
+        if (aggregate.error.code === 'E_NOT_FOUND') continue;
+        return aggregate;
       }
-      return ok(null);
-    } catch (error) {
-      return err(runtimeError('E_CORRUPT_STATE', 'Workspace pending sessions could not be enumerated', {
-        cause: error instanceof Error ? error.message : String(error),
-      }));
+      const binding = aggregate.value.binding;
+      if (
+        ['launch_pending', 'resume_pending'].includes(binding.state)
+        && binding.expiresAtMs !== null
+        && binding.expiresAtMs >= this.now()
+        && binding.owner !== null
+        && this.processLiveness(binding.owner) === 'alive'
+      ) return ok(aggregate.value);
     }
+    return ok(null);
   }
 
   private async waitForChildSpawn(

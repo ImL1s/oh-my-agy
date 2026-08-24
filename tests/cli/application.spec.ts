@@ -95,6 +95,8 @@ describe('CLI application wiring', () => {
     expect(await runCli(['--help'], services, io)).toBe(0);
     expect(output().stdout).toContain('autopilot resume --session <id> --conversation <id> --expected-revision <n>');
     expect(output().stdout).toContain('oma doctor');
+    expect(output().stdout).toContain('oma session list [--json] [--workspace-key <key>] [--limit <1..200>]');
+    expect(output().stdout).toContain('oma resume --list');
     expect(output().stdout).toContain('oma native capabilities [--json]');
     expect(output().stdout).toContain('oma native probe --live [--json]');
     expect(output().stdout).toContain('team resolve-fork --team <id> --fork <id> --winner-generation <n>');
@@ -107,6 +109,8 @@ describe('CLI application wiring', () => {
     const { services, io } = fixture();
     expect(await runCli(['workflow', 'list'], services, io)).toBe(0);
     expect(services.extendedCommand).toHaveBeenCalledWith('workflow', ['list']);
+    expect(await runCli(['session', 'list', '--json'], services, io)).toBe(0);
+    expect(services.extendedCommand).toHaveBeenCalledWith('session', ['list', '--json']);
     expect(services.passThrough).not.toHaveBeenCalled();
   });
 

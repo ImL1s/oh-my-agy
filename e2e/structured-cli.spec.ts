@@ -8,7 +8,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { createInitialSessionAggregate, SessionAggregateStore, sessionAggregateRelativePath } from '../src/continuation/session-aggregate';
+import { canonicalJsonV1 } from '../src/contracts/state-schemas';
 import { sha256 } from '../src/runtime/atomic';
+import { resolveWorkspaceIdentity } from '../src/runtime/state-root';
 import { TeamStateStore } from '../src/team/state';
 import { CanonicalTeamManifestV1 } from '../src/team/types';
 
@@ -26,6 +28,8 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('autopilot drive');
     expect(r.stdout).toContain('skill list');
+    expect(r.stdout).toContain('oma session list');
+    expect(r.stdout).toContain('oma resume --list');
   });
 
   test('TC-S-01b: oma skill list --json returns JSON skill catalog', async () => {
@@ -412,4 +416,92 @@ describe('Structured CLI e2e baseline', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   }, 45000);
+
+  test('TC-S-session-list: compiled CLI lists sessions read-only and hud auto-resolves workspace', async () => {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-e2e-session-list-'));
+    fs.chmodSync(stateRoot, 0o700);
+    const sessionPath = path.join(stateRoot, sessionAggregateRelativePath('workspace-e2e', 'session-e2e'));
+    const store = new SessionAggregateStore(sessionPath);
+    const fingerprint = (root: string): string => {
+      const parts: string[] = [];
+      const walk = (dir: string): void => {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+          const full = path.join(dir, entry.name);
+          const rel = path.relative(root, full).split(path.sep).join('/');
+          if (entry.isDirectory()) {
+            parts.push(`D:${rel}`);
+            walk(full);
+          } else if (entry.isFile()) {
+            parts.push(`F:${rel}:${fs.readFileSync(full).toString('hex')}`);
+          }
+        }
+      };
+      walk(root);
+      return parts.join('\n');
+    };
+    try {
+      await store.initialize(createInitialSessionAggregate({
+        sessionId: 'session-e2e',
+        repoKey: null,
+        workspaceKey: 'workspace-e2e',
+        launchNonceDigest: sha256('e2e-launch'),
+        phase: 'ralplan',
+      }));
+      const before = fingerprint(stateRoot);
+      const listed = await runOma(
+        ['session', 'list', '--json'],
+        { OMA_STATE_ROOT: stateRoot },
+      );
+      expect(listed.code).toBe(0);
+      const body = JSON.parse(listed.stdout) as {
+        sessions: Array<{ session_id: string; phase: string; workspace_key: string }>;
+      };
+      expect(body.sessions.some((row) => row.session_id === 'session-e2e' && row.phase === 'ralplan')).toBe(true);
+      expect(canonicalJsonV1(JSON.parse(listed.stdout))).toBe(listed.stdout.trim());
+      const alias = await runOma(
+        ['resume', '--list', '--json', '--workspace-key', 'workspace-e2e'],
+        { OMA_STATE_ROOT: stateRoot },
+      );
+      expect(alias.code).toBe(0);
+      expect(JSON.parse(alias.stdout).sessions).toEqual([
+        expect.objectContaining({ session_id: 'session-e2e', workspace_key: 'workspace-e2e' }),
+      ]);
+      const unknown = await runOma(
+        ['session', 'list', '--json', '--workspace-key', 'missing-workspace'],
+        { OMA_STATE_ROOT: stateRoot },
+      );
+      expect(unknown.code).toBe(0);
+      expect(JSON.parse(unknown.stdout).sessions).toEqual([]);
+      const rejected = await runOma(
+        ['session', 'list', '--limit', '0'],
+        { OMA_STATE_ROOT: stateRoot },
+      );
+      expect(rejected.code).toBe(2);
+      expect(rejected.stderr).toContain('E_VALIDATOR_REJECTED');
+      expect(fingerprint(stateRoot)).toBe(before);
+
+      const identity = resolveWorkspaceIdentity(process.cwd());
+      expect(identity.ok).toBe(true);
+      if (!identity.ok) return;
+      const autoPath = path.join(
+        stateRoot,
+        sessionAggregateRelativePath(identity.value.workspaceKey, 'hud-e2e-session'),
+      );
+      const autoStore = new SessionAggregateStore(autoPath);
+      await autoStore.initialize(createInitialSessionAggregate({
+        sessionId: 'hud-e2e-session',
+        repoKey: identity.value.repoKey,
+        workspaceKey: identity.value.workspaceKey,
+        launchNonceDigest: sha256('hud-e2e-launch'),
+      }));
+      const hud = await runOma(
+        ['hud', '--json', '--session', 'hud-e2e-session'],
+        { OMA_STATE_ROOT: stateRoot },
+      );
+      expect(hud.code).toBe(0);
+      expect(JSON.parse(hud.stdout).session.status).toBe('available');
+    } finally {
+      fs.rmSync(stateRoot, { recursive: true, force: true });
+    }
+  }, 30000);
 });
