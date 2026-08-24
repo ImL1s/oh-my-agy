@@ -128,6 +128,10 @@ describe('OMA session skill surface', () => {
     expect(result.message).toBe('skill catalog check ok');
     expect(result.ok).toBe(true);
     expect(result.drifted).toEqual([]);
+    // GFM 以未跳脫的 `|` 切欄；CLI helper 裡的 pipe 必須是 `\|`。
+    expect(runtime).toMatch(/oma wiki index\\\|list\\\|search/);
+    expect(runtime).toMatch(/minimal\\\|focused\\\|full/);
+    expect(runtime).toMatch(/start\\\|status\\\|tick/);
   });
 
   test('catalog generator write targets are only the two authorized catalog files', () => {

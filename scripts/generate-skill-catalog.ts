@@ -101,7 +101,7 @@ const CATALOG_COPY: Readonly<Record<string, CatalogCopy>> = Object.freeze({
   team: {
     agents: 'Multi-worker coordination',
     intent: 'Multi-worker tmux team',
-    cli: '`oma team start\\|status\\|tick\\|…`',
+    cli: '`oma team start|status|tick|…`',
   },
   cancel: {
     agents: 'Abort modes safely',
@@ -245,7 +245,7 @@ export function renderSlashCatalog(names: readonly string[], packageRoot: string
   const rows = names.map((name) => {
     const copy = copyFor(name, packageRoot);
     const body = name === 'oma-runtime' ? '(this file)' : `\`skills/${name}/SKILL.md\``;
-    return `| ${escapeCell(copy.intent)} | \`/oh-my-agy:${name}\` | ${body} | ${copy.cli} |`;
+    return `| ${escapeCell(copy.intent)} | \`/oh-my-agy:${name}\` | ${body} | ${escapeCell(copy.cli)} |`;
   });
   return [
     '| User intent | Canonical slash | Skill body | Optional CLI helper |',
