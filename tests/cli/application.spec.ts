@@ -96,6 +96,9 @@ describe('CLI application wiring', () => {
     expect(output().stdout).toContain('autopilot resume --session <id> --conversation <id> --expected-revision <n>');
     expect(output().stdout).toContain('oma doctor');
     expect(output().stdout).toContain('oma session list [--json] [--workspace-key <key>] [--limit <1..200>]');
+    expect(output().stdout).toContain(
+      'oma cancel [--session <id> --workspace-key <key>] [--team <id>] [--all] [--reason <text>] [--json]',
+    );
     expect(output().stdout).toContain('oma resume --list');
     expect(output().stdout).toContain('oma native capabilities [--json]');
     expect(output().stdout).toContain('oma native probe --live [--json]');
@@ -113,6 +116,8 @@ describe('CLI application wiring', () => {
     expect(services.extendedCommand).toHaveBeenCalledWith('workflow', ['list']);
     expect(await runCli(['session', 'list', '--json'], services, io)).toBe(0);
     expect(services.extendedCommand).toHaveBeenCalledWith('session', ['list', '--json']);
+    expect(await runCli(['cancel', '--all'], services, io)).toBe(0);
+    expect(services.extendedCommand).toHaveBeenCalledWith('cancel', ['--all']);
     expect(services.passThrough).not.toHaveBeenCalled();
   });
 

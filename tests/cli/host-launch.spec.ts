@@ -33,6 +33,8 @@ describe('OMA host-launch contract', () => {
     expect(shouldHostLaunch(['--direct'])).toBe(true);
     expect(shouldHostLaunch(['--tmux'])).toBe(true);
     expect(shouldHostLaunch(['doctor'])).toBe(false);
+    expect(shouldHostLaunch(['cancel'])).toBe(false);
+    expect(() => shouldHostLaunch(['cancel', '--direct'])).toThrow(/E_LAUNCH_USAGE/);
     expect(shouldHostLaunch(['native', 'capabilities'])).toBe(false);
     expect(shouldHostLaunch(['native', 'probe', '--live'])).toBe(false);
     expect(shouldHostLaunch(['native'])).toBe(false);

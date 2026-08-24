@@ -38,6 +38,7 @@ Usage:
   oma mcp-server
   oma wiki index|list|search <query> [--limit <1..50>]
   oma session list [--json] [--workspace-key <key>] [--limit <1..200>]
+  oma cancel [--session <id> --workspace-key <key>] [--team <id>] [--all] [--reason <text>] [--json]
   oma hud [--json] [--watch] [--preset minimal|focused|full] [--session <id> --workspace-key <key>]
   oma native-status | lsp-status | sidecar-status
   oma native capabilities [--json]

@@ -25,6 +25,7 @@ export type ExtendedCliCommand =
   | 'wiki'
   | 'hud'
   | 'session'
+  | 'cancel'
   | 'native-status'
   | 'lsp-status'
   | 'sidecar-status'
@@ -45,6 +46,7 @@ const EXTENDED_COMMANDS = new Set<ExtendedCliCommand>([
   'wiki',
   'hud',
   'session',
+  'cancel',
   'native-status',
   'lsp-status',
   'sidecar-status',

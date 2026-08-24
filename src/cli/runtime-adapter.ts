@@ -89,6 +89,7 @@ import {
   PreparedManagedInvocation,
   ordinaryEnvironment,
 } from './managed-invocation';
+import { runCancelCommand } from './cancel-command';
 import { ExtendedCliCommand, NativeCliCommand } from './parser';
 import { runSessionListCommand } from './session-commands';
 
@@ -827,6 +828,8 @@ export async function runExtendedCommand(
         return await runHudCommand(argv, context);
       case 'session':
         return runSessionListCommand(argv, context);
+      case 'cancel':
+        return await runCancelCommand(argv, context);
       case 'native-status':
         return await runNativeStatusCommand(argv, context);
       case 'lsp-status':

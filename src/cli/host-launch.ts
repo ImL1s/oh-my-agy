@@ -24,7 +24,7 @@ export const STRUCTURED_FIRST_TOKENS = Object.freeze(new Set([
   '--help', '-h', '--version', '-v',
   'help', 'version',
   'autopilot', 'team', 'setup', 'doctor', 'skill',
-  'workflow', 'mcp-server', 'wiki', 'hud', 'session',
+  'workflow', 'mcp-server', 'wiki', 'hud', 'session', 'cancel',
   'native-status', 'lsp-status', 'sidecar-status', 'notify',
   'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
 ]));

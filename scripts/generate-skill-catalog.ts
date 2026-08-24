@@ -92,7 +92,7 @@ const CATALOG_COPY: Readonly<Record<string, CatalogCopy>> = Object.freeze({
   cancel: {
     agents: 'Abort modes safely',
     intent: 'Stop active modes',
-    cli: 'cancel managed session if bound',
+    cli: '`oma cancel` (CAS-fenced)',
   },
   verify: {
     agents: 'Fresh evidence gates',

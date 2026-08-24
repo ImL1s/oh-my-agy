@@ -61,6 +61,7 @@ describe('CLI parser', () => {
     ['mcp-server', []],
     ['wiki', ['search', 'release']],
     ['session', ['list', '--json']],
+    ['cancel', ['--json']],
     ['native-status', []],
     ['resume', ['--session', 's1']],
     ['production', ['verify']],
