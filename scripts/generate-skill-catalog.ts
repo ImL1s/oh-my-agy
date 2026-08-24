@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { listWorkflowSkillNames } from '../src/modes/skill-loader';
+import { isInternalCatalogSkill, listCatalogSkillNames } from '../src/modes/skill-catalog';
 
 export const CATALOG_START_MARKER = '<!-- OMA-SKILL-CATALOG:START -->';
 export const CATALOG_END_MARKER = '<!-- OMA-SKILL-CATALOG:END -->';
@@ -27,32 +28,10 @@ interface CatalogCopy {
 }
 
 /**
- * Session 路由友善順序（對齊既有 slash catalog，缺項接在 oma-runtime 之前）。
+ * Session 路由友善順序跟隨 catalog SSOT（對齊既有 slash catalog，缺項接在 oma-runtime 之前）。
  * 未列名的新 skill 會依字母序附加，避免從索引消失。
  */
-export const PREFERRED_SKILL_ORDER: readonly string[] = [
-  'autopilot',
-  'deep-interview',
-  'plan',
-  'ralplan',
-  'ultragoal',
-  'code-review',
-  'ultraqa',
-  'ralph',
-  'ultrawork',
-  'search',
-  'team',
-  'cancel',
-  'verify',
-  'trace',
-  'ask',
-  'wiki',
-  'hud',
-  'setup',
-  'workflow',
-  'discovery-proof',
-  'oma-runtime',
-];
+export const PREFERRED_SKILL_ORDER: readonly string[] = listCatalogSkillNames();
 
 const CATALOG_COPY: Readonly<Record<string, CatalogCopy>> = Object.freeze({
   autopilot: {
@@ -247,6 +226,20 @@ export function listOrderedSkillNames(packageRoot: string): string[] {
   return [...preferred, ...rest];
 }
 
+/**
+ * oma-runtime 表只列 public catalog skill（內部 canary 不當作 workflow 索引）。
+ * 設計概念映射：OMX generate-catalog-docs 的 public surface；未入 catalog 的新目錄仍列出，
+ * 讓 `catalog:check` 在 SSOT 補登前就紅燈。
+ */
+export function listOrderedSkillNamesForCatalogFile(
+  relativePath: AuthorizedCatalogFile,
+  packageRoot: string,
+): string[] {
+  const ordered = listOrderedSkillNames(packageRoot);
+  if (relativePath !== 'skills/oma-runtime/SKILL.md') return ordered;
+  return ordered.filter((name) => !isInternalCatalogSkill(name));
+}
+
 export function renderAgentsCatalog(names: readonly string[], packageRoot: string): string {
   const rows = names.map((name) =>
     `| \`${name}/SKILL.md\` | ${escapeCell(copyFor(name, packageRoot).agents)} |`);
@@ -319,14 +312,15 @@ function formatNameDelta(label: string, values: readonly string[]): string {
 }
 
 export function checkSkillCatalogs(packageRoot: string): CatalogCheckResult {
-  const expectedNames = listOrderedSkillNames(packageRoot);
-  const expectedSet = new Set(expectedNames);
+  const onDiskNames = listOrderedSkillNames(packageRoot);
   const drifted: string[] = [];
   const missingByFile: Record<string, string[]> = {};
   const extraByFile: Record<string, string[]> = {};
   const details: string[] = [];
 
   for (const relativePath of AUTHORIZED_CATALOG_FILES) {
+    const expectedNames = listOrderedSkillNamesForCatalogFile(relativePath, packageRoot);
+    const expectedSet = new Set(expectedNames);
     const abs = resolveAuthorizedWritePath(packageRoot, relativePath);
     if (!fs.existsSync(abs)) {
       drifted.push(relativePath);
@@ -368,16 +362,16 @@ export function checkSkillCatalogs(packageRoot: string): CatalogCheckResult {
       'Skill catalog drift detected.',
       ...details,
       'Run: npm run catalog:generate',
-      `On-disk skills: ${expectedNames.join(', ') || '(none)'}`,
+      `On-disk skills: ${onDiskNames.join(', ') || '(none)'}`,
     ].join('\n');
 
   return { ok, drifted: uniqueSorted(drifted), missingByFile, extraByFile, message };
 }
 
 export function applySkillCatalogs(packageRoot: string): string[] {
-  const expectedNames = listOrderedSkillNames(packageRoot);
   const written: string[] = [];
   for (const relativePath of AUTHORIZED_CATALOG_FILES) {
+    const expectedNames = listOrderedSkillNamesForCatalogFile(relativePath, packageRoot);
     const abs = resolveAuthorizedWritePath(packageRoot, relativePath);
     const source = fs.readFileSync(abs, 'utf8');
     const next = replaceMarkedSection(

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DISCOVERY_PROOF_TOKEN_V1 } from '../../src/native/antigravity-status';
+import { listCatalogSkillNames, normalizeClaudePluginSkillEntry } from '../../src/modes/skill-catalog';
 import { computePackageIdentity } from '../../src/setup/installed-identity';
 import { DoctorCheckV1, runDoctor } from '../../src/setup/doctor';
 
@@ -69,7 +70,8 @@ describe('Antigravity package surface', () => {
     expect(claude.name).toBe('oh-my-agy');
     expect(claude.version).toBe(pkg.version);
     expect(Array.isArray(claude.skills)).toBe(true);
-    expect(claude.skills!.length).toBeGreaterThanOrEqual(5);
+    const declared = [...new Set((claude.skills ?? []).map(normalizeClaudePluginSkillEntry))].sort();
+    expect(declared).toEqual([...listCatalogSkillNames()].sort());
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/autopilot/']));
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/discovery-proof/']));
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/workflow/']));

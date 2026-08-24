@@ -467,3 +467,62 @@ describe('oma doctor version_sync four-way marketplace compare', () => {
     }));
   });
 });
+
+// 設計概念映射：OMX verify:plugin-bundle 雙向鏡像；OMA doctor skill_manifest_drift fail-closed。
+describe('oma doctor skill_manifest_drift', () => {
+  let scratch: string;
+  let source: string;
+
+  beforeEach(() => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'oma-doctor-skill-manifest-'));
+    source = path.join(scratch, 'source');
+    surface(source, '0.2.3');
+  });
+
+  afterEach(() => fs.rmSync(scratch, { recursive: true, force: true }));
+
+  async function skillManifest(root: string): Promise<DoctorCheckV1 | undefined> {
+    const report = await runDoctor({
+      packageRoot: root,
+      packageVersion: '0.2.3',
+      adapter: adapter(JSON.stringify({ imports: [] })),
+      antigravityConfigRoot: path.join(scratch, 'gemini-config'),
+      homeDir: path.join(scratch, 'home'),
+      stateRoot: path.join(scratch, 'state'),
+      mode: 'development',
+      agyCommand: 'echo',
+    });
+    expect(report.ok).toBe(true);
+    if (!report.ok) return undefined;
+    return report.value.checks.find((check) => check.id === 'skill_manifest_drift');
+  }
+
+  test('passes when plugin.json skills[] matches skills/*/SKILL.md', async () => {
+    await expect(skillManifest(source)).resolves.toEqual(expect.objectContaining({
+      status: 'pass',
+      message: expect.stringContaining('skill manifest matches'),
+    }));
+  });
+
+  test('fails when a declared plugin.json skill has no SKILL.md', async () => {
+    fs.writeFileSync(path.join(source, '.claude-plugin', 'plugin.json'), JSON.stringify({
+      name: 'oh-my-agy', version: '0.2.3', skills: ['./skills/autopilot/', './skills/workflow/'],
+    }));
+    await expect(skillManifest(source)).resolves.toEqual(expect.objectContaining({
+      status: 'fail',
+      message: expect.stringMatching(/missing files for declared skills \(workflow\)/),
+    }));
+  });
+
+  test('fails when a skills/*/SKILL.md directory is undeclared in plugin.json', async () => {
+    fs.mkdirSync(path.join(source, 'skills', 'wiki'), { recursive: true });
+    fs.writeFileSync(
+      path.join(source, 'skills', 'wiki', 'SKILL.md'),
+      '---\nname: wiki\ndescription: "fixture"\n---\n\n# wiki\n',
+    );
+    await expect(skillManifest(source)).resolves.toEqual(expect.objectContaining({
+      status: 'fail',
+      message: expect.stringMatching(/undeclared skill directories \(wiki\)/),
+    }));
+  });
+});

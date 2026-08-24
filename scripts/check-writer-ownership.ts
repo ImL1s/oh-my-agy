@@ -83,12 +83,13 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
     wave: 'OMA-W4', owner: 'oma-native-surface-owner', patterns: [
       /^src\/(?:mcp|wiki)\/.+$/,
       /^src\/workflows\/(?:schema|registry|planner|runner|replay|permissions|review|authority|antigravity-adapter)\.ts$/,
-      /^src\/modes\/(?:commands|directives|skill-loader|skill-protocol)\.ts$/,
+      /^src\/modes\/(?:commands|directives|skill-loader|skill-protocol|skill-catalog)\.ts$/,
       /^skills\/[^/]+\/SKILL\.md$/, /^agents\/.+$/, /^commands\/.+$/, /^\.agents\/workflows\/.+$/,
       /^tests\/(?:mcp|wiki|workflows)\/.+$/,
       exact([
         'tests/modes/skill-surface.spec.ts', 'tests/package/native-components.spec.ts',
         'scripts/generate-skill-catalog.ts', 'skills/AGENTS.md',
+        'tests/package/skill-catalog.spec.ts',
       ]),
     ],
   },

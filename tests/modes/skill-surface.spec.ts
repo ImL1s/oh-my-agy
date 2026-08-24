@@ -2,9 +2,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ModeDirectiveRenderer } from '../../src/modes/directives';
 import {
+  isInternalCatalogSkill,
+  listPublicCatalogSkillNames,
+  type OmaWorkflowSkill,
+} from '../../src/modes/skill-catalog';
+import {
   listWorkflowSkillNames,
   loadSkillMarkdown,
-  OmaWorkflowSkill,
   skillNameForManagedMode,
 } from '../../src/modes/skill-loader';
 import { appendSkillProtocol, extractSkillProtocol } from '../../src/modes/skill-protocol';
@@ -21,32 +25,11 @@ const packageRoot = path.resolve(__dirname, '../..');
 
 describe('OMA session skill surface', () => {
   test('required workflow skills exist with non-empty SKILL.md', () => {
-    const required = [
-      'oma-runtime',
-      'autopilot',
-      'deep-interview',
-      'ralplan',
-      'ultragoal',
-      'code-review',
-      'ultraqa',
-      'ralph',
-      'ultrawork',
-      'search',
-      'team',
-      'cancel',
-      'verify',
-      'setup',
-      'workflow',
-      'ask',
-      'wiki',
-      'hud',
-      'plan',
-      'trace',
-    ];
+    const required = listPublicCatalogSkillNames();
     const present = listWorkflowSkillNames(packageRoot);
     for (const name of required) {
       expect(present).toContain(name);
-      const body = loadSkillMarkdown(packageRoot, name as any);
+      const body = loadSkillMarkdown(packageRoot, name);
       expect(body).not.toBeNull();
       expect((body ?? '').length).toBeGreaterThan(200);
       expect(body).toMatch(/Purpose|purpose|## /);
@@ -89,7 +72,7 @@ describe('OMA session skill surface', () => {
   // `OmaWorkflowSkill` union 若少了某個出貨中的 skill，這個 typed literal 會在 tsc 階段就失敗；
   // 其他測試都走 `as any`，無法保護 union 本身。設計概念映射：OMC/OMX 的 skill 名稱型別化。
   test('shipped skill names are members of the OmaWorkflowSkill union', () => {
-    const typed: OmaWorkflowSkill[] = ['ask', 'wiki', 'hud', 'plan', 'trace', 'workflow', 'oma-runtime', 'verify'];
+    const typed: OmaWorkflowSkill[] = listPublicCatalogSkillNames();
     for (const name of typed) {
       expect(listWorkflowSkillNames(packageRoot)).toContain(name);
       expect(loadSkillMarkdown(packageRoot, name)).not.toBeNull();
@@ -124,6 +107,10 @@ describe('OMA session skill surface', () => {
     const runtime = fs.readFileSync(path.join(packageRoot, 'skills', 'oma-runtime', 'SKILL.md'), 'utf8');
     for (const name of onDisk) {
       expect(agents).toContain(`\`${name}/SKILL.md\``);
+      if (isInternalCatalogSkill(name)) {
+        expect(runtime).not.toContain(`\`/oh-my-agy:${name}\``);
+        continue;
+      }
       expect(runtime).toContain(`\`/oh-my-agy:${name}\``);
     }
     const result = checkSkillCatalogs(packageRoot);

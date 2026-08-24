@@ -1,6 +1,8 @@
 /**
  * 設計概念映射：OMC/OMX 的 skill 發現面；OMA 以 `oma skill list|show` 供 session 內 agent 使用。
+ * list 預設隱藏 catalog `visibility: internal`（OMX catalog-manifest status=internal）。
  */
+import { isInternalCatalogSkill } from '../modes/skill-catalog';
 import { listWorkflowSkillNames, loadSkillMarkdown, OmaWorkflowSkill } from '../modes/skill-loader';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
@@ -16,16 +18,26 @@ export type SkillRenderFormat = 'text' | 'json';
 export const DEFAULT_SKILL_RENDER_FORMAT: SkillRenderFormat = 'text';
 
 export type ParsedSkillCommand =
-  | { readonly kind: 'list'; readonly format?: SkillRenderFormat }
+  | { readonly kind: 'list'; readonly format?: SkillRenderFormat; readonly includeInternal?: boolean }
   | { readonly kind: 'show'; readonly name: string; readonly format?: SkillRenderFormat }
   | { readonly kind: 'help'; readonly format?: SkillRenderFormat };
 
-/** 由旗標解析明確指定的呈現格式；未指定時回傳 undefined，由呼叫端套用預設值。 */
-function takeFormatFlags(
+const SKILL_USAGE =
+  'Usage: oma skill list [--json|--text] [--all] | oma skill show <name> [--json|--text] | oma skill help';
+
+function listDiscoverableSkillNames(packageRoot: string, includeInternal: boolean): string[] {
+  const names = listWorkflowSkillNames(packageRoot);
+  if (includeInternal) return names;
+  return names.filter((name) => !isInternalCatalogSkill(name));
+}
+
+/** 由旗標解析明確指定的呈現格式與 `--all`；未指定時回傳 undefined，由呼叫端套用預設值。 */
+function takeSkillFlags(
   argv: readonly string[],
-): Result<{ rest: string[]; format?: SkillRenderFormat }, RuntimeError> {
+): Result<{ rest: string[]; format?: SkillRenderFormat; includeInternal?: boolean }, RuntimeError> {
   const rest: string[] = [];
   let format: SkillRenderFormat | undefined;
+  let includeInternal: boolean | undefined;
   let endOfOptions = false;
   for (const token of argv) {
     // `--` 之後一律視為字面值，讓名稱像旗標的 skill 仍可定址。
@@ -46,29 +58,41 @@ function takeFormatFlags(
       format = token === '--json' ? 'json' : 'text';
       continue;
     }
+    if (!endOfOptions && token === '--all') {
+      if (includeInternal === true) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'oma skill: duplicate option --all'));
+      }
+      includeInternal = true;
+      continue;
+    }
     rest.push(token);
   }
-  return ok({ rest, format });
+  return ok({ rest, format, includeInternal });
 }
 
 export function parseSkillCommand(argv: readonly string[]): Result<ParsedSkillCommand, RuntimeError> {
-  const flags = takeFormatFlags(argv);
+  const flags = takeSkillFlags(argv);
   if (!flags.ok) return flags;
-  const { rest, format } = flags.value;
+  const { rest, format, includeInternal } = flags.value;
   const withFormat = <T extends { kind: string }>(value: T): T & { format?: SkillRenderFormat } =>
     (format === undefined ? value : { ...value, format });
 
+  if (includeInternal === true && rest[0] !== 'list') {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'oma skill --all is only valid with list'));
+  }
   if (rest.length === 0 || rest[0] === 'help' || rest[0] === '--help' || rest[0] === '-h') {
     return ok(withFormat({ kind: 'help' as const }));
   }
-  if (rest[0] === 'list' && rest.length === 1) return ok(withFormat({ kind: 'list' as const }));
+  if (rest[0] === 'list' && rest.length === 1) {
+    return ok(withFormat({
+      kind: 'list' as const,
+      ...(includeInternal === true ? { includeInternal: true as const } : {}),
+    }));
+  }
   if (rest[0] === 'show' && rest.length === 2 && rest[1].trim() !== '') {
     return ok(withFormat({ kind: 'show' as const, name: rest[1].trim() }));
   }
-  return err(runtimeError(
-    'E_VALIDATOR_REJECTED',
-    'Usage: oma skill list [--json|--text] | oma skill show <name> [--json|--text] | oma skill help',
-  ));
+  return err(runtimeError('E_VALIDATOR_REJECTED', SKILL_USAGE));
 }
 
 export function runSkillCommand(
@@ -78,15 +102,15 @@ export function runSkillCommand(
   if (command.kind === 'help') {
     return ok({
       usage: [
-        'oma skill list [--json|--text]',
+        'oma skill list [--json|--text] [--all]',
         'oma skill show <name> [--json|--text]',
         'oma skill help',
       ],
-      note: 'Session skills ship under package skills/. Managed launches inject protocol for the active phase.',
+      note: 'Session skills ship under package skills/. Managed launches inject protocol for the active phase. Internal skills are omitted from list unless --all is passed.',
     });
   }
   if (command.kind === 'list') {
-    const names = listWorkflowSkillNames(packageRoot);
+    const names = listDiscoverableSkillNames(packageRoot, command.includeInternal === true);
     return ok({
       packageRoot,
       skills: names.map((name) => ({
@@ -98,7 +122,7 @@ export function runSkillCommand(
   const body = loadSkillMarkdown(packageRoot, command.name as OmaWorkflowSkill);
   if (body === null) {
     return err(runtimeError('E_NOT_FOUND', `Unknown skill: ${command.name}`, {
-      available: listWorkflowSkillNames(packageRoot),
+      available: listDiscoverableSkillNames(packageRoot, false),
     }));
   }
   return ok({
@@ -141,6 +165,7 @@ export function renderSkillCommandText(command: ParsedSkillCommand, value: unkno
       '',
       'Default output is human-readable text; pass --json for machine-readable output.',
       'Use --text to request the default rendering explicitly.',
+      'Pass --all on list to include internal skills (discovery-proof).',
     ];
     return `${lines.join('\n')}\n`;
   }

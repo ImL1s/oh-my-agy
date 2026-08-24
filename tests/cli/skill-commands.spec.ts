@@ -30,6 +30,41 @@ describe('oma skill commands', () => {
     ]) {
       expect(names).toContain(need);
     }
+    expect(names).not.toContain('discovery-proof');
+    expect(names).not.toContain('doctor');
+  });
+
+  test('list --all includes internal discovery-proof and show doctor is E_NOT_FOUND', () => {
+    expect(parseSkillCommand(['list', '--all'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'list', includeInternal: true },
+    });
+    expect(parseSkillCommand(['--all', 'list', '--json'])).toStrictEqual({
+      ok: true,
+      value: { kind: 'list', format: 'json', includeInternal: true },
+    });
+    const all = runSkillCommand({ kind: 'list', includeInternal: true }, packageRoot);
+    expect(all.ok).toBe(true);
+    if (!all.ok) return;
+    const names = (all.value as { skills: Array<{ name: string }> }).skills.map((s) => s.name);
+    expect(names).toContain('discovery-proof');
+    const canary = runSkillCommand({ kind: 'show', name: 'discovery-proof' }, packageRoot);
+    expect(canary.ok).toBe(true);
+    const shown = runSkillCommand({ kind: 'show', name: 'doctor' }, packageRoot);
+    expect(shown.ok).toBe(false);
+    if (shown.ok) return;
+    expect(shown.error.code).toBe('E_NOT_FOUND');
+  });
+
+  test('rejects --all outside list and duplicate --all', () => {
+    const onShow = parseSkillCommand(['show', 'autopilot', '--all']);
+    expect(onShow.ok).toBe(false);
+    if (onShow.ok) return;
+    expect(onShow.error.code).toBe('E_VALIDATOR_REJECTED');
+    const duplicated = parseSkillCommand(['list', '--all', '--all']);
+    expect(duplicated.ok).toBe(false);
+    if (duplicated.ok) return;
+    expect(duplicated.error.message).toMatch(/duplicate option --all/);
   });
 
   test('shows autopilot skill markdown body', () => {
@@ -135,6 +170,7 @@ describe('oma skill render format', () => {
     // help 不得宣稱不存在的能力：格式由旗標決定，CLI 從不檢查 stdout 是否為 TTY。
     expect(text).not.toMatch(/terminal|piped|TTY|isTTY/i);
     expect(text).toMatch(/Default output is human-readable text/);
+    expect(text).toMatch(/--all/);
   });
 
   test('text error output lists available skills so the user need not read the tree', () => {
@@ -146,6 +182,7 @@ describe('oma skill render format', () => {
     expect(text).toMatch(/^E_NOT_FOUND: Unknown skill: no-such-skill\n/);
     expect(text).toMatch(/Available skills:/);
     expect(text).toMatch(/\n {2}autopilot\n/);
+    expect(text).not.toMatch(/\n {2}discovery-proof\n/);
     expect(text).toMatch(/Try: oma skill show <name>/);
   });
 
