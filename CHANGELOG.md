@@ -21,6 +21,11 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `oma setup --dry-run` prints a redacted JSON plan (hosts, full spawn argv,
+  target paths, identity) and exits 0 with zero host/filesystem mutation.
+  `oma update --check` prints installed vs candidate identity without
+  replacement (`NO_UPDATE_NEEDED` / 無需更新 when identical). (#51)
+
 - `oma session list [--json] [--workspace-key <key>] [--limit <1..200>]` enumerates
   managed sessions from the existing continuation inventory (read-only).
   `oma resume --list` is an alias. `oma hud --session <id>` can omit
