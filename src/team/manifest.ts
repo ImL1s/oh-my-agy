@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { runtimeError } from '../runtime/errors';
 import { Result, err, ok } from '../runtime/types';
+import { inspectOmaRolePosture } from './roles';
 import {
   CanonicalTeamManifestV1,
   CanonicalTeamTaskV1,
@@ -125,6 +126,8 @@ function parseTask(input: unknown, repoRoot: string): Result<CanonicalTeamTaskV1
   if (!isTaskMode(input.mode)) return invalid('Task mode is invalid', { taskId: input.id });
   const scope = parseScope(input.write_scope, repoRoot);
   if (!scope.ok) return scope;
+  const role = parseOptionalTaskRole(input.role, input.mode, scope.value === 'none', input.id);
+  if (!role.ok) return role;
   if (input.mode === 'read_only' && scope.value !== 'none') {
     return invalid('Read-only tasks must use write_scope none', { taskId: input.id });
   }
@@ -145,7 +148,28 @@ function parseTask(input: unknown, repoRoot: string): Result<CanonicalTeamTaskV1
     verification: verification.value,
     ...(subject.value === undefined ? {} : { subject: subject.value }),
     ...(description.value === undefined ? {} : { description: description.value }),
+    ...(role.value === undefined ? {} : { role: role.value }),
   });
+}
+
+/** role 可省略；宣告時套用 OMA_ROLES_V1 下限，違反則 E_VALIDATOR_REJECTED。 */
+function parseOptionalTaskRole(
+  value: unknown,
+  mode: TeamTaskMode,
+  writeScopeNone: boolean,
+  taskId: string,
+): Result<TeamTaskSpecV1['role']> {
+  if (value === undefined) return ok(undefined);
+  const posture = inspectOmaRolePosture({
+    role: value,
+    capabilityMode: mode === 'read_only' ? 'read-only' : 'read-write',
+    writeScopeNone,
+    asChild: true,
+  });
+  if (!posture.ok) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', posture.message, { taskId, ...posture.details }));
+  }
+  return ok(posture.role);
 }
 
 function parseOptionalNonEmptyString(value: unknown): Result<string | undefined> {

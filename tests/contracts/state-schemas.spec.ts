@@ -295,7 +295,16 @@ describe('OMA W0 state and shared schema contracts', () => {
     expect(() => validateWorkerEnvelope({ ...envelope, write_scope: ['src/**'] })).toThrow('Read-only');
     expect(() => validateWorkerEnvelope({ ...envelope, provider: 'codex' })).toThrow('provider');
 
-    const writable = { ...envelope, capability_mode: 'read-write', write_scope: ['src/contracts/index.ts'] } as const;
+    expect(() => validateWorkerEnvelope({
+      ...envelope, capability_mode: 'read-write', write_scope: ['src/contracts/index.ts'],
+    })).toThrow('read-only role floor');
+
+    const writable = {
+      ...envelope,
+      native_role: 'executor',
+      capability_mode: 'read-write',
+      write_scope: ['src/contracts/index.ts'],
+    } as const;
     expect(() => validateWorkerEnvelope(writable)).not.toThrow();
     expect(() => validateWorkerEnvelope({ ...writable, write_scope: ['AGENTS.md'] })).toThrow();
     expect(() => validateWorkerEnvelope({ ...writable, write_scope: ['../escape'] })).toThrow();

@@ -6,6 +6,23 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ## [Unreleased]
 
+### Changed
+
+- Team and repository-workflow validation now derive a `capability_mode` floor
+  from `native_role` / optional task `role` (`src/team/roles.ts`; OMG
+  `omg_cli/team/roles.py` — posture is derived from role and is never an
+  input). Reviewer-class roles (`reviewer`, `critic`, `verifier`,
+  `security-reviewer`, `analyst`, and the other frozen read-only entries)
+  cannot take `read-write` or a non-`none` write scope. Unknown roles fail
+  closed with the legal set in the error. `orchestrator` is leader-only and
+  cannot be a child task or workflow stage. **This is a tightening: existing
+  workflow definitions that already declare contradictory role×capability
+  combinations will start failing** with `E_WORKFLOW_PERMISSION` (team
+  manifests: `E_VALIDATOR_REJECTED`). Fix by setting
+  `capability_mode: 'read-only'` and empty `write_paths` / `write_scope:
+  none`, or by changing the role to a writable worker such as `executor`.
+  Optional `role` does not bump `oma.team-manifest/v1`. (#54)
+
 ### Fixed
 
 - Session skill catalogs in `skills/AGENTS.md` and `skills/oma-runtime/SKILL.md`

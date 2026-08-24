@@ -9,6 +9,7 @@ import {
   assertStringArray,
 } from './state-schemas';
 import { sha256Hex } from './writer-chain';
+import { inspectOmaRolePosture, type OmaRoleV1 } from '../team/roles';
 
 export const REPOSITORY_WORKFLOW_CONTRACT_V1 = 'repository-workflow/v1' as const;
 
@@ -54,7 +55,7 @@ export interface WorkflowStageV1 {
   matrix_count: number;
   agent_count: number;
   max_parallel: number;
-  native_role: string;
+  native_role: OmaRoleV1;
   capability_mode: 'read-only' | 'read-write';
   mcp_allowlist: string[];
   write_paths: string[];
@@ -333,6 +334,16 @@ export function validateRepositoryWorkflow(definition: RepositoryWorkflowV1): Re
     }
     for (const [index, writePath] of stage.write_paths.entries()) {
       assertSafeRepositoryWritePath(writePath, `stage.write_paths[${index}]`);
+    }
+    // 設計概念映射：OMG role_posture 由 native_role 推導；矛盾組合以 E_WORKFLOW_PERMISSION 拒絕。
+    const rolePosture = inspectOmaRolePosture({
+      role: stage.native_role,
+      capabilityMode: stage.capability_mode,
+      writeScopeNone: stage.write_paths.length === 0,
+      asChild: true,
+    });
+    if (!rolePosture.ok) {
+      throw new ContractViolation('E_WORKFLOW_PERMISSION', rolePosture.message, rolePosture.details);
     }
     for (const [index, argv] of stage.verification_argv.entries()) {
       assertSafeArgvVector(argv, `stage.verification_argv[${index}]`);

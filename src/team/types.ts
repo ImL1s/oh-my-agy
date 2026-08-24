@@ -1,5 +1,6 @@
 import { Clock } from '../runtime/types';
 import { WorkerProvider } from '../contracts/worker-envelope';
+import { OmaRoleV1 } from './roles';
 
 export const TEAM_MANIFEST_SCHEMA = 'oma.team-manifest/v1' as const;
 
@@ -47,6 +48,8 @@ export interface TeamTaskSpecV1 {
   verification: TeamVerificationV1;
   subject?: string;
   description?: string;
+  /** 可選；省略時不套用角色下限（oma.team-manifest/v1 回溯相容）。 */
+  role?: OmaRoleV1;
 }
 
 export interface TeamManifestV1 {
