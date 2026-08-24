@@ -292,6 +292,35 @@ Live host Antigravity 1.1.4 对正常 idle stop 常发送 `terminationReason: NO
 
 ---
 
+## 故障排除
+
+OMA 的失败模式几乎都是刻意的 **fail-closed** 或 **静默 fail-open**，所以错误讯息本身往往不会告诉你怎么修。先跑 `oma doctor`。本发行版 **没有** `oma hooks status` 这条诊断指令 — 不要把它当成可执行的排查命令。
+
+| 症状 | 诊断 | 修法 |
+|------|------|------|
+| hooks 没有触发 | `oma doctor`（plugin 已安装且已启用）。检查 `DISABLE_OMA` / `OMA_SKIP_HOOKS`。在 `OMA_HOOK_DEBUG=1` 且已设 `OMA_STATE_ROOT` 时，查看 `<state-root>/logs/hook-debug.jsonl`。 | `oma setup`，然后 **重启 host**。plugin install 只是一半的表面。取消 kill-switch 环境变量。可选项目级 `.agents/hooks.json`。 |
+| `E_PLUGIN_NOT_ACTIVE`（已安装但未启用） | `oma doctor` / `oma doctor --json`，寻找 `plugin is installed but not enabled` 或 registry 缺失。 | `oma setup`。再用 `oma doctor` 确认。仅 slash 的 host 可用 `oma doctor --no-strict-plugin`（plugin 检查降为 warn）。 |
+| `oma setup` 后 slash skill 没出现 | `oma skill list`；`oma doctor` 的 `slash_skills` 与 `slash_collision`。 | 重启 host session。Claude/Grok 使用 `/oh-my-agy:autopilot`（OMC 可能占用裸 `/autopilot`）。重跑 `oma setup --host claude` 或 `--host grok`。 |
+| Legacy magic（`oma ralph task`，无 `--`）只印模式横幅然后没输出 | 非 TTY（CI）会忽略子进程 stdio，除非 `OMA_LEGACY_STDIO=inherit`。 | 优先用 managed `oma ralph -- "task"`。互动 TTY 默认 inherit；可用 `OMA_LEGACY_STDIO=inherit` 或 `ignore` 覆写。 |
+
+### 环境变量
+
+只列出操作者会设的变量。Binding env（`OMA_SESSION_ID`、`OMA_LAUNCH_NONCE` 等）由 managed launch 注入，不要手设。
+
+没有 `OMA_STATE_DIR`；出货名称是 `OMA_STATE_ROOT`。
+
+| 变量 | 默认值 | 作用 |
+|------|--------|------|
+| `DISABLE_OMA` | 未设置（关） | `1` 或 `true`（大小写不敏感）关闭 **全部** Antigravity hook。被抑制的 PreInvocation/Stop 回传 `allow`、空的 `injectSteps`、exit 0；不会解析 workspace，也不会创建 state root。 |
+| `OMA_SKIP_HOOKS` | 未设置 | 逗号分隔的逻辑 hook 名：`pre-invocation`、`stop`、`session-start`、`post-invocation`（忽略空白与大小写）。 |
+| `OMA_HOOK_DEBUG` | 未设置（关） | `1` 或 `true` 把已脱敏诊断追加到 `<OMA_STATE_ROOT>/logs/hook-debug.jsonl`（上限 1 MiB）。默认关闭；绝不写入安装目录。未设 `OMA_STATE_ROOT` 时不写。 |
+| `OMA_LEGACY_STDIO` | TTY 闸门 | Legacy magic spawn 的 stdio。未设置：TTY 上 `inherit`，否则 `ignore`。显式 `inherit` 或 `ignore` 覆写；未知值退回 TTY 闸门。 |
+| `OMA_TIMEOUT_MS` | 依路径 | 正的毫秒数。有界 headless（`oma search --`，或任一 managed 模式搭配 `OMA_MANAGED_HEADLESS=1`）：默认 `3600000`。默认 `oma ralph --` 为互动式，除非设了该 env 否则忽略此变量。Autopilot `drive` 有界 spawn：默认 `30000`。Legacy 透传：未设置则无超时。 |
+| `OMA_LAUNCH_POLICY` | `auto` | 裸 host-launch 传输：`auto`、`direct`、`tmux` 或 `detached-tmux`（最后一个映射为 `tmux`）。CLI `--direct` / `--tmux` 覆写（最后一个旗标胜出）。 |
+| `OMA_STATE_ROOT` | 平台默认 | 持久 state root（session aggregate、hook debug log）。macOS：`~/Library/Application Support/oh-my-agy/state`。Windows：`%LOCALAPPDATA%/oh-my-agy/state`。其它：`${XDG_STATE_HOME:-~/.local/state}/oh-my-agy`。 |
+
+---
+
 ## 测试 / CI / release
 
 ```bash

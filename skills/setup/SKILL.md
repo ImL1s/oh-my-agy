@@ -61,3 +61,11 @@ oma doctor
 ```
 
 `oma doctor` is the durable health gate; re-run after install changes.
+
+## Troubleshooting
+
+The `oma hooks status` verb is not shipped — do not tell the user to run it. Use `oma doctor` and `oma skill list`. See:
+
+- [Troubleshooting (English)](../../README.md#troubleshooting)
+- [故障排除](../../docs/readme/README.zh.md#故障排除)
+- [疑難排解](../../docs/readme/README.zh-TW.md#疑難排解)
