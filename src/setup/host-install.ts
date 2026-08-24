@@ -92,6 +92,22 @@ export function grokPluginInstallArgs(packageRoot: string): readonly string[] {
   return ['plugin', 'install', packageRoot, '--trust'];
 }
 
+/** Grok stdio MCP 入口：package 內編譯後的 `oma` CLI（與 plugin install 共用呼叫端的 packageRoot）。 */
+export function grokMcpServerBin(packageRoot: string): string {
+  return path.join(packageRoot, 'dist', 'bin', 'oma.js');
+}
+
+/**
+ * 設計概念映射：OMG `omg mcp-install` 執行 `grok mcp add omg <bin> -- mcp-server`。
+ * Grok 官方 CLI（https://docs.x.ai/build/features/mcp-servers ，查閱 2026-08-24）：
+ * stdio 用法為 `grok mcp add <name> -- <command> [args...]`；clap 亦接受
+ * 位置參數 `grok mcp add <name> <command> -- [args...]`。
+ * 本路徑對齊 issue #49 / OMG，不發明 flag：`grok mcp add oh-my-agy <bin> -- mcp-server`。
+ */
+export function grokMcpAddArgs(packageRoot: string): readonly string[] {
+  return ['mcp', 'add', 'oh-my-agy', grokMcpServerBin(packageRoot), '--', 'mcp-server'];
+}
+
 /**
  * 將被 spawn 的完整 argv（含 host 可執行檔名稱）。
  * 設計概念映射：OMX `setup --dry-run` 先列計畫；此處輸出可直接複製執行的 argv 陣列。
@@ -106,6 +122,7 @@ export function plannedClaudeSlashSpawns(packageRoot: string): readonly (readonl
 export function plannedGrokSlashSpawns(packageRoot: string): readonly (readonly string[])[] {
   return [
     ['grok', ...grokPluginInstallArgs(packageRoot)],
+    ['grok', ...grokMcpAddArgs(packageRoot)],
   ];
 }
 
@@ -278,8 +295,10 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
 function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostInstallStepV1 {
   const grok = adapter.which('grok');
   const installArgs = grokPluginInstallArgs(packageRoot);
+  const mcpArgs = grokMcpAddArgs(packageRoot);
   const commands = [
     ['grok', ...installArgs].map(shellQuote).join(' '),
+    ['grok', ...mcpArgs].map(shellQuote).join(' '),
     '# slash: /oh-my-agy:autopilot <goal>',
   ];
   const packageLink = linkProjectSkills(packageRoot, path.join(packageRoot, '.grok', 'skills'));
@@ -290,7 +309,7 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
       status: 'needs_manual',
       message:
         `grok CLI not on PATH; linked skills under packageRoot (.grok/skills)=${packageLink.ok}. `
-        + 'Run plugin install manually (see commands).',
+        + 'Run plugin install and MCP add manually (see commands).',
       commands,
       ownedPaths: packageLink.ownedPaths,
       detail: { packageRootSkillsLink: packageLink },
@@ -298,45 +317,58 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
   }
 
   const result = adapter.run(grok, installArgs);
+  const mcpResult = adapter.run(grok, mcpArgs);
   const commandReceipts = [
     hostCommandReceipt(grok, installArgs, result),
+    hostCommandReceipt(grok, mcpArgs, mcpResult),
   ];
-  if (result.timedOut) {
+  if (result.timedOut || mcpResult.timedOut) {
     return {
       host: 'grok',
       status: 'failed',
-      message: 'grok plugin install timed out; run commands below manually',
-      commands,
-      commandReceipts,
-      ownedPaths: packageLink.ownedPaths,
-      detail: { code: result.status, packageRootSkillsLink: packageLink },
-    };
-  }
-  if (result.status === 0) {
-    return {
-      host: 'grok',
-      status: 'ok',
-      message: 'Grok plugin install succeeded; restart session for /oh-my-agy:autopilot',
-      commands,
-      commandReceipts,
-      ownedPaths: packageLink.ownedPaths,
-      detail: {
-        packageRootSkillsLink: packageLink,
-      },
-    };
-  }
-
-  // Idempotent: already installed is success for slash-first setup
-  if (isAlreadyInstalled(result)) {
-    return {
-      host: 'grok',
-      status: 'ok',
-      message: 'Grok plugin already installed; restart session for /oh-my-agy:autopilot',
+      message: 'grok plugin install or MCP add timed out; run commands below manually',
       commands,
       commandReceipts,
       ownedPaths: packageLink.ownedPaths,
       detail: {
         code: result.status,
+        mcpCode: mcpResult.status,
+        packageRootSkillsLink: packageLink,
+      },
+    };
+  }
+  const installOk = result.status === 0 || isAlreadyInstalled(result);
+  const mcpOk = mcpResult.status === 0 || isAlreadyInstalled(mcpResult);
+  if (installOk && mcpOk) {
+    return {
+      host: 'grok',
+      status: 'ok',
+      message: result.status === 0
+        ? 'Grok plugin install and MCP add succeeded; restart session for /oh-my-agy:autopilot'
+        : 'Grok plugin already installed; MCP registration recorded; restart session for /oh-my-agy:autopilot',
+      commands,
+      commandReceipts,
+      ownedPaths: packageLink.ownedPaths,
+      detail: {
+        code: result.status,
+        mcpCode: mcpResult.status,
+        packageRootSkillsLink: packageLink,
+      },
+    };
+  }
+
+  if (installOk && !mcpOk) {
+    return {
+      host: 'grok',
+      status: 'needs_manual',
+      message:
+        'Grok plugin install succeeded but MCP add failed; run grok mcp add manually (see commands)',
+      commands,
+      commandReceipts,
+      ownedPaths: packageLink.ownedPaths,
+      detail: {
+        code: result.status,
+        mcpCode: mcpResult.status,
         packageRootSkillsLink: packageLink,
       },
     };
@@ -352,6 +384,7 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
     ownedPaths: packageLink.ownedPaths,
     detail: {
       code: result.status,
+      mcpCode: mcpResult.status,
       packageRootSkillsLink: packageLink,
     },
   };
@@ -359,7 +392,7 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
 
 function isAlreadyInstalled(result: HostCliResult): boolean {
   const combined = `${result.stderr || ''}\n${result.stdout || ''}`;
-  return /already installed/i.test(combined);
+  return /already (installed|exists|configured|registered)/i.test(combined);
 }
 
 /**

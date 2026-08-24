@@ -5,6 +5,7 @@ import {
   HostCliAdapter,
   HostCliResult,
   evaluateHostInstallAuthority,
+  grokMcpAddArgs,
   installSlashHosts,
   linkProjectSkills,
   parseSetupHosts,
@@ -68,6 +69,7 @@ describe('slash host install helpers', () => {
     ]);
     expect(plannedGrokSlashSpawns(root)).toEqual([
       ['grok', 'plugin', 'install', root, '--trust'],
+      ['grok', ...grokMcpAddArgs(root)],
     ]);
   });
 

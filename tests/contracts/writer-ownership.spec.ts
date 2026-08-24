@@ -32,6 +32,15 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     expect(() => validateChangedPathOwnership(['src/setup/doctor.ts'], 'OMA-W0')).toThrow('OMA-W1');
   });
 
+  test('#49 MCP registration files map to install and composition owners', () => {
+    expect(ownershipForPath('tests/setup/mcp-registration.spec.ts')).toEqual({
+      wave: 'OMA-W1', owner: 'oma-install-owner',
+    });
+    expect(ownershipForPath('.claude-plugin/.mcp.json')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+  });
+
   test('production probe implementation and evidence tests are W6 composition-owned', () => {
     expect(ownershipForPath('src/production/evidence.ts')).toEqual({
       wave: 'OMA-W6', owner: 'oma-final-composition-owner',

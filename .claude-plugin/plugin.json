@@ -38,5 +38,6 @@
     "./skills/hud/",
     "./skills/plan/",
     "./skills/trace/"
-  ]
+  ],
+  "mcpServers": "./.claude-plugin/.mcp.json"
 }

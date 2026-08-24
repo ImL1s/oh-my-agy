@@ -6,6 +6,7 @@ import { createDefaultServices } from '../../src/cli/services';
 import {
   HostCliAdapter,
   HostCliResult,
+  grokMcpAddArgs,
   plannedClaudeSlashSpawns,
   plannedGrokSlashSpawns,
 } from '../../src/setup/host-install';
@@ -227,6 +228,10 @@ describe('oma setup --dry-run', () => {
         expect.objectContaining({
           host: 'grok',
           args: ['grok', 'plugin', 'install', path.resolve(source), '--trust'],
+        }),
+        expect.objectContaining({
+          host: 'grok',
+          args: ['grok', ...grokMcpAddArgs(path.resolve(source))],
         }),
       ]));
     }

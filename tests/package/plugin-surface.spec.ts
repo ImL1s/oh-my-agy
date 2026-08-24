@@ -49,6 +49,7 @@ describe('Antigravity package surface', () => {
       name?: string;
       version?: string;
       skills?: string[];
+      mcpServers?: string;
       author?: { name?: string };
       homepage?: string;
     };
@@ -75,6 +76,8 @@ describe('Antigravity package surface', () => {
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/autopilot/']));
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/discovery-proof/']));
     expect(claude.skills).toEqual(expect.arrayContaining(['./skills/workflow/']));
+    expect(claude.mcpServers).toBe('./.claude-plugin/.mcp.json');
+    expect(fs.existsSync(path.join(root, '.claude-plugin', '.mcp.json'))).toBe(true);
     const discoveryProof = fs.readFileSync(
       path.join(root, 'skills', 'discovery-proof', 'SKILL.md'),
       'utf8',
