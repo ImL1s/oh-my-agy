@@ -103,6 +103,7 @@ export async function runDoctor(
   checks.push(checkPackageRoot(packageRoot, packageVersion));
   checks.push(checkPluginManifestVersion(packageRoot, packageVersion));
   checks.push(checkClaudePluginManifest(packageRoot));
+  checks.push(checkMcpRegistration(packageRoot));
   checks.push(checkSlashSkillSurface(packageRoot));
   checks.push(checkSkillManifestDrift(packageRoot));
   checks.push(checkHooks(packageRoot));
@@ -448,6 +449,103 @@ function checkHooks(packageRoot: string): DoctorCheckV1 {
     message: 'PreInvocation + Stop compiled entrypoints present',
     detail: hooks.value,
   };
+}
+
+/** Claude Code plugin.json 的 mcpServers 路徑（相對 plugin root，須以 ./ 開頭）。 */
+export const CLAUDE_PLUGIN_MCP_SERVERS_PATH = './.claude-plugin/.mcp.json';
+
+/**
+ * 設計概念映射：OMC `.claude-plugin/plugin.json` 的 `mcpServers` 指向
+ * `${CLAUDE_PLUGIN_ROOT}` 版 `.mcp.json`；OMG 則另跑 `grok mcp add`。
+ * 未註冊只 WARN，避免既有安裝一次打成紅燈（#49）。禁止 fail。
+ */
+function checkMcpRegistration(packageRoot: string): DoctorCheckV1 {
+  const id = 'mcp_registration';
+  const warn = (message: string, detail?: unknown): DoctorCheckV1 => ({
+    id,
+    status: 'warn',
+    message,
+    ...(detail === undefined ? {} : { detail }),
+  });
+  const manifestPath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+  const mcpPath = path.join(packageRoot, '.claude-plugin', '.mcp.json');
+  if (!fs.existsSync(manifestPath)) {
+    return warn('Claude plugin manifest missing; MCP server is unregistered');
+  }
+  const manifest = readJsonObject(manifestPath);
+  if (!manifest.ok) {
+    return warn('.claude-plugin/plugin.json unreadable for mcpServers', { cause: manifest.cause });
+  }
+  const mcpServersField = manifest.value.mcpServers;
+  const pointed = resolveMcpServersPath(mcpServersField);
+  if (pointed !== CLAUDE_PLUGIN_MCP_SERVERS_PATH) {
+    return warn(
+      'Claude plugin mcpServers is unregistered (expected ./.claude-plugin/.mcp.json)',
+      { mcpServers: mcpServersField ?? null },
+    );
+  }
+  if (!fs.existsSync(mcpPath)) {
+    return warn('Claude MCP config missing (.claude-plugin/.mcp.json); MCP server is unregistered');
+  }
+  let raw: string;
+  try {
+    raw = fs.readFileSync(mcpPath, 'utf8');
+  } catch (error) {
+    return warn('.claude-plugin/.mcp.json unreadable', {
+      cause: error instanceof Error ? error.message : String(error),
+    });
+  }
+  if (raw.includes('${extensionPath}')) {
+    return warn(
+      '.claude-plugin/.mcp.json uses ${extensionPath} (Antigravity-only); expected ${CLAUDE_PLUGIN_ROOT}',
+    );
+  }
+  if (!raw.includes('${CLAUDE_PLUGIN_ROOT}')) {
+    return warn('.claude-plugin/.mcp.json is missing ${CLAUDE_PLUGIN_ROOT}');
+  }
+  const parsed = readJsonObject(mcpPath);
+  if (!parsed.ok) {
+    return warn('.claude-plugin/.mcp.json is not a JSON object', { cause: parsed.cause });
+  }
+  const servers = parsed.value.mcpServers;
+  if (typeof servers !== 'object' || servers === null || Array.isArray(servers)) {
+    return warn('.claude-plugin/.mcp.json is missing mcpServers object');
+  }
+  const entry = (servers as Record<string, unknown>)['oh-my-agy'];
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return warn('.claude-plugin/.mcp.json is missing oh-my-agy server');
+  }
+  const server = entry as Record<string, unknown>;
+  const args = Array.isArray(server.args) ? server.args : [];
+  const hasBin = args.some((item) => (
+    typeof item === 'string' && item.includes('${CLAUDE_PLUGIN_ROOT}') && item.endsWith('oma.js')
+  ));
+  const hasVerb = args.some((item) => item === 'mcp-server');
+  if (server.command !== 'node' || !hasBin || !hasVerb) {
+    return warn(
+      '.claude-plugin/.mcp.json oh-my-agy server does not launch node .../oma.js mcp-server',
+      { command: server.command, args },
+    );
+  }
+  return {
+    id,
+    status: 'pass',
+    message:
+      'Claude plugin MCP wiring present (${CLAUDE_PLUGIN_ROOT}); Grok MCP is registered by oma setup --host grok',
+    detail: {
+      mcpServers: pointed,
+      config: '.claude-plugin/.mcp.json',
+    },
+  };
+}
+
+function resolveMcpServersPath(raw: unknown): string | undefined {
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    const paths = raw.filter((item): item is string => typeof item === 'string');
+    return paths.find((item) => item === CLAUDE_PLUGIN_MCP_SERVERS_PATH) ?? paths[0];
+  }
+  return undefined;
 }
 
 function checkClaudePluginManifest(packageRoot: string): DoctorCheckV1 {

@@ -61,7 +61,7 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
     wave: 'OMA-W1', owner: 'oma-install-owner', patterns: [
       /^src\/setup\/(?:plugin|doctor|transaction|host-install|installed-identity|update|uninstall|receipt|dry-run)\.ts$/,
       /^scripts\/(?:install|smoke)\.sh$/, /^scripts\/(?:smoke-full-product|release-attest)\.ts$/,
-      /^tests\/setup\/(?:doctor|host-install|plugin-preflight|setup-transaction|installed-identity|update|uninstall|release-install|dry-run)\.spec\.ts$/,
+      /^tests\/setup\/(?:doctor|host-install|plugin-preflight|setup-transaction|installed-identity|update|uninstall|release-install|dry-run|mcp-registration)\.spec\.ts$/,
       exact(['tests/package/plugin-surface.spec.ts']),
     ],
   },
@@ -110,7 +110,8 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
         'src/cli/services.ts', 'src/cli/skill-commands.ts', 'src/cli/session-commands.ts', 'src/autopilot/commands.ts',
         'src/autopilot/phases.ts', 'src/autopilot/runtime.ts', 'src/enforcer.ts', 'src/types.ts',
         'package.json', 'package-lock.json', 'plugin.json', 'hooks.json', '.agents/hooks.json',
-        '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json', '.mcp.json',
+        '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json',
+        '.claude-plugin/.mcp.json', '.mcp.json',
         'rules/runtime.md', '.github/workflows/ci.yml', '.github/workflows/release.yml',
         'README.md', 'CHANGELOG.md', 'CLAUDE.md', 'DESIGN.md', 'PROJECT.md', 'TEST_INFRA.md',
         'TEST_READY.md', 'docs/npm-publishing.md', 'docs/RELEASE.md', 'docs/capabilities.md',

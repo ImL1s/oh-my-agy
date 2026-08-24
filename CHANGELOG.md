@@ -38,6 +38,14 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- Claude Code plugin MCP wiring: `.claude-plugin/.mcp.json` uses
+  `${CLAUDE_PLUGIN_ROOT}` (not Antigravity `${extensionPath}`), and
+  `.claude-plugin/plugin.json` `mcpServers` points at that file. Grok host
+  install runs `grok mcp add oh-my-agy <bin> -- mcp-server` beside plugin
+  install (spawn + argv + receipt). `oma doctor` adds `mcp_registration`,
+  which **warns** when unregistered instead of failing. No new MCP
+  operations. (#49)
+
 - README Troubleshooting (EN / zh / zh-TW) plus an operator environment-variable
   table bound to `src/`/`bin/` usage and `CLI_HELP`. Does not claim
   `oma hooks status`. (#64)
