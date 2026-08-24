@@ -8,6 +8,12 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Changed
 
+- PreInvocation managed skill inject now renders every `visibility: 'public'`
+  entry from `OMA_SKILL_CATALOG_V1` (plus `OMA_MANAGED_MODE`) instead of a
+  hardcoded 7-skill pipe list. Internal `discovery-proof` stays omitted.
+  Inject text is capped with a stable truncation marker; catalog load/list
+  failures fail-open to the previous static hint and still `decision: 'allow'`.
+  (#52)
 - Team and repository-workflow validation now derive a `capability_mode` floor
   from `native_role` / optional task `role` (`src/team/roles.ts`; OMG
   `omg_cli/team/roles.py` — posture is derived from role and is never an
