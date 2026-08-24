@@ -87,6 +87,7 @@ describe('CLI application wiring', () => {
     services.launchMode.mockResolvedValue(err(runtimeError('E_PLUGIN_NOT_ACTIVE', 'plugin inactive')));
     expect(await runCli(['ralph', '--', 'task'], services, io)).toBe(1);
     expect(output().stderr).toContain('E_PLUGIN_NOT_ACTIVE: plugin inactive');
+    expect(output().stderr).toContain('  next: ');
     expect(services.passThrough).not.toHaveBeenCalled();
   });
 
@@ -111,6 +112,7 @@ describe('CLI application wiring', () => {
     );
     expect(output().stdout).toContain('oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]');
     expect(output().stdout).toContain('oma update [--release] [--bin-dir <dir>] [--check]');
+    expect(output().stdout).toContain('oma explain <E_CODE> [--json]');
   });
 
   test('routes public composition commands without passing them to agy', async () => {
@@ -123,6 +125,8 @@ describe('CLI application wiring', () => {
     expect(services.extendedCommand).toHaveBeenCalledWith('cancel', ['--all']);
     expect(await runCli(['hooks', 'status', '--json'], services, io)).toBe(0);
     expect(services.extendedCommand).toHaveBeenCalledWith('hooks', ['status', '--json']);
+    expect(await runCli(['explain', 'E_PLUGIN_NOT_ACTIVE', '--json'], services, io)).toBe(0);
+    expect(services.extendedCommand).toHaveBeenCalledWith('explain', ['E_PLUGIN_NOT_ACTIVE', '--json']);
     expect(services.passThrough).not.toHaveBeenCalled();
   });
 

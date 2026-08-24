@@ -12,6 +12,7 @@ import {
   type SessionAggregateV1,
 } from '../continuation/session-aggregate';
 import { listWorkspaceSessionInventory } from '../continuation/state';
+import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { resolveStateRoot } from '../runtime/state-root';
 import { Result, err, ok } from '../runtime/types';
@@ -175,12 +176,12 @@ export function runSessionListCommand(
 ): number {
   const parsed = parseSessionListArgv(argv);
   if (!parsed.ok) {
-    context.stderr(`${parsed.error.code}: ${parsed.error.message}\n`);
+    context.stderr(formatCliError(parsed.error.code, parsed.error.message));
     return 2;
   }
   const stateRoot = resolveListStateRoot(context);
   if (!stateRoot.ok) {
-    context.stderr(`${stateRoot.error.code}: ${stateRoot.error.message}\n`);
+    context.stderr(formatCliError(stateRoot.error.code, stateRoot.error.message));
     return 1;
   }
   const listed = listManagedSessions({
@@ -189,7 +190,7 @@ export function runSessionListCommand(
     limit: parsed.value.limit,
   });
   if (!listed.ok) {
-    context.stderr(`${listed.error.code}: ${listed.error.message}\n`);
+    context.stderr(formatCliError(listed.error.code, listed.error.message));
     return listed.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
   }
   context.stdout(`${renderSessionList(listed.value, parsed.value.asJson ? 'json' : 'text')}\n`);

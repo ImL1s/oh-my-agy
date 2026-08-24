@@ -1,3 +1,4 @@
+import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError } from '../runtime/errors';
 import { ProcessOutcome } from '../runtime/process';
 import { Result } from '../runtime/types';
@@ -54,6 +55,7 @@ Usage:
   oma production verify [--run-id <id>]
   oma production probe <plugin-discovery|managed-lifecycle|exact-resume|worker-runtime|mcp-lsp|workflow> [--run-id <id>]
   oma production capture <review|ultraqa> [--run-id <id>] -- <codex|claude|grok|agy|cursor-agent> <args...>
+  oma explain <E_CODE> [--json]
   oma autopilot start -- <goal>
   oma autopilot status --session <id>
   oma autopilot advance|checkpoint --session <id> --expected-revision <n> --evidence <file>
@@ -111,7 +113,7 @@ export async function runCli(
       io.stdout(`${services.version ?? 'unknown'}\n`);
       return 0;
     case 'invalid':
-      io.stderr(`${command.code}: ${command.message}\n`);
+      io.stderr(formatCliError(command.code, command.message));
       return 2;
     case 'mode':
       return outcomeCode(await services.launchMode(command.mode, command.task), io);
@@ -139,7 +141,7 @@ function outcomeCode(
   io: CliIo,
 ): number {
   if (!result.ok) {
-    io.stderr(`${result.error.code}: ${result.error.message}\n`);
+    io.stderr(formatCliError(result.error.code, result.error.message));
     // 與 legacy gate / invalid 對齊：validator 類錯誤用 2
     return result.error.code === 'E_VALIDATOR_REJECTED' || result.error.code === 'E_DIRECTIVE_INVALID'
       ? 2

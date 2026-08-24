@@ -30,6 +30,7 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('skill list');
     expect(r.stdout).toContain('oma session list');
     expect(r.stdout).toContain('oma resume --list');
+    expect(r.stdout).toContain('oma explain <E_CODE> [--json]');
   });
 
   test('TC-S-01b: oma skill list --json returns JSON skill catalog', async () => {

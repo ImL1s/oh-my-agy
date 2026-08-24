@@ -37,6 +37,7 @@ describe('OMA host-launch contract', () => {
     expect(() => shouldHostLaunch(['cancel', '--direct'])).toThrow(/E_LAUNCH_USAGE/);
     expect(shouldHostLaunch(['hooks'])).toBe(false);
     expect(shouldHostLaunch(['hooks', 'status'])).toBe(false);
+    expect(shouldHostLaunch(['explain'])).toBe(false);
     expect(shouldHostLaunch(['native', 'capabilities'])).toBe(false);
     expect(shouldHostLaunch(['native', 'probe', '--live'])).toBe(false);
     expect(shouldHostLaunch(['native'])).toBe(false);

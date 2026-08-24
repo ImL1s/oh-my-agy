@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { StateStore } from '../runtime/state-store';
 import { Result, err, ok } from '../runtime/types';
@@ -433,7 +434,7 @@ export async function teamCommand(
   const stderr = options.stderr ?? ((value) => process.stderr.write(value));
   const parsed = parseTeamCommand(argv);
   if (!parsed.ok) {
-    stderr(`${parsed.error.code}: ${parsed.error.message}\n`);
+    stderr(formatCliError(parsed.error.code, parsed.error.message));
     return 2;
   }
   const getOrchestrator = (): TeamOrchestrator => options.orchestratorFactory?.(options.context)
@@ -446,7 +447,7 @@ export async function teamCommand(
       repoRoot: options.context.workspaceRoot,
     });
     if (!resolvedParallel.ok) {
-      stderr(`${resolvedParallel.error.code}: ${resolvedParallel.error.message}\n`);
+      stderr(formatCliError(resolvedParallel.error.code, resolvedParallel.error.message));
       return teamStartErrorExitCode(resolvedParallel.error.code);
     }
     orchestrator.setMaxParallelWorkers(resolvedParallel.value);
@@ -455,7 +456,7 @@ export async function teamCommand(
       parsed.value.workerMode,
     );
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return teamStartErrorExitCode(result.error.code);
     }
     // claimToken 僅單次回傳於 JSON；勿寫入 durable 日誌以外的儲存
@@ -482,7 +483,7 @@ export async function teamCommand(
     const orchestrator = getOrchestrator();
     const result = await orchestrator.status(parsed.value.teamId);
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return 1;
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-status', ...result.value })}\n`);
@@ -492,7 +493,7 @@ export async function teamCommand(
   if (parsed.value.kind === 'stop') {
     const result = await getOrchestrator().stop(parsed.value.teamId);
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return 1;
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-stopped', ...result.value })}\n`);
@@ -502,7 +503,7 @@ export async function teamCommand(
   if (parsed.value.kind === 'supervise') {
     const result = await getOrchestrator().superviseOnce(parsed.value.teamId);
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return 1;
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-supervise-report', ...result.value })}\n`);
@@ -518,7 +519,7 @@ export async function teamCommand(
       parsed.value.process,
     );
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return result.error.code === 'E_RECLAIM_IDENTITY_UNPROVEN' || result.error.code === 'E_VALIDATOR_REJECTED'
         ? 2
         : 1;
@@ -537,7 +538,7 @@ export async function teamCommand(
       worktreePath: parsed.value.worktreePath,
     });
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return 1;
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-delivered', ...result.value })}\n`);
@@ -551,7 +552,7 @@ export async function teamCommand(
     }
     const result = await orch.tick(parsed.value.teamId, parsed.value.workerMode);
     if (!result.ok) {
-      stderr(`${result.error.code}: ${result.error.message}\n`);
+      stderr(formatCliError(result.error.code, result.error.message));
       return 1;
     }
     stdout(`${JSON.stringify({
@@ -583,9 +584,10 @@ export async function teamCommand(
   try {
     evidence = JSON.parse(fs.readFileSync(parsed.value.evidencePath, 'utf8')) as RecoveryForkSelectionEvidenceV1;
   } catch (error) {
-    stderr(`E_CORRUPT_STATE: cannot read recovery evidence: ${
-      error instanceof Error ? error.message : String(error)
-    }\n`);
+    stderr(formatCliError(
+      'E_CORRUPT_STATE',
+      `cannot read recovery evidence: ${error instanceof Error ? error.message : String(error)}`,
+    ));
     return 1;
   }
 
@@ -598,7 +600,7 @@ export async function teamCommand(
     ? attachLeaderActorFromRecovery(options.context, store, key)
     : ok(options.context);
   if (!context.ok) {
-    stderr(`${context.error.code}: ${context.error.message}\n`);
+    stderr(formatCliError(context.error.code, context.error.message));
     return 1;
   }
   const resolver = new RecoveryForkResolver(store, key);
@@ -610,7 +612,7 @@ export async function teamCommand(
   }, context.value);
 
   if (result.kind === 'Rejected') {
-    stderr(`${result.error.code}: ${result.error.message}\n`);
+    stderr(formatCliError(result.error.code, result.error.message));
     return 1;
   }
   // issuedClaimToken 僅 Selected 單次回傳；durable 狀態只存 digest
@@ -873,14 +875,15 @@ async function runTeamApiCommand(
   try {
     const parsedJson = JSON.parse(parsed.inputJson) as unknown;
     if (parsedJson === null || typeof parsedJson !== 'object' || Array.isArray(parsedJson)) {
-      stderr('E_VALIDATOR_REJECTED: team api --input must be a JSON object\n');
+      stderr(formatCliError('E_VALIDATOR_REJECTED', 'team api --input must be a JSON object'));
       return 2;
     }
     input = parsedJson as Record<string, unknown>;
   } catch (error) {
-    stderr(`E_VALIDATOR_REJECTED: team api --input is not valid JSON: ${
-      error instanceof Error ? error.message : String(error)
-    }\n`);
+    stderr(formatCliError(
+      'E_VALIDATOR_REJECTED',
+      `team api --input is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    ));
     return 2;
   }
 

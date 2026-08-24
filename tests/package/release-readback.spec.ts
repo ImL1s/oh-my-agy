@@ -37,6 +37,7 @@ describe('0.5.2 release readback', () => {
       'docs/parity/oma-traceability.json',
       'docs/security.md',
       'docs/workflows.md',
+      'docs/error-codes.md',
       'docs/npm-publishing.md',
       'dist/scripts/check-writer-ownership.js',
     ]));
@@ -212,6 +213,7 @@ describe('0.5.2 release readback', () => {
       'docs/parity/oma-traceability.json',
       'docs/security.md',
       'docs/workflows.md',
+      'docs/error-codes.md',
       'docs/npm-publishing.md',
       'dist/bin/oma.js',
       'dist/scripts/check-writer-ownership.js',

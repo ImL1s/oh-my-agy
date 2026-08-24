@@ -67,7 +67,7 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
   },
   {
     wave: 'OMA-W2', owner: 'oma-state-owner', patterns: [
-      /^src\/runtime\/(?:atomic|errors|lock|process|sandbox|state-root|state-store|types|tracker|capability-discovery|redaction|compaction)\.ts$/,
+      /^src\/runtime\/(?:atomic|errors|error-catalog|lock|process|sandbox|state-root|state-store|types|tracker|capability-discovery|redaction|compaction)\.ts$/,
       /^src\/continuation\/(?:decision|event-identity|progress-oracle|session-aggregate|state|resume|recovery)\.ts$/,
       /^src\/hooks\/(?:common|debug-log|pre-invocation|stop|workspace|session-start|post-invocation)\.ts$/,
       /^tests\/(?:runtime|hooks|continuation)\/.+$/,
@@ -107,7 +107,7 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
       exact([
         'bin/oma.ts', 'src/cli/application.ts', 'src/cli/dangerous-launch.ts',
         'src/cli/host-launch.ts', 'src/cli/managed-invocation.ts', 'src/cli/parser.ts',
-        'src/cli/runtime-adapter.ts', 'src/cli/cancel-command.ts',
+        'src/cli/runtime-adapter.ts', 'src/cli/cancel-command.ts', 'src/cli/explain-command.ts',
         'src/cli/services.ts', 'src/cli/skill-commands.ts', 'src/cli/session-commands.ts',
         'src/cli/hooks-commands.ts', 'src/autopilot/commands.ts',
         'src/autopilot/phases.ts', 'src/autopilot/runtime.ts', 'src/enforcer.ts', 'src/types.ts',
@@ -117,7 +117,7 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
         'rules/runtime.md', '.github/workflows/ci.yml', '.github/workflows/release.yml',
         'README.md', 'CHANGELOG.md', 'CLAUDE.md', 'DESIGN.md', 'PROJECT.md', 'TEST_INFRA.md',
         'TEST_READY.md', 'docs/npm-publishing.md', 'docs/RELEASE.md', 'docs/capabilities.md',
-        'docs/security.md', 'docs/workflows.md', 'jest.config.js', 'jest.unit.config.js',
+        'docs/security.md', 'docs/workflows.md', 'docs/error-codes.md', 'jest.config.js', 'jest.unit.config.js',
         'tsconfig.json', 'tests/package/release-readback.spec.ts',
       ]),
       /^tests\/(?:cli|autopilot)\/.+$/,

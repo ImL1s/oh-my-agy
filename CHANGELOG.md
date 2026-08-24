@@ -22,6 +22,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   `capability_mode: 'read-only'` and empty `write_paths` / `write_scope:
   none`, or by changing the role to a writable worker such as `executor`.
   Optional `role` does not bump `oma.team-manifest/v1`. (#54)
+- Cataloged CLI errors now print an extra indented `next:` line on stderr
+  after `CODE: message`. Uncataloged codes keep the previous one-line
+  format (fail-open). Scripts that match stderr exactly should tolerate
+  the extra line. `--json` output is unchanged. (#57)
 
 ### Fixed
 
@@ -83,6 +87,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   readable no-op with exit 0. `oma autopilot cancel` is unchanged.
   `skills/cancel` now calls this verb instead of hand-editing state files.
   (#48)
+- `oma explain <E_CODE> [--json]` looks up the CLI-visible error catalog
+  (`src/runtime/error-catalog.ts`, shipped as `docs/error-codes.md`).
+  Unknown `E_*` codes return a readable `E_NOT_IN_CATALOG` message and
+  exit non-zero; non-`E_*` input is `E_VALIDATOR_REJECTED`. (#57)
 - New in-session skill **`plan`** (`/oh-my-agy:plan`): light planning under
   `ralplan`, with verifiable per-step completion and artifacts in `.agy/plans/`.
   No `oma plan` CLI verb. (#40)

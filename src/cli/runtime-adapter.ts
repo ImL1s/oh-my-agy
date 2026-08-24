@@ -43,6 +43,7 @@ import {
   ManagedLaunchTransaction as RuntimeManagedLaunchTransaction,
   SessionLocator,
 } from '../continuation/state';
+import { formatCliError } from '../runtime/error-catalog';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { currentProcessIdentity, ProcessRunner } from '../runtime/process';
 import {
@@ -807,7 +808,7 @@ function writeNativeFailure(
       schema: 'oma.native-command-result/v1',
     }).toString('utf8')}\n`);
   } else {
-    context.stderr(`${error.code}: ${error.message}\n`);
+    context.stderr(formatCliError(error.code, error.message));
   }
   return exitCode;
 }
@@ -853,11 +854,15 @@ export async function runExtendedCommand(
         return await runParityCommand(argv, context);
       case 'production':
         return await runProductionCommand(argv, context);
+      case 'explain': {
+        const { runExplainCommand } = await import('./explain-command');
+        return runExplainCommand(argv, context);
+      }
     }
   } catch (error) {
     const usage = error instanceof ExtendedCliUsageError;
     const message = error instanceof Error ? error.message : String(error);
-    context.stderr(`${usage ? 'E_CLI_USAGE' : 'E_COMMAND_FAILED'}: ${message}\n`);
+    context.stderr(formatCliError(usage ? 'E_CLI_USAGE' : 'E_COMMAND_FAILED', message));
     return usage ? 2 : 1;
   }
 }
@@ -2977,7 +2982,10 @@ async function runProductionCommand(
       seams: result.seams,
     }, null, 2)}\n`);
     if (!result.ok) {
-      context.stderr('E_PRODUCTION_EVIDENCE: one or more live seams are missing, stale, skipped, or invalid\n');
+      context.stderr(formatCliError(
+        'E_PRODUCTION_EVIDENCE',
+        'one or more live seams are missing, stale, skipped, or invalid',
+      ));
     }
     return result.ok ? 0 : 1;
   }

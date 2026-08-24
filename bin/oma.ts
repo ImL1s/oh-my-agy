@@ -71,6 +71,7 @@ function shouldUseStructuredCli(args: readonly string[]): boolean {
     'workflow', 'mcp-server', 'wiki', 'hud', 'session', 'cancel', 'hooks',
     'native-status', 'lsp-status', 'sidecar-status', 'notify',
     'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
+    'explain',
   ].includes(first)) {
     return true;
   }
@@ -241,11 +242,12 @@ async function main() {
     const legacyStdio = resolveLegacyStdio(process.env, Boolean(process.stdout.isTTY));
 
     const { guardDangerousArgv } = await import('../src/cli/dangerous-launch');
+    const { formatCliError } = await import('../src/runtime/error-catalog');
     const magicGuarded = await guardDangerousArgv(remainingArgs, {
       isTTY: Boolean(process.stdin.isTTY),
     });
     if (!magicGuarded.ok) {
-      process.stderr.write(`${magicGuarded.error.code}: ${magicGuarded.error.message}\n`);
+      process.stderr.write(formatCliError(magicGuarded.error.code, magicGuarded.error.message));
       process.exit(2);
     }
     const magicArgv = [...magicGuarded.value];
@@ -321,11 +323,12 @@ async function main() {
   }
 
   const { guardDangerousArgv: guardPassThrough } = await import('../src/cli/dangerous-launch');
+  const { formatCliError: formatPassThroughError } = await import('../src/runtime/error-catalog');
   const passGuarded = await guardPassThrough(args, {
     isTTY: Boolean(process.stdin.isTTY),
   });
   if (!passGuarded.ok) {
-    process.stderr.write(`${passGuarded.error.code}: ${passGuarded.error.message}\n`);
+    process.stderr.write(formatPassThroughError(passGuarded.error.code, passGuarded.error.message));
     process.exit(2);
   }
   const passArgv = [...passGuarded.value];

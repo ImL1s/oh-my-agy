@@ -234,6 +234,7 @@ oma parity verify-composition --run-id <id> --aggregate <aggregate-handoff.json>
 oma production verify [--run-id <id>]
 oma production probe <seam> [--run-id <id>]
 oma production capture <review|ultraqa> [--run-id <id>] -- <allowlisted-cli> …
+oma explain <E_CODE> [--json]
 
 oma setup
 oma doctor [--json] [--no-strict-plugin] [--native]

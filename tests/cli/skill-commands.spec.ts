@@ -6,6 +6,7 @@ import {
   renderSkillErrorText,
   runSkillCommand,
 } from '../../src/cli/skill-commands';
+import { formatCliError } from '../../src/runtime/error-catalog';
 import { runtimeError } from '../../src/runtime/errors';
 
 const packageRoot = path.resolve(__dirname, '../..');
@@ -188,6 +189,6 @@ describe('oma skill render format', () => {
 
   test('error rendering degrades gracefully when no available list is attached', () => {
     const text = renderSkillErrorText(runtimeError('E_VALIDATOR_REJECTED', 'bad usage'));
-    expect(text).toBe('E_VALIDATOR_REJECTED: bad usage\n');
+    expect(text).toBe(formatCliError('E_VALIDATOR_REJECTED', 'bad usage'));
   });
 });
