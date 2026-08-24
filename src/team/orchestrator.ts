@@ -30,6 +30,7 @@ import { teamWorkerLivenessBasenames } from './provider-readiness';
 import {
   ArgvSpawnFn,
   observeTmuxWorkerIdentity,
+  ProviderChildResolutionV1,
   providerChildProcessMarker,
   providerLivenessFromResolution,
   resolveProviderChild,
@@ -1254,9 +1255,11 @@ export class TeamOrchestrator {
       this.workerExecutablePath,
       routeReceipt.resolvedExecutable,
     );
-    const resolvedChild = resolveProviderChild(sessionName, { expectedBasenames });
+    const resolvedChild = await resolveProviderChildAtLaunch(sessionName, expectedBasenames);
+    // 不得把 pane bootstrap PID 當 worker；沒等到子程序就寫未證明佔位，
+    // 之後 resume 觀測到真正 child 才可 adopt（Codex PR97 P1）。
     const processIdentity = providerChildProcessMarker(resolvedChild)
-      ?? paneProcessFallback(sessionName);
+      ?? { pid: 0, startMarker: '' };
     const heartbeat: SupervisorHeartbeatV1 = {
       schemaVersion: 1,
       workerId,
@@ -1415,8 +1418,9 @@ export function observeBoundWorkerForResume(
         );
         providerIdentityMatched = observed.providerIdentityMatched;
         processLiveness = observed.processLiveness;
+        // 只有觀測到不同的子程序 marker 才覆寫；未證明時保留 binding，讓
+        // identityMatches 通過後走 block_identity_unproven（Codex PR97 P2）。
         if (observed.process !== undefined) observedProcess = observed.process;
-        else observedProcess = undefined;
       }
     }
   } else if (heartbeat !== undefined) {
@@ -1502,6 +1506,26 @@ function sanitizeSession(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 80);
 }
 
+const PROVIDER_CHILD_LAUNCH_ATTEMPTS = 5;
+const PROVIDER_CHILD_LAUNCH_WAIT_MS = 20;
+
+/** launch 時 worker-bootstrap 可能尚未 spawn `oma team worker run`；有界重試。 */
+async function resolveProviderChildAtLaunch(
+  sessionName: string,
+  expectedBasenames: readonly string[],
+): Promise<ProviderChildResolutionV1> {
+  let resolved = resolveProviderChild(sessionName, { expectedBasenames });
+  for (
+    let attempt = 1;
+    attempt < PROVIDER_CHILD_LAUNCH_ATTEMPTS && resolved.status !== 'matched';
+    attempt += 1
+  ) {
+    await boundedSleep(PROVIDER_CHILD_LAUNCH_WAIT_MS);
+    resolved = resolveProviderChild(sessionName, { expectedBasenames });
+  }
+  return resolved;
+}
+
 function inferSessionName(
   prefix: string | undefined,
   teamId: string,
@@ -1516,19 +1540,6 @@ function inferSessionName(
   }
   const base = prefix ?? `oma-${teamId}`;
   return sanitizeSession(`${base}-${workerId}-g1`);
-}
-
-function paneProcessFallback(sessionName: string): { pid: number; startMarker: string } {
-  const panePid = readPanePid(sessionName);
-  if (panePid === null) {
-    return { pid: 0, startMarker: '' };
-  }
-  const start = spawnSync('ps', ['-o', 'lstart=', '-p', String(panePid)], {
-    encoding: 'utf8',
-    shell: false,
-  });
-  const startMarker = start.status === 0 ? start.stdout.trim() : '';
-  return { pid: panePid, startMarker };
 }
 
 function gitHead(cwd: string): Result<string, RuntimeError> {
@@ -1560,15 +1571,4 @@ function gitRevList(
   return ok(commits);
 }
 
-/** 讀取 tmux session 第一個 pane 的 shell pid（worker 側 process 身分） */
-function readPanePid(sessionName: string): number | null {
-  const result = spawnSync(
-    'tmux',
-    ['list-panes', '-t', sessionName, '-F', '#{pane_pid}'],
-    { encoding: 'utf8', shell: false },
-  );
-  if (result.status !== 0) return null;
-  const line = result.stdout.trim().split('\n')[0];
-  const pid = Number(line);
-  return Number.isFinite(pid) && pid > 0 ? pid : null;
-}
+

@@ -629,6 +629,105 @@ describe('oma team resume / TeamOrchestrator.resume', () => {
     expect(reconcileWorkerObservation(aggregate, observed).action).toBe('fence_stale_observation');
   });
 
+  test('unproven child keeps the bound marker and blocks rather than fences', () => {
+    const binding = bindingFor('healthy', 'tmux_agy');
+    const aggregate = {
+      schemaVersion: 1 as const,
+      teamId: 'resume-team',
+      repoKey: 'repo',
+      leaderWorkspaceKey: 'workspace',
+      ownerNonce: 'owner-secret',
+      manifest: resumeManifest('resume-team', ['healthy']),
+      tasks: {
+        healthy: {
+          id: 'healthy', revision: 1, status: 'in_progress' as const, commandEvidence: {},
+          claim: { ownerId: 'worker-healthy', token: 'claim-healthy', generation: 1, leasedUntilMs: 50_000 },
+        },
+      },
+      heartbeats: {
+        healthy: {
+          schemaVersion: 1 as const,
+          workerId: 'healthy',
+          ownerNonce: 'owner-secret',
+          workerNonce: 'worker-healthy',
+          process: binding.process!,
+          paneId: '%1',
+          sessionName: 'oma-healthy',
+          providerBasename: 'node',
+          recordedAtMs: 1,
+        },
+      },
+      mailbox: {},
+      workerBindings: { healthy: binding },
+      mailboxCursors: {},
+      terminalReceipts: {},
+    };
+    const panePid = 501;
+    const paneOnly = [
+      `  ${panePid}     1 Mon Aug 24 11:00:00 2026 node`,
+      '',
+    ].join('\n');
+    const tmux = {
+      inspectOwnedPane: () => ok({
+        sessionName: 'oma-healthy',
+        paneId: '%1',
+        ownerNonce: 'owner-secret',
+        workerNonce: 'worker-healthy',
+      }),
+    } as unknown as TmuxController;
+    const observed = observeBoundWorkerForResume(
+      aggregate,
+      binding,
+      tmux,
+      undefined,
+      '/usr/bin/node',
+      {
+        tmuxSpawn: () => ({ status: 0, stdout: `${panePid}\n`, stderr: '' }),
+        psSpawn: () => ({ status: 0, stdout: paneOnly, stderr: '' }),
+        probePane: () => 'alive',
+      },
+    );
+    expect(observed.process).toEqual(binding.process);
+    expect(observed.providerIdentityMatched).toBe(false);
+    expect(reconcileWorkerObservation(aggregate, observed).action).toBe('block_identity_unproven');
+  });
+
+  test('unproven launch placeholder process does not fence a later worker child', () => {
+    const binding = bindingFor('healthy', 'tmux_agy');
+    const placeholder = { pid: 0, startMarker: '' };
+    const live = { pid: 9001, startMarker: 'Mon Aug 24 12:00:01 2026' };
+    const bound = { ...binding, process: placeholder };
+    const aggregate = {
+      schemaVersion: 1 as const,
+      teamId: 'resume-team',
+      repoKey: 'repo',
+      leaderWorkspaceKey: 'workspace',
+      ownerNonce: 'owner-secret',
+      manifest: resumeManifest('resume-team', ['healthy']),
+      tasks: {
+        healthy: {
+          id: 'healthy', revision: 1, status: 'in_progress' as const, commandEvidence: {},
+          claim: { ownerId: 'worker-healthy', token: 'claim-healthy', generation: 1, leasedUntilMs: 50_000 },
+        },
+      },
+      heartbeats: {},
+      mailbox: {},
+      workerBindings: { healthy: bound },
+      mailboxCursors: {},
+      terminalReceipts: {},
+    };
+    expect(reconcileWorkerObservation(aggregate, {
+      taskId: 'healthy',
+      generation: 1,
+      providerReceiptHash: bound.providerReceiptHash,
+      process: live,
+      pane: bound.pane,
+      processLiveness: 'alive',
+      paneLiveness: 'alive',
+      providerIdentityMatched: true,
+    }).action).toBe('adopt');
+  });
+
   test('dead bound workers are reclaimable and not restarted', async () => {
     const seeded = await seededResumeTeam(['dead']);
     try {
