@@ -64,6 +64,13 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   `stopped_by` is `converged` (exit 0), `timeout` (non-zero, workers untouched),
   or `aborted` (SIGINT; no leftover timers). Out-of-range `--poll-interval-ms`
   is `E_VALIDATOR_REJECTED`. Wait never ticks or cancels workers. (#55)
+- `oma ask <codex|claude|grok|agy|cursor-agent> "<question>" [--file <path>] [--dry-run] [--json]`
+  brokers a locally installed advisor CLI on the same allowlist as
+  `oma production capture`. Transcripts land in
+  `.agy/artifacts/ask-<UTC>-<tool>.md` and are **advisory only** — they
+  never write `.agy/autopilot` / `.agy/reviews`, never close a gate, and
+  never imply inbound reply injection. `--dry-run` prints the full argv
+  and does not spawn. (#56)
 
 - Claude Code plugin MCP wiring: `.claude-plugin/.mcp.json` uses
   `${CLAUDE_PLUGIN_ROOT}` (not Antigravity `${extensionPath}`), and

@@ -56,6 +56,21 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     });
   });
 
+  test('ask broker and CLI command are W6 composition-owned', () => {
+    expect(ownershipForPath('src/ask/allowed-tools.ts')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+    expect(ownershipForPath('src/ask/broker.ts')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+    expect(ownershipForPath('src/cli/ask-command.ts')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+    expect(ownershipForPath('tests/cli/ask-broker.spec.ts')).toEqual({
+      wave: 'OMA-W6', owner: 'oma-final-composition-owner',
+    });
+  });
+
   test('production probe implementation and evidence tests are W6 composition-owned', () => {
     expect(ownershipForPath('src/production/evidence.ts')).toEqual({
       wave: 'OMA-W6', owner: 'oma-final-composition-owner',

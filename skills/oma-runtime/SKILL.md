@@ -39,7 +39,7 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 | Stop active modes | `/oh-my-agy:cancel` | `skills/cancel/SKILL.md` | `oma cancel` (CAS-fenced) |
 | Evidence before “done” | `/oh-my-agy:verify` | `skills/verify/SKILL.md` | tests/build/doctor evidence |
 | Why did this happen (competing hypotheses) | `/oh-my-agy:trace` | `skills/trace/SKILL.md` | (none) |
-| External advisor second opinion | `/oh-my-agy:ask` | `skills/ask/SKILL.md` | none — advisory only, never a worker |
+| External advisor second opinion | `/oh-my-agy:ask` | `skills/ask/SKILL.md` | `oma ask <codex\|claude\|grok\|agy\|cursor-agent>` (advisory only) |
 | Provenance-tracked knowledge lookup | `/oh-my-agy:wiki` | `skills/wiki/SKILL.md` | `oma wiki index\|list\|search <query>` |
 | Where are we / what is stuck | `/oh-my-agy:hud` | `skills/hud/SKILL.md` | `oma hud [--preset minimal\|focused\|full] [--watch]` |
 | Install/enable plugin | `/oh-my-agy:setup` | `skills/setup/SKILL.md` | `oma setup` / `oma doctor` |

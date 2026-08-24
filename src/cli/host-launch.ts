@@ -28,7 +28,7 @@ export const STRUCTURED_FIRST_TOKENS = Object.freeze(new Set([
   'workflow', 'mcp-server', 'wiki', 'hud', 'session', 'cancel', 'hooks',
   'native-status', 'lsp-status', 'sidecar-status', 'notify',
   'resume', 'recovery', 'update', 'uninstall', 'parity', 'production',
-  'explain',
+  'explain', 'ask',
 ]));
 
 export const LAUNCHER_ONLY_FLAGS = Object.freeze(new Set([

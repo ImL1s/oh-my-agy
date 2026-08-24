@@ -858,6 +858,10 @@ export async function runExtendedCommand(
         const { runExplainCommand } = await import('./explain-command');
         return runExplainCommand(argv, context);
       }
+      case 'ask': {
+        const { runAskCommand } = await import('./ask-command');
+        return runAskCommand(argv, context);
+      }
     }
   } catch (error) {
     const usage = error instanceof ExtendedCliUsageError;

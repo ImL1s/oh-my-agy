@@ -37,7 +37,8 @@ export type ExtendedCliCommand =
   | 'uninstall'
   | 'parity'
   | 'production'
-  | 'explain';
+  | 'explain'
+  | 'ask';
 
 export type NativeCliCommand = 'capabilities' | 'probe';
 
@@ -61,6 +62,7 @@ const EXTENDED_COMMANDS = new Set<ExtendedCliCommand>([
   'parity',
   'production',
   'explain',
+  'ask',
 ]);
 
 export function parseCliArguments(argv: readonly string[]): ParsedCliCommand {

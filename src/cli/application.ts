@@ -56,6 +56,7 @@ Usage:
   oma production verify [--run-id <id>]
   oma production probe <plugin-discovery|managed-lifecycle|exact-resume|worker-runtime|mcp-lsp|workflow> [--run-id <id>]
   oma production capture <review|ultraqa> [--run-id <id>] -- <codex|claude|grok|agy|cursor-agent> <args...>
+  oma ask <codex|claude|grok|agy|cursor-agent> "<question>" [--file <path>] [--dry-run] [--json]
   oma explain <E_CODE> [--json]
   oma autopilot start -- <goal>
   oma autopilot status --session <id>

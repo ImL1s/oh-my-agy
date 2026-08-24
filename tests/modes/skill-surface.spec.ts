@@ -129,6 +129,10 @@ describe('OMA session skill surface', () => {
     expect(traceBody).toMatch(/compet/i);
     expect(traceBody).toMatch(/no `oma trace` CLI/i);
     expect(traceBody).toMatch(/\.agy\/trace\//);
+    const askBody = loadSkillMarkdown(packageRoot, 'ask');
+    expect(askBody).toMatch(/oma ask <codex\|claude\|grok\|agy\|cursor-agent>/);
+    expect(askBody).not.toMatch(/no `oma ask` CLI/i);
+    expect(askBody).toMatch(/\.agy\/artifacts\/ask-/);
   });
 
   test('catalog generator write targets are only the two authorized catalog files', () => {
