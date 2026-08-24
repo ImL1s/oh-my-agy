@@ -25,6 +25,7 @@ In-session skill playbooks shipped with the plugin. Each subdirectory has a `SKI
 | `team/SKILL.md` | Multi-worker coordination |
 | `cancel/SKILL.md` | Abort modes safely |
 | `verify/SKILL.md` | Fresh evidence gates |
+| `trace/SKILL.md` | Competing-hypothesis causal trace |
 | `ask/SKILL.md` | External advisor second opinion (advisory-only) |
 | `wiki/SKILL.md` | Provenance-tracked knowledge lookup |
 | `hud/SKILL.md` | Run-state HUD with minimal/focused/full presets |

@@ -28,7 +28,9 @@ export type OmaWorkflowSkill =
   // 設計概念映射：OMX/OMC/OMG 的 hud（run-state 讀出面，含 preset 分層）。
   | 'hud'
   // 設計概念映射：OMC/OMX 的 plan（ralplan 之下的輕量規劃層，無 consensus）。
-  | 'plan';
+  | 'plan'
+  // 設計概念映射：OMC/OMX tracer（競爭假設、正反證據、next probe）。
+  | 'trace';
 
 const MODE_TO_SKILL: Readonly<Record<ManagedMode, OmaWorkflowSkill>> = Object.freeze({
   ralph: 'ralph',

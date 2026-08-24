@@ -44,6 +44,7 @@ export const PREFERRED_SKILL_ORDER: readonly string[] = [
   'team',
   'cancel',
   'verify',
+  'trace',
   'ask',
   'wiki',
   'hud',
@@ -118,6 +119,11 @@ const CATALOG_COPY: Readonly<Record<string, CatalogCopy>> = Object.freeze({
     agents: 'Fresh evidence gates',
     intent: 'Evidence before “done”',
     cli: 'tests/build/doctor evidence',
+  },
+  trace: {
+    agents: 'Competing-hypothesis causal trace',
+    intent: 'Why did this happen (competing hypotheses)',
+    cli: '(none)',
   },
   ask: {
     agents: 'External advisor second opinion (advisory-only)',
