@@ -208,17 +208,73 @@ export class GitWorktreeManager {
   }
 
   /**
+   * worktree 已不在時，仍用分支 tip 對 leader HEAD / baseSha 做整合判定。
+   * 設計概念映射：Codex PR96 P1 — 不得在未檢查 unmerged tip 時 `branch -D`。
+   */
+  assessOwnedBranchRemoval(
+    descriptor: Readonly<ManagedWorktreeV1>,
+    options: Readonly<{ ownerNonce: string }>,
+  ): Result<void> {
+    if (descriptor.ownerNonce !== options.ownerNonce) {
+      return err(runtimeError('E_LOCK_NOT_OWNER', 'Managed worktree cleanup owner does not match'));
+    }
+    const marker = readDescriptor(descriptor.markerPath);
+    if (marker === null || marker.ownerNonce !== options.ownerNonce) {
+      return err(runtimeError('E_LOCK_NOT_OWNER', 'Managed worktree owner marker does not match'));
+    }
+    if (!this.isManagedBranchName(descriptor.branchName)) {
+      return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'Managed branch name is invalid'));
+    }
+    const listed = git(this.leaderRepo, ['branch', '--list', descriptor.branchName]);
+    if (!listed.ok) return listed;
+    if (listed.value.stdout.trim() === '') return ok(undefined);
+    const tip = git(this.leaderRepo, ['rev-parse', descriptor.branchName]);
+    if (!tip.ok) {
+      return err(runtimeError('E_DELIVERY_UNINTEGRATED', 'Unintegrated commits require branch preservation'));
+    }
+    const sha = tip.value.stdout.trim();
+    if (sha === descriptor.baseSha || this.isReachableFromLeader(sha)) return ok(undefined);
+    return err(runtimeError('E_DELIVERY_UNINTEGRATED', 'Unintegrated commits require branch preservation', {
+      branchName: descriptor.branchName,
+    }));
+  }
+
+  /** leader HEAD 可達該 SHA（已合併）才視為整合證明。 */
+  isReachableFromLeader(sha: string): boolean {
+    if (!/^[0-9a-f]{7,64}$/i.test(sha)) return false;
+    const ancestor = git(this.leaderRepo, ['merge-base', '--is-ancestor', sha, 'HEAD']);
+    return ancestor.ok;
+  }
+
+  isDescriptorIntegrated(descriptor: Readonly<ManagedWorktreeV1>): boolean {
+    if (fs.existsSync(descriptor.path)) {
+      const head = git(descriptor.path, ['rev-parse', 'HEAD']);
+      if (!head.ok) return false;
+      return this.isReachableFromLeader(head.value.stdout.trim());
+    }
+    if (!this.isManagedBranchName(descriptor.branchName)) return false;
+    const tip = git(this.leaderRepo, ['rev-parse', descriptor.branchName]);
+    if (!tip.ok) return false;
+    return this.isReachableFromLeader(tip.value.stdout.trim());
+  }
+
+  /**
    * 在 worktree 已安全移除後刪除 managed 分支。分支不存在視為成功（idempotent）。
+   * 使用 `branch -d`（拒絕 unmerged），禁止 force `-D`。
    */
   deleteManagedBranch(branchName: string): Result<void> {
-    if (!/^[A-Za-z0-9._/-]+$/.test(branchName) || branchName.includes('..')) {
+    if (!this.isManagedBranchName(branchName)) {
       return err(runtimeError('E_PATH_OUTSIDE_ROOT', 'Managed branch name is invalid'));
     }
     const listed = git(this.leaderRepo, ['branch', '--list', branchName]);
     if (!listed.ok) return listed;
     if (listed.value.stdout.trim() === '') return ok(undefined);
-    const deleted = git(this.leaderRepo, ['branch', '-D', branchName]);
+    const deleted = git(this.leaderRepo, ['branch', '-d', branchName]);
     return deleted.ok ? ok(undefined) : deleted;
+  }
+
+  private isManagedBranchName(branchName: string): boolean {
+    return /^[A-Za-z0-9._/-]+$/.test(branchName) && !branchName.includes('..');
   }
 
   /** Abort a newly-created launch without preserving its disposable branch. */

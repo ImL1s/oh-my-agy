@@ -12,10 +12,12 @@ import {
   LEADER_CONTEXT_FILE_NAME,
   writeBoundedLeaderContext,
 } from '../../src/team/leader-context';
-import { listReadyTaskSpecs, TeamOrchestrator } from '../../src/team/orchestrator';
+import { ok } from '../../src/runtime/types';
+import { listReadyTaskSpecs, observeBoundWorkerForResume, TeamOrchestrator } from '../../src/team/orchestrator';
 import { TeamStateStore } from '../../src/team/state';
 import {
   PersistentTeamSupervisor,
+  reconcileWorkerObservation,
   WorkerRuntimeObservationV1,
 } from '../../src/team/supervisor-control';
 import { TmuxController } from '../../src/team/tmux';
@@ -520,6 +522,210 @@ describe('oma team resume / TeamOrchestrator.resume', () => {
     } finally {
       seeded.fixture.cleanup();
     }
+  });
+
+  test('resume from a non-leader workspace is E_TEAM_LEADER_REQUIRED', async () => {
+    const seeded = await seededResumeTeam(['healthy']);
+    try {
+      const orch = new TeamOrchestrator({
+        stateRoot: seeded.fixture.root,
+        workspaceRoot: seeded.fixture.root,
+        repoKey: 'repo',
+        workspaceKey: 'other-workspace',
+        managedWorktreesRoot: path.join(seeded.fixture.root, 'managed-worktrees'),
+        nowMs: () => 1_000,
+        leaseMs: 50_000,
+        tmux: throwingTmux(),
+        worktrees: {
+          create: () => { throw new Error('resume must not create worktrees'); },
+          rollbackLaunch: () => { throw new Error('resume must not roll back worktrees'); },
+        } as unknown as GitWorktreeManager,
+        resumeObserver: ({ binding }) => observationFor(binding),
+        supervisorProcess: { pid: 7, startMarker: 'leader-resume' },
+      });
+      const before = seeded.store.read();
+      expect(before.ok).toBe(true);
+      if (!before.ok) return;
+      const resumed = await orch.resume(seeded.teamId, seeded.revision);
+      expect(resumed.ok).toBe(false);
+      if (resumed.ok) return;
+      expect(resumed.error.code).toBe('E_TEAM_LEADER_REQUIRED');
+      const after = seeded.store.read();
+      expect(after.ok).toBe(true);
+      if (!after.ok) return;
+      expect(after.value.revision).toBe(before.value.revision);
+    } finally {
+      seeded.fixture.cleanup();
+    }
+  });
+
+  test('observed tmux process marker replacement is fenced, not adopted', () => {
+    const binding = bindingFor('healthy', 'tmux_agy');
+    const aggregate = {
+      schemaVersion: 1 as const,
+      teamId: 'resume-team',
+      repoKey: 'repo',
+      leaderWorkspaceKey: 'workspace',
+      ownerNonce: 'owner-secret',
+      manifest: resumeManifest('resume-team', ['healthy']),
+      tasks: {
+        healthy: {
+          id: 'healthy',
+          revision: 1,
+          status: 'in_progress' as const,
+          commandEvidence: {},
+          claim: { ownerId: 'worker-healthy', token: 'claim-healthy', generation: 1, leasedUntilMs: 50_000 },
+        },
+      },
+      heartbeats: {
+        healthy: {
+          schemaVersion: 1 as const,
+          workerId: 'healthy',
+          ownerNonce: 'owner-secret',
+          workerNonce: 'worker-healthy',
+          process: binding.process!,
+          paneId: '%1',
+          sessionName: 'oma-healthy',
+          providerBasename: 'node',
+          recordedAtMs: 1,
+        },
+      },
+      mailbox: {},
+      workerBindings: { healthy: binding },
+      mailboxCursors: {},
+      terminalReceipts: {},
+    };
+    const panePid = 501;
+    const replacementPid = 9999;
+    const oldStart = binding.process!.startMarker;
+    const newStart = 'Mon Aug 24 12:00:00 2026';
+    const psStdout = [
+      `  ${panePid}     1 Mon Aug 24 11:00:00 2026 zsh`,
+      `  ${replacementPid}   ${panePid} ${newStart} node`,
+      '',
+    ].join('\n');
+    const tmux = {
+      inspectOwnedPane: () => ok({
+        sessionName: 'oma-healthy',
+        paneId: '%1',
+        ownerNonce: 'owner-secret',
+        workerNonce: 'worker-healthy',
+      }),
+    } as unknown as TmuxController;
+    const observed = observeBoundWorkerForResume(
+      aggregate,
+      binding,
+      tmux,
+      undefined,
+      '/usr/bin/node',
+      {
+        tmuxSpawn: () => ({ status: 0, stdout: `${panePid}\n`, stderr: '' }),
+        psSpawn: () => ({ status: 0, stdout: psStdout, stderr: '' }),
+        probePane: () => 'alive',
+      },
+    );
+    expect(observed.process).toEqual({ pid: replacementPid, startMarker: newStart });
+    expect(observed.process).not.toEqual({ pid: binding.process!.pid, startMarker: oldStart });
+    expect(reconcileWorkerObservation(aggregate, observed).action).toBe('fence_stale_observation');
+  });
+
+  test('unproven child keeps the bound marker and blocks rather than fences', () => {
+    const binding = bindingFor('healthy', 'tmux_agy');
+    const aggregate = {
+      schemaVersion: 1 as const,
+      teamId: 'resume-team',
+      repoKey: 'repo',
+      leaderWorkspaceKey: 'workspace',
+      ownerNonce: 'owner-secret',
+      manifest: resumeManifest('resume-team', ['healthy']),
+      tasks: {
+        healthy: {
+          id: 'healthy', revision: 1, status: 'in_progress' as const, commandEvidence: {},
+          claim: { ownerId: 'worker-healthy', token: 'claim-healthy', generation: 1, leasedUntilMs: 50_000 },
+        },
+      },
+      heartbeats: {
+        healthy: {
+          schemaVersion: 1 as const,
+          workerId: 'healthy',
+          ownerNonce: 'owner-secret',
+          workerNonce: 'worker-healthy',
+          process: binding.process!,
+          paneId: '%1',
+          sessionName: 'oma-healthy',
+          providerBasename: 'node',
+          recordedAtMs: 1,
+        },
+      },
+      mailbox: {},
+      workerBindings: { healthy: binding },
+      mailboxCursors: {},
+      terminalReceipts: {},
+    };
+    const panePid = 501;
+    const paneOnly = [
+      `  ${panePid}     1 Mon Aug 24 11:00:00 2026 node`,
+      '',
+    ].join('\n');
+    const tmux = {
+      inspectOwnedPane: () => ok({
+        sessionName: 'oma-healthy',
+        paneId: '%1',
+        ownerNonce: 'owner-secret',
+        workerNonce: 'worker-healthy',
+      }),
+    } as unknown as TmuxController;
+    const observed = observeBoundWorkerForResume(
+      aggregate,
+      binding,
+      tmux,
+      undefined,
+      '/usr/bin/node',
+      {
+        tmuxSpawn: () => ({ status: 0, stdout: `${panePid}\n`, stderr: '' }),
+        psSpawn: () => ({ status: 0, stdout: paneOnly, stderr: '' }),
+        probePane: () => 'alive',
+      },
+    );
+    expect(observed.process).toEqual(binding.process);
+    expect(observed.providerIdentityMatched).toBe(false);
+    expect(reconcileWorkerObservation(aggregate, observed).action).toBe('block_identity_unproven');
+  });
+
+  test('unproven launch placeholder process does not fence a later worker child', () => {
+    const binding = bindingFor('healthy', 'tmux_agy');
+    const placeholder = { pid: 0, startMarker: '' };
+    const live = { pid: 9001, startMarker: 'Mon Aug 24 12:00:01 2026' };
+    const bound = { ...binding, process: placeholder };
+    const aggregate = {
+      schemaVersion: 1 as const,
+      teamId: 'resume-team',
+      repoKey: 'repo',
+      leaderWorkspaceKey: 'workspace',
+      ownerNonce: 'owner-secret',
+      manifest: resumeManifest('resume-team', ['healthy']),
+      tasks: {
+        healthy: {
+          id: 'healthy', revision: 1, status: 'in_progress' as const, commandEvidence: {},
+          claim: { ownerId: 'worker-healthy', token: 'claim-healthy', generation: 1, leasedUntilMs: 50_000 },
+        },
+      },
+      heartbeats: {},
+      mailbox: {},
+      workerBindings: { healthy: bound },
+      mailboxCursors: {},
+      terminalReceipts: {},
+    };
+    expect(reconcileWorkerObservation(aggregate, {
+      taskId: 'healthy',
+      generation: 1,
+      providerReceiptHash: bound.providerReceiptHash,
+      process: live,
+      pane: bound.pane,
+      processLiveness: 'alive',
+      paneLiveness: 'alive',
+      providerIdentityMatched: true,
+    }).action).toBe('adopt');
   });
 
   test('dead bound workers are reclaimable and not restarted', async () => {

@@ -20,6 +20,7 @@ import { Result, err, ok } from '../runtime/types';
 import { createDeliveryEvidence, DeliveryValidator } from './delivery';
 import { IntegrationManager } from './integration';
 import { probeRecordedWorkerProcess, probeTmuxSession } from './liveness';
+import { ProcessLiveness } from '../runtime/lock';
 import { readTeamManifest } from './manifest';
 import { FastForwardPublisherV1 } from './publisher';
 import { requireDeadProof } from './reclaim';
@@ -27,7 +28,9 @@ import { TeamStateStore } from './state';
 import { assessWorker, SupervisorAssessment } from './supervisor';
 import { teamWorkerLivenessBasenames } from './provider-readiness';
 import {
+  ArgvSpawnFn,
   observeTmuxWorkerIdentity,
+  ProviderChildResolutionV1,
   providerChildProcessMarker,
   providerLivenessFromResolution,
   resolveProviderChild,
@@ -145,6 +148,12 @@ export interface TeamOrchestratorOptions {
    * production 以 process/pane probe 組 observation，不得盲目採納。
    */
   resumeObserver?: TeamResumeObserverV1;
+  /** 測試注入：resume 生產觀測的 tmux/ps adapter（fake 行程表，不打真實 ps）。 */
+  resumeIdentitySpawn?: {
+    readonly tmuxSpawn?: ArgvSpawnFn;
+    readonly psSpawn?: ArgvSpawnFn;
+    readonly probePane?: (sessionName: string) => ProcessLiveness;
+  };
   /** 測試注入：supervisor lease owner token；預設使用 team ownerNonce。 */
   supervisorOwnerToken?: string;
   /** 測試注入：supervisor process 身分；預設為本行程。 */
@@ -274,6 +283,7 @@ export class TeamOrchestrator {
   private readonly workerBootstrapArgv: readonly string[];
   private readonly providerProfileFactory: TeamOrchestratorOptions['providerProfileFactory'];
   private readonly resumeObserver: TeamResumeObserverV1 | undefined;
+  private readonly resumeIdentitySpawn: TeamOrchestratorOptions['resumeIdentitySpawn'];
   private readonly supervisorOwnerToken: string | undefined;
   private readonly supervisorProcess: ProcessMarkerV1 | undefined;
   private readonly leaderContextMaxBytes: number;
@@ -296,6 +306,7 @@ export class TeamOrchestrator {
     this.workerExecutablePath = options.workerExecutablePath ?? process.execPath;
     this.providerProfileFactory = options.providerProfileFactory;
     this.resumeObserver = options.resumeObserver;
+    this.resumeIdentitySpawn = options.resumeIdentitySpawn;
     this.supervisorOwnerToken = options.supervisorOwnerToken;
     this.supervisorProcess = options.supervisorProcess;
     this.leaderContextMaxBytes = options.leaderContextMaxBytes ?? LEADER_CONTEXT_MAX_BYTES;
@@ -806,6 +817,13 @@ export class TeamOrchestrator {
         actualRevision: snapshot.value.revision,
       }));
     }
+    if (snapshot.value.value.leaderWorkspaceKey !== this.workspaceKey) {
+      return err(runtimeError(
+        'E_TEAM_LEADER_REQUIRED',
+        'Team resume requires the recorded leader workspace',
+        { leaderWorkspaceKey: snapshot.value.value.leaderWorkspaceKey },
+      ));
+    }
 
     const nowMs = this.nowMs();
     const ownerToken = this.supervisorOwnerToken ?? snapshot.value.value.ownerNonce;
@@ -919,12 +937,13 @@ export class TeamOrchestrator {
           : { heartbeat: aggregate.heartbeats[binding.taskId] }),
       });
     }
-    return defaultObserveBoundWorker(
+    return observeBoundWorkerForResume(
       aggregate,
       binding,
       this.tmux,
       this.sessionNamePrefix,
       this.workerExecutablePath,
+      this.resumeIdentitySpawn,
     );
   }
 
@@ -1236,9 +1255,11 @@ export class TeamOrchestrator {
       this.workerExecutablePath,
       routeReceipt.resolvedExecutable,
     );
-    const resolvedChild = resolveProviderChild(sessionName, { expectedBasenames });
+    const resolvedChild = await resolveProviderChildAtLaunch(sessionName, expectedBasenames);
+    // 不得把 pane bootstrap PID 當 worker；沒等到子程序就寫未證明佔位，
+    // 之後 resume 觀測到真正 child 才可 adopt（Codex PR97 P1）。
     const processIdentity = providerChildProcessMarker(resolvedChild)
-      ?? paneProcessFallback(sessionName);
+      ?? { pid: 0, startMarker: '' };
     const heartbeat: SupervisorHeartbeatV1 = {
       schemaVersion: 1,
       workerId,
@@ -1341,27 +1362,34 @@ export class TeamOrchestrator {
 }
 
 /**
- * production resume observation：tmux 必須證明 worker 子程序（#59），
- * 不得只因 pane shell 存活就 adopt。設計概念映射：OMC/OMX resume fence。
+ * production resume observation：tmux 必須證明 worker **子程序**（#59），
+ * 不得把 pane bootstrap comm 當 worker。觀測到的 process marker 必須寫回
+ * observation，否則 identityMatches 對 binding 自身永遠成立（Codex PR95 P1）。
  */
-function defaultObserveBoundWorker(
+export function observeBoundWorkerForResume(
   aggregate: TeamAggregateV1,
   binding: WorkerAuthorityBindingV1,
   tmux: TmuxController,
   sessionNamePrefix: string | undefined,
   workerExecutablePath: string,
+  spawn?: Readonly<{
+    tmuxSpawn?: ArgvSpawnFn;
+    psSpawn?: ArgvSpawnFn;
+    probePane?: (sessionName: string) => ProcessLiveness;
+  }>,
 ): WorkerRuntimeObservationV1 {
   const heartbeat = aggregate.heartbeats[binding.taskId];
-  const observedProcess = binding.process ?? heartbeat?.process;
+  let observedProcess: ProcessMarkerV1 | undefined = binding.process ?? heartbeat?.process;
   let processLiveness = observedProcess === undefined
     ? 'unknown' as const
     : probeRecordedWorkerProcess(observedProcess);
 
+  const paneProbe = spawn?.probePane ?? probeTmuxSession;
   let paneLiveness = 'unknown' as ReturnType<typeof probeTmuxSession>;
   let observedPane = binding.pane;
   let providerIdentityMatched: boolean | undefined;
   if (binding.pane !== undefined) {
-    paneLiveness = probeTmuxSession(binding.pane.sessionName);
+    paneLiveness = paneProbe(binding.pane.sessionName);
     if (paneLiveness === 'alive') {
       const inspected = tmux.inspectOwnedPane(binding.pane.sessionName);
       if (!inspected.ok) {
@@ -1386,13 +1414,17 @@ function defaultObserveBoundWorker(
         const observed = observeTmuxWorkerIdentity(
           binding.pane.sessionName,
           expectedBasenames,
+          spawn,
         );
         providerIdentityMatched = observed.providerIdentityMatched;
         processLiveness = observed.processLiveness;
+        // 只有觀測到不同的子程序 marker 才覆寫；未證明時保留 binding，讓
+        // identityMatches 通過後走 block_identity_unproven（Codex PR97 P2）。
+        if (observed.process !== undefined) observedProcess = observed.process;
       }
     }
   } else if (heartbeat !== undefined) {
-    paneLiveness = probeTmuxSession(
+    paneLiveness = paneProbe(
       inferSessionName(sessionNamePrefix, aggregate.teamId, binding.taskId, heartbeat),
     );
   }
@@ -1474,6 +1506,26 @@ function sanitizeSession(value: string): string {
   return value.replace(/[^A-Za-z0-9_.-]+/g, '-').slice(0, 80);
 }
 
+const PROVIDER_CHILD_LAUNCH_ATTEMPTS = 5;
+const PROVIDER_CHILD_LAUNCH_WAIT_MS = 20;
+
+/** launch 時 worker-bootstrap 可能尚未 spawn `oma team worker run`；有界重試。 */
+async function resolveProviderChildAtLaunch(
+  sessionName: string,
+  expectedBasenames: readonly string[],
+): Promise<ProviderChildResolutionV1> {
+  let resolved = resolveProviderChild(sessionName, { expectedBasenames });
+  for (
+    let attempt = 1;
+    attempt < PROVIDER_CHILD_LAUNCH_ATTEMPTS && resolved.status !== 'matched';
+    attempt += 1
+  ) {
+    await boundedSleep(PROVIDER_CHILD_LAUNCH_WAIT_MS);
+    resolved = resolveProviderChild(sessionName, { expectedBasenames });
+  }
+  return resolved;
+}
+
 function inferSessionName(
   prefix: string | undefined,
   teamId: string,
@@ -1488,19 +1540,6 @@ function inferSessionName(
   }
   const base = prefix ?? `oma-${teamId}`;
   return sanitizeSession(`${base}-${workerId}-g1`);
-}
-
-function paneProcessFallback(sessionName: string): { pid: number; startMarker: string } {
-  const panePid = readPanePid(sessionName);
-  if (panePid === null) {
-    return { pid: 0, startMarker: '' };
-  }
-  const start = spawnSync('ps', ['-o', 'lstart=', '-p', String(panePid)], {
-    encoding: 'utf8',
-    shell: false,
-  });
-  const startMarker = start.status === 0 ? start.stdout.trim() : '';
-  return { pid: panePid, startMarker };
 }
 
 function gitHead(cwd: string): Result<string, RuntimeError> {
@@ -1532,15 +1571,4 @@ function gitRevList(
   return ok(commits);
 }
 
-/** 讀取 tmux session 第一個 pane 的 shell pid（worker 側 process 身分） */
-function readPanePid(sessionName: string): number | null {
-  const result = spawnSync(
-    'tmux',
-    ['list-panes', '-t', sessionName, '-F', '#{pane_pid}'],
-    { encoding: 'utf8', shell: false },
-  );
-  if (result.status !== 0) return null;
-  const line = result.stdout.trim().split('\n')[0];
-  const pid = Number(line);
-  return Number.isFinite(pid) && pid > 0 ? pid : null;
-}
+

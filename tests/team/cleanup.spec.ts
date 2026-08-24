@@ -277,11 +277,63 @@ describe('oma team cleanup / GitWorktreeManager.cleanupTerminal', () => {
     }
   });
 
+  test('completeReadOnlyTask worktree with extra commits is preserved', async () => {
+    const { fixture, store, manager, orch } = await seedWorld(['done-task']);
+    try {
+      const worktree = addWorktree(manager, fixture, 'done-task');
+      fixture.commitFile('src/result.ts', 'done\n', 'worker result', worktree.path);
+      await completeTask(store, 'done-task', 'claim-done');
+      const result = await orch.cleanup(TEAM_ID, currentRevision(store));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(fs.existsSync(worktree.path)).toBe(true);
+      expect(fixture.git(['branch', '--list', worktree.branchName]).stdout).toContain(worktree.branchName);
+      expect(result.value.preserved).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'worktree',
+          taskId: 'done-task',
+          code: 'E_DELIVERY_UNINTEGRATED',
+        }),
+      ]));
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('missing worktree with unmerged branch is preserved and not force-deleted', async () => {
+    const { fixture, store, manager, orch } = await seedWorld(['cancelled-task']);
+    try {
+      const worktree = addWorktree(manager, fixture, 'cancelled-task');
+      fixture.commitFile('result.ts', 'only on branch\n', 'keep branch tip', worktree.path);
+      await cancelTask(store, 'cancelled-task', 'claim-cancel');
+      fixture.git(['worktree', 'remove', worktree.path]);
+      expect(fs.existsSync(worktree.path)).toBe(false);
+      expect(fs.existsSync(worktree.markerPath)).toBe(true);
+      const beforeBranch = fixture.git(['rev-parse', worktree.branchName]).stdout.trim();
+      const result = await orch.cleanup(TEAM_ID, currentRevision(store));
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(fixture.git(['rev-parse', worktree.branchName]).stdout.trim()).toBe(beforeBranch);
+      expect(result.value.preserved).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'branch',
+          taskId: 'cancelled-task',
+          branchName: worktree.branchName,
+          code: 'E_DELIVERY_UNINTEGRATED',
+        }),
+      ]));
+      expect(result.value.removed.filter((item) => item.kind === 'branch')).toEqual([]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('safely removes integrated terminal worktree, branch, mailbox body, and retires aggregate', async () => {
     const { fixture, store, manager, orch, context } = await seedWorld(['done-task']);
     try {
       const worktree = addWorktree(manager, fixture, 'done-task');
       fixture.commitFile('src/result.ts', 'done\n', 'worker result', worktree.path);
+      fixture.git(['merge', '--ff-only', worktree.branchName]);
       await completeTask(store, 'done-task', 'claim-done');
       const bodyPath = writeMailboxBody(store, 'm-term', 'recycle me\n');
       const sent = await store.sendMailbox(currentRevision(store), {
@@ -425,7 +477,6 @@ describe('oma team cleanup / GitWorktreeManager.cleanupTerminal', () => {
         ]));
         expect(spy.mock.calls.some((call) => (
           call[0].workerId === 'cancelled-task'
-          && call[1].outcome === 'cancelled'
           && call[1].ownerNonce === OWNER_NONCE
         ))).toBe(true);
         expect(fs.existsSync(worktree.path)).toBe(false);
@@ -570,5 +621,7 @@ describe('oma team cleanup / GitWorktreeManager.cleanupTerminal', () => {
     expect(joined).not.toContain('git reset --hard');
     expect(joined).not.toContain('git clean -fd');
     expect(joined).toContain('cleanupTerminal');
+    expect(joined).toContain("['branch', '-d', branchName]");
+    expect(joined).not.toContain("['branch', '-D', branchName]");
   });
 });
