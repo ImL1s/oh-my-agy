@@ -71,6 +71,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
   never write `.agy/autopilot` / `.agy/reviews`, never close a gate, and
   never imply inbound reply injection. `--dry-run` prints the full argv
   and does not spawn. (#56)
+- `oma doctor` checks now include a required `nextAction` string. Human
+  output prints it only on warn/fail (`  next: …`); `--json` always
+  includes it with stable field order (`id`, `status`, `message`,
+  `nextAction`, optional `detail`). `oma doctor --fix` prints the owned
+  repair plan first, then runs `setupCommand` + plugin readback once via
+  spawn argv (**never git**, no retry loop), and reports before/after.
+  Missing `agy` prints a readable skip. New informational
+  `hooks_kill_switch` check is pass when `DISABLE_OMA` / `OMA_SKIP_HOOKS`
+  are unset, and warns that hooks are off when they are set. (#50)
 
 - Claude Code plugin MCP wiring: `.claude-plugin/.mcp.json` uses
   `${CLAUDE_PLUGIN_ROOT}` (not Antigravity `${extensionPath}`), and

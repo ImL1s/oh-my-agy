@@ -237,7 +237,7 @@ oma production capture <review|ultraqa> [--run-id <id>] -- <allowlisted-cli> …
 oma explain <E_CODE> [--json]
 
 oma setup
-oma doctor [--json] [--no-strict-plugin] [--native]
+oma doctor [--json] [--no-strict-plugin] [--native] [--fix]
 oma <agy args...>   # pass-through (strips managed binding env)
 ```
 

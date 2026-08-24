@@ -12,6 +12,11 @@ import {
 } from '../native/capability-profile';
 import { isHostCapabilityProfileFresh } from '../native/probes/cache';
 import {
+  hooksDisabled,
+  hookSkipped,
+  HookNameV1,
+} from '../hooks/common';
+import {
   PluginCommandAdapter,
   readPackagePluginName,
   resolveHookEntrypoints,
@@ -22,11 +27,45 @@ import { listWorkflowSkillNames } from '../modes/skill-loader';
 
 export type DoctorCheckStatus = 'pass' | 'warn' | 'fail';
 
+/** `--json` 每列固定欄位序；detail 僅在有值時接在最後。 */
+export const DOCTOR_CHECK_JSON_KEYS = ['id', 'status', 'message', 'nextAction'] as const;
+
 export interface DoctorCheckV1 {
   id: string;
   status: DoctorCheckStatus;
   message: string;
+  nextAction: string;
   detail?: unknown;
+}
+
+const NEXT_NONE = 'No action required.';
+const HOOK_NAMES_V1: readonly HookNameV1[] = [
+  'pre-invocation', 'stop', 'session-start', 'post-invocation',
+];
+
+/**
+ * 每個 check builder 必須經此函式產出，以保證 nextAction 非空且 JSON 欄位序穩定。
+ * 設計概念映射：OMG doctor envelope 的 next_action；OMA 欄位名為 camelCase nextAction。
+ */
+export function doctorCheck(
+  id: string,
+  status: DoctorCheckStatus,
+  message: string,
+  nextAction: string,
+  detail?: unknown,
+): DoctorCheckV1 {
+  const trimmed = nextAction.trim();
+  if (trimmed === '') {
+    throw new Error(`DoctorCheckV1 ${id} requires a non-empty nextAction`);
+  }
+  const check: DoctorCheckV1 = {
+    id,
+    status,
+    message,
+    nextAction: trimmed,
+  };
+  if (detail !== undefined) check.detail = detail;
+  return check;
 }
 
 export interface DoctorReportV1 {
@@ -81,6 +120,8 @@ export interface RunDoctorInput {
   includeNativeCapabilities?: boolean;
   nativeCapabilitiesProbe?: () => Promise<Result<NativeDoctorProbeResultV1, RuntimeError>>;
   nowMs?: () => number;
+  /** 測試注入 kill switch；未給則讀 process.env。 */
+  environment?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -95,6 +136,7 @@ export async function runDoctor(
   const agyCommand = input.agyCommand ?? 'agy';
   const mode = input.mode ?? (input.strictPlugin === false ? 'development' : 'strict');
   const homeDir = path.resolve(input.homeDir ?? os.homedir());
+  const environment = input.environment ?? process.env;
   const configRoot = input.antigravityConfigRoot === undefined
     ? input.homeDir === undefined ? undefined : path.join(homeDir, '.gemini', 'config')
     : path.resolve(input.antigravityConfigRoot);
@@ -108,6 +150,7 @@ export async function runDoctor(
   checks.push(checkSlashSkillSurface(packageRoot));
   checks.push(checkSkillManifestDrift(packageRoot));
   checks.push(checkHooks(packageRoot));
+  checks.push(checkHooksKillSwitch(environment));
   checks.push(checkAgyOnPath(agyCommand, homeDir, configRoot));
   checks.push(checkStateRoot(input.stateRoot, homeDir, input.homeDir !== undefined));
   checks.push(checkHooksObserved(input.stateRoot, homeDir, input.homeDir !== undefined));
@@ -183,12 +226,13 @@ async function checkNativeCapabilities(
       diagnostics: [...result.value.diagnostics],
     };
     return {
-      check: {
-        id: 'native_capabilities',
-        status: 'warn',
-        message: 'native capabilities unavailable (agy host absent)',
-        detail: projection,
-      },
+      check: doctorCheck(
+        'native_capabilities',
+        'warn',
+        'native capabilities unavailable (agy host absent)',
+        'Install agy on PATH, then re-run oma doctor --native.',
+        projection,
+      ),
       projection,
     };
   }
@@ -221,33 +265,36 @@ async function checkNativeCapabilities(
         ],
       };
       return {
-        check: {
-          id: 'native_capabilities',
-          status: 'fail',
-          message: 'native capability profile evidence is stale',
-          detail: staleProjection,
-        },
+        check: doctorCheck(
+          'native_capabilities',
+          'fail',
+          'native capability profile evidence is stale',
+          'Re-run oma doctor --native after a fresh identity-bound capability inspection; stale profiles cannot be auto-fixed.',
+          staleProjection,
+        ),
         projection: staleProjection,
       };
     }
     if (profile.identityStatus === 'drifted') {
       return {
-        check: {
-          id: 'native_capabilities',
-          status: 'fail',
-          message: 'native capability identity drifted during passive inspection',
-          detail: projection,
-        },
+        check: doctorCheck(
+          'native_capabilities',
+          'fail',
+          'native capability identity drifted during passive inspection',
+          'Re-run oma doctor --native after a fresh identity-bound capability inspection; drifted profiles cannot be auto-fixed.',
+          projection,
+        ),
         projection,
       };
     }
     return {
-      check: {
-        id: 'native_capabilities',
-        status: 'pass',
-        message: `native capability profile valid (${outcome})`,
-        detail: projection,
-      },
+      check: doctorCheck(
+        'native_capabilities',
+        'pass',
+        `native capability profile valid (${outcome})`,
+        NEXT_NONE,
+        projection,
+      ),
       projection,
     };
   } catch (error) {
@@ -272,12 +319,13 @@ function nativeDoctorFailure(
     diagnostics: [{ code, message }],
   };
   return {
-    check: {
-      id: 'native_capabilities',
-      status: 'fail',
-      message: `native capability profile invalid (${code})`,
-      detail: projection,
-    },
+    check: doctorCheck(
+      'native_capabilities',
+      'fail',
+      `native capability profile invalid (${code})`,
+      'Re-run oma doctor --native after a successful identity-bound probe; invalid profiles cannot be auto-fixed.',
+      projection,
+    ),
     projection,
   };
 }
@@ -285,44 +333,54 @@ function nativeDoctorFailure(
 function checkNodeVersion(): DoctorCheckV1 {
   const major = Number.parseInt(process.versions.node.split('.')[0] ?? '0', 10);
   if (major >= 20) {
-    return { id: 'node', status: 'pass', message: `Node ${process.versions.node} (>=20)` };
+    return doctorCheck('node', 'pass', `Node ${process.versions.node} (>=20)`, NEXT_NONE);
   }
-  return {
-    id: 'node',
-    status: 'fail',
-    message: `Node ${process.versions.node} is below required >=20`,
-  };
+  return doctorCheck(
+    'node',
+    'fail',
+    `Node ${process.versions.node} is below required >=20`,
+    'Install Node.js 20 or newer, then re-run oma doctor.',
+  );
 }
 
 function checkPackageRoot(packageRoot: string, version: string): DoctorCheckV1 {
   const pkg = path.join(packageRoot, 'package.json');
   const bin = path.join(packageRoot, 'dist', 'bin', 'oma.js');
   if (!fs.existsSync(pkg)) {
-    return { id: 'package_root', status: 'fail', message: 'package.json missing', detail: { packageRoot } };
+    return doctorCheck(
+      'package_root',
+      'fail',
+      'package.json missing',
+      'Run oma doctor from the oh-my-agy package root (the directory that contains package.json).',
+      { packageRoot },
+    );
   }
   if (!fs.existsSync(bin)) {
-    return {
-      id: 'package_root',
-      status: 'fail',
-      message: 'dist/bin/oma.js missing — run npm run build',
-      detail: { bin },
-    };
+    return doctorCheck(
+      'package_root',
+      'fail',
+      'dist/bin/oma.js missing — run npm run build',
+      'Run npm run build, then re-run oma doctor.',
+      { bin },
+    );
   }
-  return {
-    id: 'package_root',
-    status: 'pass',
-    message: `package root ready (v${version})`,
-    detail: { packageRoot },
-  };
+  return doctorCheck(
+    'package_root',
+    'pass',
+    `package root ready (v${version})`,
+    NEXT_NONE,
+    { packageRoot },
+  );
 }
 
 function failVersionSync(message: string, detail?: unknown): DoctorCheckV1 {
-  return {
-    id: 'version_sync',
-    status: 'fail',
+  return doctorCheck(
+    'version_sync',
+    'fail',
     message,
-    ...(detail === undefined ? {} : { detail }),
-  };
+    'Align plugin.json, .claude-plugin/plugin.json, and .claude-plugin/marketplace.json versions with package.json, then re-run oma doctor.',
+    detail,
+  );
 }
 
 function readJsonObject(
@@ -419,38 +477,87 @@ function checkPluginManifestVersion(packageRoot: string, packageVersion: string)
 
   const claudeSynced = claudePresent;
   const marketplaceSynced = marketplacePresent;
-  return {
-    id: 'version_sync',
-    status: 'pass',
-    message: claudeSynced && marketplaceSynced
+  return doctorCheck(
+    'version_sync',
+    'pass',
+    claudeSynced && marketplaceSynced
       ? `package.json, plugin.json, .claude-plugin/plugin.json, and .claude-plugin/marketplace.json all ${packageVersion}`
       : marketplaceSynced
         ? `package.json, plugin.json, and .claude-plugin/marketplace.json all ${packageVersion} (.claude-plugin/plugin.json absent)`
         : `package.json and plugin.json both ${packageVersion} (.claude-plugin absent)`,
-    detail: {
+    NEXT_NONE,
+    {
       name: pluginResult.value.name,
       claudePluginSynced: claudeSynced,
       marketplaceSynced,
     },
-  };
+  );
 }
 
 function checkHooks(packageRoot: string): DoctorCheckV1 {
   const hooks = resolveHookEntrypoints(packageRoot);
   if (!hooks.ok) {
-    return {
-      id: 'hooks',
-      status: 'fail',
-      message: hooks.error.message,
-      detail: hooks.error,
-    };
+    return doctorCheck(
+      'hooks',
+      'fail',
+      hooks.error.message,
+      'Run npm run build so dist/src/hooks/pre-invocation.js and stop.js exist, then re-run oma doctor.',
+      hooks.error,
+    );
   }
-  return {
-    id: 'hooks',
-    status: 'pass',
-    message: 'PreInvocation + Stop compiled entrypoints present',
-    detail: hooks.value,
-  };
+  return doctorCheck(
+    'hooks',
+    'pass',
+    'PreInvocation + Stop compiled entrypoints present',
+    NEXT_NONE,
+    hooks.value,
+  );
+}
+
+const HOOKS_KILL_SWITCH_NEXT =
+  'Unset DISABLE_OMA and/or OMA_SKIP_HOOKS in this shell and the host launcher env, then restart the host so hooks can run. oma doctor --fix cannot change environment variables.';
+
+/**
+ * informational：回報 DISABLE_OMA / OMA_SKIP_HOOKS 是否把 hook 關掉。
+ * 設計概念映射：OMC DISABLE_OMC / OMC_SKIP_HOOKS；kill-switch issue 刻意延後到 #50。
+ */
+function checkHooksKillSwitch(env: NodeJS.ProcessEnv): DoctorCheckV1 {
+  const disableRaw = env.DISABLE_OMA;
+  const skipRaw = env.OMA_SKIP_HOOKS;
+  const disableSet = typeof disableRaw === 'string' && disableRaw.trim() !== '';
+  const skipSet = typeof skipRaw === 'string' && skipRaw.trim() !== '';
+  if (!disableSet && !skipSet) {
+    return doctorCheck(
+      'hooks_kill_switch',
+      'pass',
+      'hook kill switches unset (DISABLE_OMA / OMA_SKIP_HOOKS)',
+      NEXT_NONE,
+    );
+  }
+  const skipped = HOOK_NAMES_V1.filter((name) => hookSkipped(name, env));
+  const bits: string[] = [];
+  if (hooksDisabled(env)) {
+    bits.push(`DISABLE_OMA=${JSON.stringify(disableRaw)} disables all Antigravity hooks`);
+  } else if (disableSet) {
+    bits.push(`DISABLE_OMA is set to ${JSON.stringify(disableRaw)}`);
+  }
+  if (skipped.length > 0) {
+    bits.push(`OMA_SKIP_HOOKS=${JSON.stringify(skipRaw)} skips ${skipped.join(', ')}`);
+  } else if (skipSet) {
+    bits.push(`OMA_SKIP_HOOKS is set to ${JSON.stringify(skipRaw)}`);
+  }
+  return doctorCheck(
+    'hooks_kill_switch',
+    'warn',
+    `hooks are currently off: ${bits.join('; ')}`,
+    HOOKS_KILL_SWITCH_NEXT,
+    {
+      DISABLE_OMA: disableSet ? disableRaw : null,
+      OMA_SKIP_HOOKS: skipSet ? skipRaw : null,
+      skipped,
+      allDisabled: hooksDisabled(env),
+    },
+  );
 }
 
 /** Claude Code plugin.json 的 mcpServers 路徑（相對 plugin root，須以 ./ 開頭）。 */
@@ -463,12 +570,14 @@ export const CLAUDE_PLUGIN_MCP_SERVERS_PATH = './.claude-plugin/.mcp.json';
  */
 function checkMcpRegistration(packageRoot: string): DoctorCheckV1 {
   const id = 'mcp_registration';
-  const warn = (message: string, detail?: unknown): DoctorCheckV1 => ({
+  const next = 'Point .claude-plugin/plugin.json mcpServers at ./.claude-plugin/.mcp.json using ${CLAUDE_PLUGIN_ROOT}, then run oma setup --host claude (and oma setup --host grok for Grok MCP).';
+  const warn = (message: string, detail?: unknown): DoctorCheckV1 => doctorCheck(
     id,
-    status: 'warn',
+    'warn',
     message,
-    ...(detail === undefined ? {} : { detail }),
-  });
+    next,
+    detail,
+  );
   const manifestPath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
   const mcpPath = path.join(packageRoot, '.claude-plugin', '.mcp.json');
   if (!fs.existsSync(manifestPath)) {
@@ -529,16 +638,16 @@ function checkMcpRegistration(packageRoot: string): DoctorCheckV1 {
       { command: server.command, args },
     );
   }
-  return {
+  return doctorCheck(
     id,
-    status: 'pass',
-    message:
-      'Claude plugin MCP wiring present (${CLAUDE_PLUGIN_ROOT}); Grok MCP is registered by oma setup --host grok',
-    detail: {
+    'pass',
+    'Claude plugin MCP wiring present (${CLAUDE_PLUGIN_ROOT}); Grok MCP is registered by oma setup --host grok',
+    NEXT_NONE,
+    {
       mcpServers: pointed,
       config: '.claude-plugin/.mcp.json',
     },
-  };
+  );
 }
 
 function resolveMcpServersPath(raw: unknown): string | undefined {
@@ -569,40 +678,45 @@ function checkHooksObserved(
   } else {
     const state = resolveStateRoot({ create: false, env, homeDirectory: homeDir });
     if (!state.ok) {
-      return {
-        id: 'hooks_observed',
-        status: 'warn',
-        message: `未觀察到 — cannot read state root (${state.error.message})`,
-        detail: { code: state.error.code },
-      };
+      return doctorCheck(
+        'hooks_observed',
+        'warn',
+        `未觀察到 — cannot read state root (${state.error.message})`,
+        'Set OMA_STATE_ROOT to a writable directory, restart the Antigravity host after oma setup, then re-run oma hooks status.',
+        { code: state.error.code },
+      );
     }
     root = state.value.path;
   }
   const projection = projectHooksObservation(root);
   if (projection.observed) {
-    return {
-      id: 'hooks_observed',
-      status: 'pass',
-      message: projection.message,
-      detail: projection,
-    };
+    return doctorCheck(
+      'hooks_observed',
+      'pass',
+      projection.message,
+      NEXT_NONE,
+      projection,
+    );
   }
-  return {
-    id: 'hooks_observed',
-    status: 'warn',
-    message: projection.message,
-    detail: projection,
-  };
+  return doctorCheck(
+    'hooks_observed',
+    'warn',
+    projection.message,
+    'Restart the Antigravity host after oma setup so PreInvocation/Stop actually run, then re-run oma hooks status. oma doctor --fix cannot invent hook evidence.',
+    projection,
+  );
 }
 
 function checkClaudePluginManifest(packageRoot: string): DoctorCheckV1 {
   const manifest = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+  const restoreNext = 'Restore .claude-plugin/plugin.json from the oh-my-agy package, then re-run oma doctor.';
   if (!fs.existsSync(manifest)) {
-    return {
-      id: 'claude_plugin_manifest',
-      status: 'fail',
-      message: 'Missing .claude-plugin/plugin.json (Claude Code slash skills will not register)',
-    };
+    return doctorCheck(
+      'claude_plugin_manifest',
+      'fail',
+      'Missing .claude-plugin/plugin.json (Claude Code slash skills will not register)',
+      restoreNext,
+    );
   }
   try {
     const raw = JSON.parse(fs.readFileSync(manifest, 'utf8')) as {
@@ -610,56 +724,64 @@ function checkClaudePluginManifest(packageRoot: string): DoctorCheckV1 {
       skills?: unknown;
     };
     if (raw.name !== 'oh-my-agy') {
-      return {
-        id: 'claude_plugin_manifest',
-        status: 'warn',
-        message: `Claude plugin name is ${raw.name ?? 'missing'} (expected oh-my-agy for /oh-my-agy:… slash)`,
-      };
+      return doctorCheck(
+        'claude_plugin_manifest',
+        'warn',
+        `Claude plugin name is ${raw.name ?? 'missing'} (expected oh-my-agy for /oh-my-agy:… slash)`,
+        'Set .claude-plugin/plugin.json name to "oh-my-agy" so /oh-my-agy:… slash skills register.',
+      );
     }
     if (!Array.isArray(raw.skills) || raw.skills.length === 0) {
-      return {
-        id: 'claude_plugin_manifest',
-        status: 'fail',
-        message: '.claude-plugin/plugin.json has empty skills[]',
-      };
+      return doctorCheck(
+        'claude_plugin_manifest',
+        'fail',
+        '.claude-plugin/plugin.json has empty skills[]',
+        'Add skills[] entries to .claude-plugin/plugin.json matching skills/*/SKILL.md, then re-run oma doctor.',
+      );
     }
-    return {
-      id: 'claude_plugin_manifest',
-      status: 'pass',
-      message: `Claude plugin manifest ok (${raw.skills.length} skills) → /oh-my-agy:autopilot`,
-      detail: { skills: raw.skills.length },
-    };
+    return doctorCheck(
+      'claude_plugin_manifest',
+      'pass',
+      `Claude plugin manifest ok (${raw.skills.length} skills) → /oh-my-agy:autopilot`,
+      NEXT_NONE,
+      { skills: raw.skills.length },
+    );
   } catch (error) {
-    return {
-      id: 'claude_plugin_manifest',
-      status: 'fail',
-      message: '.claude-plugin/plugin.json unreadable',
-      detail: { cause: error instanceof Error ? error.message : String(error) },
-    };
+    return doctorCheck(
+      'claude_plugin_manifest',
+      'fail',
+      '.claude-plugin/plugin.json unreadable',
+      restoreNext,
+      { cause: error instanceof Error ? error.message : String(error) },
+    );
   }
 }
 
 function checkSlashSkillSurface(packageRoot: string): DoctorCheckV1 {
   const autopilot = path.join(packageRoot, 'skills', 'autopilot', 'SKILL.md');
   if (!fs.existsSync(autopilot)) {
-    return {
-      id: 'slash_skills',
-      status: 'fail',
-      message: 'skills/autopilot/SKILL.md missing',
-    };
+    return doctorCheck(
+      'slash_skills',
+      'fail',
+      'skills/autopilot/SKILL.md missing',
+      'Restore skills/autopilot/SKILL.md from the oh-my-agy package, then re-run oma doctor.',
+    );
   }
   const body = fs.readFileSync(autopilot, 'utf8');
   // 硬標記：避免僅提到 “slash” 就假綠（CLI-first 文檔也可能含 slash 字樣）
   const inSessionFirst = /You are already in the agent session/i.test(body)
     || /IN-SESSION PRIMARY/i.test(body);
-  return {
-    id: 'slash_skills',
-    status: inSessionFirst ? 'pass' : 'warn',
-    message: inSessionFirst
+  return doctorCheck(
+    'slash_skills',
+    inSessionFirst ? 'pass' : 'warn',
+    inSessionFirst
       ? 'autopilot skill present (in-session primary language detected)'
       : 'autopilot skill present but body may still be CLI-first — prefer slash-first wording',
-    detail: { path: autopilot },
-  };
+    inSessionFirst
+      ? NEXT_NONE
+      : 'Rewrite skills/autopilot/SKILL.md to in-session primary (slash-first) wording.',
+    { path: autopilot },
+  );
 }
 
 /**
@@ -669,47 +791,53 @@ function checkSlashSkillSurface(packageRoot: string): DoctorCheckV1 {
  */
 function checkSkillManifestDrift(packageRoot: string): DoctorCheckV1 {
   const manifestPath = path.join(packageRoot, '.claude-plugin', 'plugin.json');
+  const driftNext = 'Keep .claude-plugin/plugin.json skills[] in sync with skills/*/SKILL.md (add missing files or declare undeclared directories), then re-run oma doctor.';
   if (!fs.existsSync(manifestPath)) {
-    return {
-      id: 'skill_manifest_drift',
-      status: 'fail',
-      message: '.claude-plugin/plugin.json missing — cannot verify skill manifest',
-    };
+    return doctorCheck(
+      'skill_manifest_drift',
+      'fail',
+      '.claude-plugin/plugin.json missing — cannot verify skill manifest',
+      driftNext,
+    );
   }
   let raw: { skills?: unknown };
   try {
     raw = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { skills?: unknown };
   } catch (error) {
-    return {
-      id: 'skill_manifest_drift',
-      status: 'fail',
-      message: '.claude-plugin/plugin.json unreadable',
-      detail: { cause: error instanceof Error ? error.message : String(error) },
-    };
+    return doctorCheck(
+      'skill_manifest_drift',
+      'fail',
+      '.claude-plugin/plugin.json unreadable',
+      driftNext,
+      { cause: error instanceof Error ? error.message : String(error) },
+    );
   }
   if (!Array.isArray(raw.skills)) {
-    return {
-      id: 'skill_manifest_drift',
-      status: 'fail',
-      message: '.claude-plugin/plugin.json skills[] is not an array',
-    };
+    return doctorCheck(
+      'skill_manifest_drift',
+      'fail',
+      '.claude-plugin/plugin.json skills[] is not an array',
+      driftNext,
+    );
   }
   const declared: string[] = [];
   for (const entry of raw.skills) {
     if (typeof entry !== 'string' || entry.trim() === '') {
-      return {
-        id: 'skill_manifest_drift',
-        status: 'fail',
-        message: '.claude-plugin/plugin.json skills[] contains a non-string entry',
-      };
+      return doctorCheck(
+        'skill_manifest_drift',
+        'fail',
+        '.claude-plugin/plugin.json skills[] contains a non-string entry',
+        driftNext,
+      );
     }
     const name = normalizeClaudePluginSkillEntry(entry);
     if (name === '') {
-      return {
-        id: 'skill_manifest_drift',
-        status: 'fail',
-        message: '.claude-plugin/plugin.json skills[] contains an empty skill path',
-      };
+      return doctorCheck(
+        'skill_manifest_drift',
+        'fail',
+        '.claude-plugin/plugin.json skills[] contains an empty skill path',
+        driftNext,
+      );
     }
     declared.push(name);
   }
@@ -722,19 +850,21 @@ function checkSkillManifestDrift(packageRoot: string): DoctorCheckV1 {
       missingFiles.length > 0 ? `missing files for declared skills (${missingFiles.join(', ')})` : '',
       undeclared.length > 0 ? `undeclared skill directories (${undeclared.join(', ')})` : '',
     ].filter((bit) => bit !== '');
-    return {
-      id: 'skill_manifest_drift',
-      status: 'fail',
-      message: `skill manifest drifted: ${bits.join('; ')}`,
-      detail: { declared: declaredUnique, onDisk, missingFiles, undeclared },
-    };
+    return doctorCheck(
+      'skill_manifest_drift',
+      'fail',
+      `skill manifest drifted: ${bits.join('; ')}`,
+      driftNext,
+      { declared: declaredUnique, onDisk, missingFiles, undeclared },
+    );
   }
-  return {
-    id: 'skill_manifest_drift',
-    status: 'pass',
-    message: `skill manifest matches plugin.json skills[] and skills/*/SKILL.md (${onDisk.length} skills)`,
-    detail: { skills: onDisk },
-  };
+  return doctorCheck(
+    'skill_manifest_drift',
+    'pass',
+    `skill manifest matches plugin.json skills[] and skills/*/SKILL.md (${onDisk.length} skills)`,
+    NEXT_NONE,
+    { skills: onDisk },
+  );
 }
 
 function checkOmcAutopilotCollision(homeDir: string): DoctorCheckV1 {
@@ -744,19 +874,20 @@ function checkOmcAutopilotCollision(homeDir: string): DoctorCheckV1 {
   ];
   const found = omcPaths.filter((p) => fs.existsSync(p));
   if (found.length === 0) {
-    return {
-      id: 'slash_collision',
-      status: 'pass',
-      message: 'No obvious OMC bare /autopilot skill at ~/.claude/skills/autopilot',
-    };
+    return doctorCheck(
+      'slash_collision',
+      'pass',
+      'No obvious OMC bare /autopilot skill at ~/.claude/skills/autopilot',
+      NEXT_NONE,
+    );
   }
-  return {
-    id: 'slash_collision',
-    status: 'warn',
-    message:
-      'OMC/compat autopilot skill may own bare /autopilot — use /oh-my-agy:autopilot for OMA',
-    detail: { found },
-  };
+  return doctorCheck(
+    'slash_collision',
+    'warn',
+    'OMC/compat autopilot skill may own bare /autopilot — use /oh-my-agy:autopilot for OMA',
+    'Use /oh-my-agy:autopilot instead of bare /autopilot, or remove the OMC skill at ~/.claude/skills/autopilot.',
+    { found },
+  );
 }
 
 function checkAgyOnPath(
@@ -776,21 +907,22 @@ function checkAgyOnPath(
   });
   if (probe.error) {
     // slash-first：Claude/Grok 主路徑不強制 agy；缺席改 warn（hooks/managed 才真正需要）
-    return {
-      id: 'agy_path',
-      status: 'warn',
-      message:
-        `agy not runnable (${agyCommand}): ${probe.error.message} `
+    return doctorCheck(
+      'agy_path',
+      'warn',
+      `agy not runnable (${agyCommand}): ${probe.error.message} `
         + '— optional for /oh-my-agy:autopilot slash; required only for managed hooks',
-    };
+      'Install agy on PATH for managed hooks, or use slash-only: oma setup --host claude. oma doctor --fix will not retry agy forever.',
+    );
   }
   // help 可能 exit 0 或 1，重點是能 spawn
-  return {
-    id: 'agy_path',
-    status: 'pass',
-    message: `agy command reachable (${agyCommand})`,
-    detail: { code: probe.status },
-  };
+  return doctorCheck(
+    'agy_path',
+    'pass',
+    `agy command reachable (${agyCommand})`,
+    NEXT_NONE,
+    { code: probe.status },
+  );
 }
 
 function checkStateRoot(
@@ -803,19 +935,21 @@ function checkStateRoot(
   else if (isolateHome) delete env.OMA_STATE_ROOT;
   const state = resolveStateRoot({ create: true, env, homeDirectory: homeDir });
   if (!state.ok) {
-    return {
-      id: 'state_root',
-      status: 'fail',
-      message: state.error.message,
-      detail: state.error,
-    };
+    return doctorCheck(
+      'state_root',
+      'fail',
+      state.error.message,
+      'Set OMA_STATE_ROOT to a writable directory or fix HOME permissions, then re-run oma doctor.',
+      state.error,
+    );
   }
-  return {
-    id: 'state_root',
-    status: 'pass',
-    message: `state root ok (${state.value.source})`,
-    detail: { path: state.value.path },
-  };
+  return doctorCheck(
+    'state_root',
+    'pass',
+    `state root ok (${state.value.source})`,
+    NEXT_NONE,
+    { path: state.value.path },
+  );
 }
 
 async function checkPluginRegistry(
@@ -825,8 +959,9 @@ async function checkPluginRegistry(
   identityRoots: { antigravityConfigRoot?: string; homeDir?: string },
 ): Promise<DoctorCheckV1> {
   const name = readPackagePluginName(packageRoot);
+  const pluginNext = 'Run oma setup or oma doctor --fix (owned plugin install/enable + readback; never git). If agy is missing, install agy or use oma setup --host claude.';
   if (!name.ok) {
-    return { id: 'plugin_registry', status: 'fail', message: name.error.message };
+    return doctorCheck('plugin_registry', 'fail', name.error.message, pluginNext);
   }
   const active = await verifyPluginActive({
     packageRoot,
@@ -836,18 +971,19 @@ async function checkPluginRegistry(
     homeDir: identityRoots.homeDir,
   });
   if (active.ok) {
-    return {
-      id: 'plugin_registry',
-      status: 'pass',
-      message: `plugin ${name.value} exact installed identity verified`,
-      detail: {
+    return doctorCheck(
+      'plugin_registry',
+      'pass',
+      `plugin ${name.value} exact installed identity verified`,
+      NEXT_NONE,
+      {
         version: active.value.version,
         installPath: active.value.installPath,
         installedDigest: active.value.installedDigest,
         sourceDigest: active.value.sourceDigest,
         components: active.value.components,
       },
-    };
+    );
   }
   const hardMismatch = active.error.details !== undefined
     && (
@@ -857,12 +993,13 @@ async function checkPluginRegistry(
         && typeof active.error.details.installedVersion === 'string'
     );
   const hard = hardMismatch || mode !== 'development';
-  return {
-    id: 'plugin_registry',
-    status: hard ? 'fail' : 'warn',
-    message: active.error.message,
-    detail: active.error,
-  };
+  return doctorCheck(
+    'plugin_registry',
+    hard ? 'fail' : 'warn',
+    active.error.message,
+    pluginNext,
+    active.error,
+  );
 }
 
 function readPackageJsonVersion(packageRoot: string): string {
@@ -908,10 +1045,36 @@ export function doctorReportToLines(report: DoctorReportV1): string[] {
   for (const check of report.checks) {
     const mark = check.status === 'pass' ? '✓' : check.status === 'warn' ? '!' : '✗';
     lines.push(`${mark} [${check.id}] ${check.message}`);
+    // 人類模式：pass 不印 next action；warn / fail 才縮排第二行。
+    if (check.status !== 'pass') {
+      lines.push(`  next: ${check.nextAction}`);
+    }
   }
   lines.push('');
   if (!report.ok) {
     lines.push('Fix: npm run build && oma setup && re-run oma doctor');
+    lines.push('Safe auto-repair: oma doctor --fix (setup + plugin readback only; never git)');
   }
   return lines;
+}
+
+/** 穩定欄位序的 JSON 物件（id, status, message, nextAction, 可選 detail）。 */
+export function doctorCheckToJsonValue(check: DoctorCheckV1): DoctorCheckV1 {
+  return doctorCheck(check.id, check.status, check.message, check.nextAction, check.detail);
+}
+
+export function doctorReportToJsonValue(report: DoctorReportV1): DoctorReportV1 {
+  const json: DoctorReportV1 = {
+    schemaVersion: 1,
+    ok: report.ok,
+    exitCode: report.exitCode,
+    packageRoot: report.packageRoot,
+    packageVersion: report.packageVersion,
+    mode: report.mode,
+    checks: report.checks.map(doctorCheckToJsonValue),
+  };
+  if (report.nativeCapabilities !== undefined) {
+    json.nativeCapabilities = report.nativeCapabilities;
+  }
+  return json;
 }
