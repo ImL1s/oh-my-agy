@@ -324,6 +324,38 @@ Live host Antigravity 1.1.4 often sends `terminationReason: NO_TOOL_CALL` for no
 
 ---
 
+## Troubleshooting
+
+OMA failures are usually **fail-closed** or **silent fail-open**, so the error
+text often does not include the fix. Start with `oma doctor`. This release does
+**not** ship `oma hooks status` — do not treat that as a diagnostic command.
+
+| Symptom | Diagnose | Fix |
+|---------|----------|-----|
+| Hooks never fire | `oma doctor` (plugin installed+enabled). Check `DISABLE_OMA` / `OMA_SKIP_HOOKS`. With `OMA_HOOK_DEBUG=1` and `OMA_STATE_ROOT` set, inspect `<state-root>/logs/hook-debug.jsonl`. | `oma setup`, then **restart the host**. Plugin install is only half the surface. Unset kill-switch env. Optional project-local `.agents/hooks.json`. |
+| `E_PLUGIN_NOT_ACTIVE` (installed but not enabled) | `oma doctor` / `oma doctor --json` — look for `plugin is installed but not enabled` or registry absent. | `oma setup`. Confirm with `oma doctor`. Slash-only hosts may use `oma doctor --no-strict-plugin` (plugin check becomes warn). |
+| Slash skill missing after `oma setup` | `oma skill list`; `oma doctor` checks `slash_skills` and `slash_collision`. | Restart the host session. On Claude/Grok use `/oh-my-agy:autopilot` (OMC may own bare `/autopilot`). Re-run `oma setup --host claude` or `--host grok`. |
+| Legacy magic (`oma ralph task`, no `--`) prints a mode banner then silence | Non-TTY (CI) ignores child stdio unless `OMA_LEGACY_STDIO=inherit`. | Prefer managed `oma ralph -- "task"`. Interactive TTY inherits by default; override with `OMA_LEGACY_STDIO=inherit` or `ignore`. |
+
+### Environment variables
+
+Operator-facing env only. Binding env (`OMA_SESSION_ID`, `OMA_LAUNCH_NONCE`, …)
+is injected by managed launch — do not set it by hand.
+
+There is no `OMA_STATE_DIR`; the shipped name is `OMA_STATE_ROOT`.
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `DISABLE_OMA` | unset (off) | `1` or `true` (case-insensitive) disables **all** Antigravity hooks. Suppressed PreInvocation/Stop return `allow` with empty `injectSteps` and exit 0; they do not resolve workspace or create a state root. |
+| `OMA_SKIP_HOOKS` | unset | Comma-separated logical names to skip: `pre-invocation`, `stop`, `session-start`, `post-invocation` (whitespace and case ignored). |
+| `OMA_HOOK_DEBUG` | unset (off) | `1` or `true` appends redacted diagnostics to `<OMA_STATE_ROOT>/logs/hook-debug.jsonl` (bounded 1 MiB). Off by default; never writes into the install directory. No-ops if `OMA_STATE_ROOT` is unset. |
+| `OMA_LEGACY_STDIO` | TTY-gated | Legacy magic spawn stdio. Unset: `inherit` on TTY, `ignore` otherwise. Explicit `inherit` or `ignore` overrides; unknown values fall back to the TTY gate. |
+| `OMA_TIMEOUT_MS` | path-specific | Positive milliseconds. Managed headless (`oma ralph --` / `OMA_MANAGED_HEADLESS=1`): default `3600000`. Autopilot `drive` bounded spawn: default `30000`. Legacy pass-through: no timeout unless set. |
+| `OMA_LAUNCH_POLICY` | `auto` | Bare host-launch transport: `auto`, `direct`, `tmux`, or `detached-tmux` (the last maps to `tmux`). CLI `--direct` / `--tmux` override (last flag wins). |
+| `OMA_STATE_ROOT` | platform default | Durable state root (session aggregate, hook debug log). macOS: `~/Library/Application Support/oh-my-agy/state`. Windows: `%LOCALAPPDATA%/oh-my-agy/state`. Else `${XDG_STATE_HOME:-~/.local/state}/oh-my-agy`. |
+
+---
+
 ## Tests / CI / release
 
 ```bash

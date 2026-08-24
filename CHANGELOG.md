@@ -21,6 +21,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- README Troubleshooting (EN / zh / zh-TW) plus an operator environment-variable
+  table bound to `src/`/`bin/` usage and `CLI_HELP`. Does not claim
+  `oma hooks status`. (#64)
+
 - New in-session skill **`trace`** (`/oh-my-agy:trace`): competing-hypothesis
   causal tracking with evidence for/against and a next probe. No `oma trace`
   CLI. (#39)
