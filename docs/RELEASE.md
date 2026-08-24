@@ -4,7 +4,7 @@ English | [简体中文](./RELEASE.zh.md) | [繁體中文](./RELEASE.zh-TW.md)
 
 ## Current channel policy
 
-OMA `0.5.2` treats a GitHub Release tarball plus `SHA256SUMS` as the only
+OMA `0.6.0` treats a GitHub Release tarball plus `SHA256SUMS` as the only
 installable release channel. The repository does **not** currently publish to
 npmjs.org or GitHub Packages. `@iml1s/oh-my-agy` is the package identity inside
 the tarball, not proof that a registry entry exists.

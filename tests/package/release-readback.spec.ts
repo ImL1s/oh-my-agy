@@ -5,7 +5,7 @@ import * as path from 'path';
 
 const root = path.resolve(__dirname, '../..');
 
-describe('0.5.2 release readback', () => {
+describe('0.6.0 release readback', () => {
   test('all public manifests and the workflow skill inventory agree', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
     const plugin = JSON.parse(fs.readFileSync(path.join(root, 'plugin.json'), 'utf8'));
@@ -13,7 +13,7 @@ describe('0.5.2 release readback', () => {
     const marketplace = JSON.parse(
       fs.readFileSync(path.join(root, '.claude-plugin', 'marketplace.json'), 'utf8'),
     ) as { version?: string; plugins?: Array<{ name?: string; version?: string }> };
-    expect(pkg.version).toBe('0.5.2');
+    expect(pkg.version).toBe('0.6.0');
     expect(plugin.version).toBe(pkg.version);
     expect(slash.version).toBe(pkg.version);
     expect(marketplace.version).toBe(pkg.version);
