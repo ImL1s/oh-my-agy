@@ -92,6 +92,7 @@ import {
 import { runCancelCommand } from './cancel-command';
 import { ExtendedCliCommand, NativeCliCommand } from './parser';
 import { runSessionListCommand } from './session-commands';
+import { runHooksCommand } from './hooks-commands';
 
 export interface RuntimeManagedTransactionOptions {
   readonly cwd?: string;
@@ -826,6 +827,8 @@ export async function runExtendedCommand(
         return runWikiCommand(argv, context);
       case 'hud':
         return await runHudCommand(argv, context);
+      case 'hooks':
+        return runHooksCommand(argv, context);
       case 'session':
         return runSessionListCommand(argv, context);
       case 'cancel':

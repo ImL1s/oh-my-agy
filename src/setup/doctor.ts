@@ -5,6 +5,7 @@ import * as path from 'path';
 import { resolveStateRoot } from '../runtime/state-root';
 import { RuntimeError } from '../runtime/errors';
 import { Result, ok } from '../runtime/types';
+import { projectHooksObservation } from '../cli/hooks-commands';
 import {
   HostCapabilityProfileV1,
   validateHostCapabilityProfile,
@@ -109,6 +110,7 @@ export async function runDoctor(
   checks.push(checkHooks(packageRoot));
   checks.push(checkAgyOnPath(agyCommand, homeDir, configRoot));
   checks.push(checkStateRoot(input.stateRoot, homeDir, input.homeDir !== undefined));
+  checks.push(checkHooksObserved(input.stateRoot, homeDir, input.homeDir !== undefined));
   checks.push(checkOmcAutopilotCollision(homeDir));
 
   const adapter = input.adapter ?? defaultAgyListAdapter(agyCommand, {
@@ -546,6 +548,51 @@ function resolveMcpServersPath(raw: unknown): string | undefined {
     return paths.find((item) => item === CLAUDE_PLUGIN_MCP_SERVERS_PATH) ?? paths[0];
   }
   return undefined;
+}
+
+/**
+ * 設計概念映射：OMX `omx hooks status` 與 OMG doctor hook 形狀檢查。
+ * 只 warn、不 fail — 既有安裝不得因為「host 還沒叫過 hook」被一次打紅。
+ * 消費 `oma hooks status` 同一份投影；未觀察到必須寫明，不得全綠。
+ */
+function checkHooksObserved(
+  stateRoot: string | undefined,
+  homeDir: string,
+  isolateHome: boolean,
+): DoctorCheckV1 {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (stateRoot !== undefined) env.OMA_STATE_ROOT = path.resolve(stateRoot);
+  else if (isolateHome) delete env.OMA_STATE_ROOT;
+  let root: string;
+  if (stateRoot !== undefined && stateRoot.trim() !== '') {
+    root = path.resolve(stateRoot);
+  } else {
+    const state = resolveStateRoot({ create: false, env, homeDirectory: homeDir });
+    if (!state.ok) {
+      return {
+        id: 'hooks_observed',
+        status: 'warn',
+        message: `未觀察到 — cannot read state root (${state.error.message})`,
+        detail: { code: state.error.code },
+      };
+    }
+    root = state.value.path;
+  }
+  const projection = projectHooksObservation(root);
+  if (projection.observed) {
+    return {
+      id: 'hooks_observed',
+      status: 'pass',
+      message: projection.message,
+      detail: projection,
+    };
+  }
+  return {
+    id: 'hooks_observed',
+    status: 'warn',
+    message: projection.message,
+    detail: projection,
+  };
 }
 
 function checkClaudePluginManifest(packageRoot: string): DoctorCheckV1 {
