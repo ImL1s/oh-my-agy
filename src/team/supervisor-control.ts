@@ -7,6 +7,7 @@ import { canonicalJson, sha256 } from '../runtime/atomic';
 import { ProcessLiveness } from '../runtime/lock';
 import { RuntimeError, runtimeError } from '../runtime/errors';
 import { Result, Snapshot, err, ok } from '../runtime/types';
+import { isProvenProcessMarker } from './liveness';
 import { TeamStateStore } from './state';
 import {
   ProcessMarkerV1,
@@ -149,12 +150,4 @@ function identityMatches(
   if (binding.pane !== undefined
     && canonicalJson(binding.pane) !== canonicalJson(observation.pane)) return false;
   return true;
-}
-
-/** pid 0 / 空 startMarker 是 launch 尚未等到 worker 子程序的佔位，不得拿來 fence。 */
-function isProvenProcessMarker(marker: Readonly<ProcessMarkerV1> | undefined): boolean {
-  return marker !== undefined
-    && Number.isSafeInteger(marker.pid)
-    && marker.pid > 0
-    && marker.startMarker.trim() !== '';
 }

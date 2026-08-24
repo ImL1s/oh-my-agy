@@ -17,9 +17,17 @@ export function probeProcessPid(pid: number): ProcessLiveness {
   }
 }
 
+/** pid 0 / 空 startMarker 是 launch 尚未等到 worker 子程序的佔位。 */
+export function isProvenProcessMarker(marker: Readonly<ProcessMarkerV1> | undefined): boolean {
+  return marker !== undefined
+    && Number.isSafeInteger(marker.pid)
+    && marker.pid > 0
+    && marker.startMarker.trim() !== '';
+}
+
 /** PID-reuse-safe：pid + startMarker（ps lstart）必須同時相符。 */
 export function probeProcessMarker(marker: Readonly<ProcessMarkerV1>): ProcessLiveness {
-  if (!Number.isSafeInteger(marker.pid) || marker.pid <= 0 || marker.startMarker.trim() === '') {
+  if (!isProvenProcessMarker(marker)) {
     return 'unknown';
   }
   return defaultProcessLiveness({
@@ -44,6 +52,22 @@ export function probeTmuxSession(sessionName: string): ProcessLiveness {
  * 新標記含 ps lstart，走 PID-reuse-safe probe。
  */
 export function probeRecordedWorkerProcess(marker: Readonly<ProcessMarkerV1>): ProcessLiveness {
+  if (!isProvenProcessMarker(marker) && !marker.startMarker.startsWith('tmux:')) {
+    return 'unknown';
+  }
   if (marker.startMarker.startsWith('tmux:')) return probeProcessPid(marker.pid);
   return probeProcessMarker(marker);
+}
+
+/**
+ * reclaim DeadProof：從未證明的 worker 身分在 pane 已死後視為 process dead
+ * （沒有可活著的子程序可證）。
+ */
+export function processLivenessForReclaim(
+  marker: Readonly<ProcessMarkerV1> | undefined,
+  pane: ProcessLiveness,
+): ProcessLiveness {
+  if (marker === undefined) return 'unknown';
+  if (!isProvenProcessMarker(marker) && pane === 'dead') return 'dead';
+  return probeRecordedWorkerProcess(marker);
 }
