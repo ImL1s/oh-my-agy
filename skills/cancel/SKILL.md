@@ -31,7 +31,7 @@ Stop active OMA workflows without destroying user work (OMC `$cancel` / OMX `omx
    The CLI verb is the only mutation path for managed session/team state.
 3. Team: `oma cancel --team <id>` (or `--all`) stops the durable team ledger. If workers may still be live, tell the user how to confirm with `oma team status`.
 4. Autopilot: `oma cancel --session <id> --workspace-key <key>` marks the session cancelled with reason + UTC timestamp (`oma session list` shows `terminal=true`). Do not delete evidence (specs/plans/reviews/qa).
-5. Do **not** run destructive git cleanups, and do **not** remove worktrees that still have unintegrated commits.
+5. Do **not** run destructive git cleanups, and do **not** remove worktrees that still have unintegrated commits. Worktree recycle is a separate verb: `oma team cleanup --dry-run` then `oma team cleanup --team <id> --expected-revision <n>`. `oma cancel` / `oma team stop` do not delete managed worktrees.
 6. Tell the user how to resume (re-invoke slash skill, or optional `oma autopilot resume` / `oma team status` if they used durable CLI).
 
 ## Forbidden
@@ -59,6 +59,7 @@ Use when durable sessions were started via CLI. Prefer the top-level verb; keep 
 ```bash
 oma cancel [--session <id> --workspace-key <key>] [--team <id>] [--all] [--reason <text>] [--json]
 oma team stop --team <id>
+oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]
 oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot resume --session <id> --conversation <cid> --expected-revision <n>
 oma team status --team <id>

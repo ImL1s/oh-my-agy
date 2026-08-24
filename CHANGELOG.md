@@ -66,6 +66,15 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]`:
+  reclaims terminal-task managed worktrees, branches, and `mailbox-bodies`
+  via `GitWorktreeManager.cleanupTerminal` / `removeIfSafe`, then marks the
+  aggregate `retired`. `--dry-run` lists planned removals with zero
+  mutation. Unintegrated commits are preserved with
+  `E_DELIVERY_UNINTEGRATED`. Non-terminal tasks are untouched. CAS on
+  `--expected-revision`; repeated cleanup is idempotent. Never destructive
+  git restore/clean. `oma team stop` is unchanged (tmux only). `oma team
+  status` still reads a retired aggregate. (#61)
 - `oma team resume --team <id> --expected-revision <n> [--json]`: rebind a
   returning leader to an existing team via `TeamOrchestrator.resume()`.
   Acquires (or keeps) the generation-fenced supervisor lease, reconciles each

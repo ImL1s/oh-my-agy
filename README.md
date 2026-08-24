@@ -206,6 +206,9 @@ oma team status --team <id>
 oma team resume --team <id> --expected-revision <n> [--json]
   # Rebind a returning leader: supervisor lease + adopt/fence survivors; no worker restart.
 oma team stop --team <id>
+oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]
+  # Recycle terminal-task worktrees / branches / mailbox-bodies. Prefer --dry-run first.
+  # Unintegrated commits are preserved. stop remains tmux-only and does not imply cleanup.
 oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --process dead
 oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>

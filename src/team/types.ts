@@ -296,6 +296,9 @@ export interface TeamAggregateV1 {
   mailboxCursors?: Readonly<Record<string, MailboxCursorV1>>;
   terminalReceipts?: Readonly<Record<string, WorkerTerminalReceiptV1>>;
   supervisor?: TeamSupervisorAuthorityV1;
+  /** 可選：`oma team cleanup` 退役後仍可供 status 讀取。 */
+  retired?: boolean;
+  retiredAtMs?: number;
 }
 
 export interface LeaderWorktreeIdentityV1 {

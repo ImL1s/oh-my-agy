@@ -28,6 +28,7 @@ describe('Structured CLI e2e baseline', () => {
     expect(r.stdout).toContain('team tick');
     expect(r.stdout).toContain('team wait');
     expect(r.stdout).toContain('team resume');
+    expect(r.stdout).toContain('team cleanup');
     expect(r.stdout).toContain('team worker run');
     expect(r.stdout).toContain('autopilot drive');
     expect(r.stdout).toContain('skill list');
@@ -52,6 +53,12 @@ describe('Structured CLI e2e baseline', () => {
     ]);
     expect(r.code).toBe(1);
     expect(r.stderr).toContain('E_NOT_FOUND');
+  });
+
+  test('TC-S-01g: oma team cleanup without required flags is E_VALIDATOR_REJECTED', async () => {
+    const r = await runOma(['team', 'cleanup', '--dry-run']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('E_VALIDATOR_REJECTED');
   });
 
   test('TC-S-01b: oma skill list --json returns JSON skill catalog', async () => {

@@ -59,6 +59,13 @@ export type ParsedTeamCommand =
       teamId: string;
     }
   | {
+      kind: 'cleanup';
+      teamId: string;
+      expectedRevision: number;
+      dryRun: boolean;
+      json: boolean;
+    }
+  | {
       kind: 'supervise';
       teamId: string;
     }
@@ -205,6 +212,9 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
       return err(runtimeError('E_VALIDATOR_REJECTED', 'team stop requires --team'));
     }
     return ok({ kind: 'stop', teamId: flags.value.get('--team')! });
+  }
+  if (subcommand === 'cleanup') {
+    return parseTeamCleanupCommand(argv.slice(1));
   }
   if (subcommand === 'supervise') {
     const flags = parseStrictFlags(argv.slice(1));
@@ -467,6 +477,71 @@ function parseTeamWaitCommand(argv: readonly string[]): Result<ParsedTeamCommand
   });
 }
 
+/**
+ * 設計概念映射：OMC `omc team cleanup [--json]`；`--dry-run` / `--json` 為布林旗標，
+ * 不可走 parseStrictFlags 的 name/value 成對解析。
+ */
+function parseTeamCleanupCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
+  let teamId: string | undefined;
+  let expectedRevision: number | undefined;
+  let dryRun = false;
+  let json = false;
+  for (let index = 0; index < argv.length; index += 1) {
+    const token = argv[index];
+    if (token === '--json') {
+      if (json) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --json'));
+      }
+      json = true;
+      continue;
+    }
+    if (token === '--dry-run') {
+      if (dryRun) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --dry-run'));
+      }
+      dryRun = true;
+      continue;
+    }
+    if (token === '--team' || token === '--expected-revision') {
+      const value = argv[index + 1];
+      if (value === undefined || value.startsWith('--')) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', `team cleanup ${token} requires a value`));
+      }
+      index += 1;
+      if (token === '--team') {
+        if (teamId !== undefined) {
+          return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --team'));
+        }
+        teamId = value;
+        continue;
+      }
+      if (expectedRevision !== undefined) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'duplicate option --expected-revision'));
+      }
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed) || parsed < 0) {
+        return err(runtimeError('E_VALIDATOR_REJECTED', 'expected-revision must be a non-negative integer'));
+      }
+      expectedRevision = parsed;
+      continue;
+    }
+    return err(runtimeError('E_VALIDATOR_REJECTED', `Unknown team cleanup flag: ${token}`));
+  }
+  if (teamId === undefined || expectedRevision === undefined) {
+    return err(runtimeError(
+      'E_VALIDATOR_REJECTED',
+      'team cleanup requires --team and --expected-revision',
+    ));
+  }
+  return ok({
+    kind: 'cleanup',
+    teamId,
+    expectedRevision,
+    dryRun,
+    json,
+  });
+}
+
 function parseTeamPanesCommand(argv: readonly string[]): Result<ParsedTeamCommand, RuntimeError> {
   const flags = parseStrictFlags(argv);
   if (!flags.ok) return flags;
@@ -686,6 +761,21 @@ export async function teamCommand(
       return 1;
     }
     stdout(`${JSON.stringify({ ok: true, kind: 'team-stopped', ...result.value })}\n`);
+    return 0;
+  }
+
+  if (parsed.value.kind === 'cleanup') {
+    const result = await getOrchestrator().cleanup(
+      parsed.value.teamId,
+      parsed.value.expectedRevision,
+      { dryRun: parsed.value.dryRun },
+    );
+    if (!result.ok) {
+      stderr(formatCliError(result.error.code, result.error.message));
+      return result.error.code === 'E_VALIDATOR_REJECTED' ? 2 : 1;
+    }
+    // `--json` 與 status/stop/wait 相同：永遠印 JSON envelope；旗標僅表面相容。
+    stdout(`${JSON.stringify({ ok: true, kind: 'team-cleanup', ...result.value })}\n`);
     return 0;
   }
 

@@ -199,6 +199,9 @@ oma team start --manifest <file> [--worker-mode interactive|headless] [--max-par
   # Ready task（deps completed）至多 max-parallel；managed worktree + tmux + agy bootstrap。
 oma team status --team <id>
 oma team stop --team <id>
+oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]
+  # 回收終局 task 的 worktree / 分支 / mailbox-bodies。請先 --dry-run。
+  # 未整合 commit 會保留。stop 仍只殺 tmux，不會隱含 cleanup。
 oma team supervise --team <id>
 oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead --process dead
 oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>

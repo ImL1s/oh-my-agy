@@ -77,6 +77,7 @@ Usage:
   oma team capture --team <id> --task <id> [--lines 1..2000]
   oma team view --team <id> [--task <id>] --print-argv
   oma team stop --team <id>
+  oma team cleanup --team <id> --expected-revision <n> [--dry-run] [--json]
   oma team supervise --team <id>
   oma team reclaim --team <id> --task <id> --expected-revision <n> --pane dead|alive|unknown --process dead|alive|unknown
   oma team deliver --team <id> --task <id> --expected-revision <n> --claim-token <tok> --generation <n> --worktree <path>
