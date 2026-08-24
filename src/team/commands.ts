@@ -15,7 +15,7 @@ import {
   RecoveryTaskAggregateV1,
 } from './recovery-fork';
 import { TeamOrchestrator, TeamOrchestratorOptions } from './orchestrator';
-import { isCanonicalTeamIdentifier } from './manifest';
+import { isCanonicalTeamIdentifier, readTeamManifest } from './manifest';
 import { TeamStateStore } from './state';
 import { RuntimeContext, TeamActorIdentityV1 } from './types';
 import { resolveGitWorktreeIdentity } from './worktree';
@@ -33,6 +33,7 @@ export type ParsedTeamCommand =
       kind: 'start';
       manifestPath: string;
       workerMode: 'interactive' | 'headless';
+      maxParallel?: number;
     }
   | {
       kind: 'status';
@@ -124,10 +125,18 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
     if (workerMode !== 'interactive' && workerMode !== 'headless') {
       return err(runtimeError('E_VALIDATOR_REJECTED', 'worker-mode must be interactive or headless'));
     }
+    // 設計概念映射：start 與 tick 共用 --max-parallel 驗證；OMC team --count / OMX team N / OMG team --workers。
+    let maxParallel: number | undefined;
+    if (flags.value.has('--max-parallel')) {
+      const parsedMax = parseMaxParallelFlag(flags.value.get('--max-parallel')!);
+      if (!parsedMax.ok) return parsedMax;
+      maxParallel = parsedMax.value;
+    }
     return ok({
       kind: 'start',
       manifestPath: flags.value.get('--manifest')!,
       workerMode,
+      ...(maxParallel === undefined ? {} : { maxParallel }),
     });
   }
   if (subcommand === 'status') {
@@ -218,10 +227,9 @@ export function parseTeamCommand(argv: readonly string[]): Result<ParsedTeamComm
     }
     let maxParallel: number | undefined;
     if (flags.value.has('--max-parallel')) {
-      maxParallel = Number(flags.value.get('--max-parallel'));
-      if (!Number.isSafeInteger(maxParallel) || maxParallel! < 1) {
-        return err(runtimeError('E_VALIDATOR_REJECTED', 'max-parallel must be a positive integer'));
-      }
+      const parsedMax = parseMaxParallelFlag(flags.value.get('--max-parallel')!);
+      if (!parsedMax.ok) return parsedMax;
+      maxParallel = parsedMax.value;
     }
     return ok({
       kind: 'tick',
@@ -327,15 +335,23 @@ export async function teamCommand(
     ?? defaultOrchestrator(options.context, options.providerProfileFactory);
   if (parsed.value.kind === 'start') {
     const orchestrator = getOrchestrator();
+    const resolvedParallel = resolveTeamStartMaxParallel({
+      cliMaxParallel: parsed.value.maxParallel,
+      manifestPath: parsed.value.manifestPath,
+      repoRoot: options.context.workspaceRoot,
+    });
+    if (!resolvedParallel.ok) {
+      stderr(`${resolvedParallel.error.code}: ${resolvedParallel.error.message}\n`);
+      return teamStartErrorExitCode(resolvedParallel.error.code);
+    }
+    orchestrator.setMaxParallelWorkers(resolvedParallel.value);
     const result = await orchestrator.startFromManifest(
       parsed.value.manifestPath,
       parsed.value.workerMode,
     );
     if (!result.ok) {
       stderr(`${result.error.code}: ${result.error.message}\n`);
-      return result.error.code === 'E_VALIDATOR_REJECTED' || result.error.code === 'E_MANIFEST_INVALID'
-        ? 2
-        : 1;
+      return teamStartErrorExitCode(result.error.code);
     }
     // claimToken 僅單次回傳於 JSON；勿寫入 durable 日誌以外的儲存
     stdout(`${JSON.stringify({
@@ -560,6 +576,36 @@ export function attachLeaderActorFromRecovery(
     actor,
     tokenFactory: base.tokenFactory,
   });
+}
+
+const MAX_PARALLEL_FLAG_MESSAGE = 'max-parallel must be a positive integer';
+
+/** 與 tick 同一驗證：Number.isSafeInteger 且 >= 1。 */
+function parseMaxParallelFlag(raw: string): Result<number, RuntimeError> {
+  const maxParallel = Number(raw);
+  if (!Number.isSafeInteger(maxParallel) || maxParallel < 1) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', MAX_PARALLEL_FLAG_MESSAGE));
+  }
+  return ok(maxParallel);
+}
+
+/**
+ * 設計概念映射：start 平行度優先序 CLI flag > manifest.max_parallel > 1
+ * （OMC team --count / OMX team N / OMG team --workers）。
+ */
+function resolveTeamStartMaxParallel(input: {
+  cliMaxParallel: number | undefined;
+  manifestPath: string;
+  repoRoot: string;
+}): Result<number, RuntimeError> {
+  if (input.cliMaxParallel !== undefined) return ok(input.cliMaxParallel);
+  const loaded = readTeamManifest(input.manifestPath, input.repoRoot);
+  if (!loaded.ok) return loaded;
+  return ok(loaded.value.max_parallel ?? 1);
+}
+
+function teamStartErrorExitCode(code: string): number {
+  return code === 'E_VALIDATOR_REJECTED' || code === 'E_MANIFEST_INVALID' ? 2 : 1;
 }
 
 function parseStrictFlags(argv: readonly string[]): Result<Map<string, string>, RuntimeError> {

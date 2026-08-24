@@ -98,6 +98,9 @@ describe('CLI application wiring', () => {
     expect(output().stdout).toContain('oma native capabilities [--json]');
     expect(output().stdout).toContain('oma native probe --live [--json]');
     expect(output().stdout).toContain('team resolve-fork --team <id> --fork <id> --winner-generation <n>');
+    expect(output().stdout).toContain(
+      'oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]',
+    );
   });
 
   test('routes public composition commands without passing them to agy', async () => {

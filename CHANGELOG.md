@@ -18,6 +18,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `oma team start` honors `--max-parallel` and optional manifest `max_parallel`
+  (CLI flag > manifest > default 1), matching `tick` validation. Overlapping
+  `write_scope` still serializes. (#43)
+
 - `.claude-plugin/marketplace.json` now carries `$schema`
   (`https://json.schemastore.org/claude-code-marketplace.json`), a top-level
   `version` matching `package.json`, and plugin-entry `version` / `category` /

@@ -195,7 +195,7 @@ oma autopilot cancel --session <id> --expected-revision <n> --reason <text>
 oma autopilot doctor --session <id>
 oma autopilot review|qa|reset-breaker …   # 见 oma --help
 
-oma team start --manifest <file> [--worker-mode interactive|headless]
+oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]
   # Ready task（deps completed）至多 max-parallel；managed worktree + tmux + agy bootstrap。
 oma team status --team <id>
 oma team stop --team <id>

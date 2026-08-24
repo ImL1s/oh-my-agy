@@ -54,6 +54,8 @@ export interface TeamManifestV1 {
   teamId: string;
   revision: number;
   tasks: readonly TeamTaskSpecV1[];
+  /** 可選平行度上限（OMC team --count / OMX team N / OMG team --workers）；省略視為 1。 */
+  max_parallel?: number;
 }
 
 export interface CanonicalTeamTaskV1 extends Omit<TeamTaskSpecV1, 'write_scope'> {

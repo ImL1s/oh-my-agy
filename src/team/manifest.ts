@@ -28,6 +28,8 @@ export function validateTeamManifest(
   if (!isCanonicalTeamIdentifier(input.teamId) || !Number.isInteger(input.revision) || Number(input.revision) < 0) {
     return invalid('Manifest teamId or revision is invalid');
   }
+  const maxParallel = parseManifestMaxParallel(input.max_parallel);
+  if (!maxParallel.ok) return maxParallel;
   if (!Array.isArray(input.tasks) || input.tasks.length === 0) {
     return invalid('Manifest tasks must be a non-empty array');
   }
@@ -72,7 +74,47 @@ export function validateTeamManifest(
     revision: input.revision,
     repoRoot: canonicalRoot,
     tasks,
+    max_parallel: maxParallel.value,
   });
+}
+
+/**
+ * 設計概念映射：與 validateTeamManifest 同一契約；測試與 CLI 以 parseTeamManifest 為入口。
+ * OMC `team --count` / OMX `team N` / OMG `team --workers` 的 manifest 對應欄位。
+ */
+export function parseTeamManifest(
+  input: unknown,
+  repoRoot: string,
+): Result<CanonicalTeamManifestV1> {
+  return validateTeamManifest(input, repoRoot);
+}
+
+/** 讀檔後走 parseTeamManifest；start CLI 與 TeamOrchestrator 共用。 */
+export function readTeamManifest(
+  manifestPath: string,
+  repoRoot: string,
+): Result<CanonicalTeamManifestV1> {
+  if (!fs.existsSync(manifestPath)) {
+    return err(runtimeError('E_MANIFEST_INVALID', `manifest not found: ${manifestPath}`));
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    return err(runtimeError(
+      'E_MANIFEST_INVALID',
+      `cannot parse manifest: ${error instanceof Error ? error.message : String(error)}`,
+    ));
+  }
+  return parseTeamManifest(raw, repoRoot);
+}
+
+function parseManifestMaxParallel(value: unknown): Result<number> {
+  if (value === undefined) return ok(1);
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    return err(runtimeError('E_VALIDATOR_REJECTED', 'max_parallel must be a positive integer'));
+  }
+  return ok(value);
 }
 
 function parseTask(input: unknown, repoRoot: string): Result<CanonicalTeamTaskV1> {
