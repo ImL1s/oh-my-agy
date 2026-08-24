@@ -11,6 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ManagedBindingEnv, PreInvocationEventV1, SessionLocator } from '../continuation/state';
 import { writeSessionProjection } from '../continuation/session-aggregate';
+import { isInternalCatalogSkill, listPublicCatalogSkillNames } from '../modes/skill-catalog';
 import { resolveStateRoot } from '../runtime/state-root';
 import { appendHookLifecycleEvent, appendOperatorDisabledLifecycle, hookSuppressed } from './common';
 import { writeHookDebug } from './debug-log';
@@ -86,7 +87,7 @@ export async function handlePreInvocation(
     writeHookDebug('preinvocation.allow_diagnostic', bound.error);
     return failOpen();
   }
-  // managed exact_env 綁定成功時注入 session skill 提醒（OMC SessionStart / skill-injector 對應）
+  // managed exact_env 綁定成功時注入 catalog 推導的 skill 提醒（OMC skill-injector 對應；#52）
   const injectSteps = buildManagedSkillInjectSteps(env, bound.session.sessionId);
   const result: PreInvocationHookResult = {
     injectSteps,
@@ -127,30 +128,90 @@ export async function handlePreInvocation(
 }
 
 /**
- * 設計概念映射：OMC session-start / skill-injector — 在 managed 工作階段提醒 agent 讀取 plugin skills。
- * host 若不認識 injectSteps 結構會忽略；fail-open。
+ * injectStep 長度上限。對齊 OMC skill-injector / OMX compact skill「勿灌爆 prompt」；
+ * 此處只列 catalog 名，故遠小於 SKILL.md 正文的 12_000。
  */
-function buildManagedSkillInjectSteps(
+export const MANAGED_SKILL_INJECT_MAX_CHARS_V1 = 4_096;
+
+/** 穩定截斷標記；測試與操作者都靠此辨識清單被截斷，而非靜默少 skill。 */
+export const MANAGED_SKILL_INJECT_TRUNCATION_MARKER_V1 = '…[OMA_SKILL_INJECT_TRUNCATED]';
+
+const LEGACY_SKILL_PIPE_V1 = 'ralph|ultrawork|search|autopilot|team|cancel|verify';
+const LEGACY_SKILL_SLASH_V1 = 'ralph/ultrawork/search/autopilot/team';
+
+/**
+ * 設計概念映射：OMC `scripts/skill-injector.mjs`（UserPromptSubmit 遞迴發現 skill 後注入）、
+ * OMX SessionStart keyword registry。OMA 只有 PreInvocation 能主動宣傳 skill，故改由
+ * `OMA_SKILL_CATALOG_V1` 渲染 `visibility: 'public'` 條目，避免硬編碼清單 drift（#52）。
+ * catalog 模組拋錯時 fail-open 回退既有靜態字串，不得把 hook 打成 deny。
+ */
+export function buildManagedSkillInjectSteps(
   env: Readonly<NodeJS.ProcessEnv>,
   sessionId: string,
 ): Array<Record<string, unknown>> {
   const packageRoot = env.OMA_PACKAGE_ROOT?.trim();
   const mode = env.OMA_MANAGED_MODE?.trim() || 'managed';
-  const skillHint = packageRoot
-    ? `Read OMA skill under ${packageRoot}/skills/ (ralph|ultrawork|search|autopilot|team|cancel|verify) and follow it until verified complete.`
-    : 'Follow OMA managed skill protocols (ralph/ultrawork/search/autopilot/team). Prefer `oma` CLI for team/autopilot state; never claim complete without verification evidence.';
+  try {
+    return [injectTextStep(capManagedSkillInjectText(
+      assembleManagedSkillInjectText(sessionId, mode, catalogDerivedSkillHint(packageRoot)),
+    ))];
+  } catch (error) {
+    writeHookDebug('preinvocation.skill_catalog_fail_open', {
+      message: error instanceof Error ? error.message : String(error),
+    });
+    return [injectTextStep(capManagedSkillInjectText(
+      assembleManagedSkillInjectText(sessionId, mode, legacyManagedSkillHint(packageRoot)),
+    ))];
+  }
+}
+
+/** 只列 public；internal（discovery-proof）即使 lister 漏出也要濾掉。 */
+function catalogDerivedSkillHint(packageRoot: string | undefined): string {
+  const listed = listPublicCatalogSkillNames();
+  if (!Array.isArray(listed)) {
+    throw new Error('skill catalog did not return an array');
+  }
+  const names = listed.filter((name) => !isInternalCatalogSkill(name));
+  return packageRoot
+    ? `Read OMA skill under ${packageRoot}/skills/ (${names.join('|')}) and follow it until verified complete.`
+    : `Follow OMA managed skill protocols (${names.join('/')}). Prefer \`oma\` CLI for team/autopilot state; never claim complete without verification evidence.`;
+}
+
+/** #52 fail-open：catalog 拋錯時必須是改前的靜態字串，不得用新 catalog 名重拼。 */
+function legacyManagedSkillHint(packageRoot: string | undefined): string {
+  return packageRoot
+    ? `Read OMA skill under ${packageRoot}/skills/ (${LEGACY_SKILL_PIPE_V1}) and follow it until verified complete.`
+    : `Follow OMA managed skill protocols (${LEGACY_SKILL_SLASH_V1}). Prefer \`oma\` CLI for team/autopilot state; never claim complete without verification evidence.`;
+}
+
+function assembleManagedSkillInjectText(
+  sessionId: string,
+  mode: string,
+  skillHint: string,
+): string {
   return [
-    {
-      type: 'text',
-      text: [
-        '[OMA SESSION SKILL]',
-        `sessionId=${sessionId}`,
-        `mode_hint=${mode}`,
-        skillHint,
-        'CLI alone is not completion. Execute the skill checklist with fresh evidence.',
-      ].join('\n'),
-    },
-  ];
+    '[OMA SESSION SKILL]',
+    `sessionId=${sessionId}`,
+    `mode_hint=${mode}`,
+    `OMA_MANAGED_MODE=${mode}`,
+    skillHint,
+    'CLI alone is not completion. Execute the skill checklist with fresh evidence.',
+  ].join('\n');
+}
+
+/** 總長含標記不得超過上限；從尾端截斷以保留 sessionId= / mode_hint= 行首。 */
+function capManagedSkillInjectText(
+  text: string,
+  maxChars = MANAGED_SKILL_INJECT_MAX_CHARS_V1,
+): string {
+  if (text.length <= maxChars) return text;
+  const marker = MANAGED_SKILL_INJECT_TRUNCATION_MARKER_V1;
+  if (maxChars <= marker.length) return marker.slice(0, Math.max(0, maxChars));
+  return `${text.slice(0, maxChars - marker.length)}${marker}`;
+}
+
+function injectTextStep(text: string): Record<string, unknown> {
+  return { type: 'text', text };
 }
 
 function failOpen(): PreInvocationHookResult {
