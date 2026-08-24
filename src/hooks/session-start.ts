@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { appendHookLifecycleEvent } from './common';
+import { appendHookLifecycleEvent, hookSuppressed } from './common';
 
 export interface OptionalLifecycleInput { conversationId?: string }
 export interface OptionalLifecycleResult {
@@ -13,6 +13,9 @@ export function handleSessionStart(
   input: Readonly<OptionalLifecycleInput>,
   env: Readonly<NodeJS.ProcessEnv> = process.env,
 ): OptionalLifecycleResult {
+  if (hookSuppressed('session-start', env)) {
+    return { decision: 'allow', ok: false, claimed: false };
+  }
   appendOptional('session_started', input, env);
   return { decision: 'allow', ok: false, claimed: false };
 }

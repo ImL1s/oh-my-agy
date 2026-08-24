@@ -8,6 +8,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- **Hook kill switch:** `DISABLE_OMA=1|true` (case-insensitive, trimmed) turns
+  every Antigravity hook off, and `OMA_SKIP_HOOKS` skips named hooks
+  (`pre-invocation`, `stop`, `session-start`, `post-invocation`). Mirrors OMC
+  `DISABLE_OMC` / `OMC_SKIP_HOOKS` and OMG `DISABLE_OMG` / `OMG_SKIP_HOOKS`. A
+  suppressed PreInvocation/Stop returns allow with empty `injectSteps`, exits
+  0, and does not resolve workspace or state root. A durable lifecycle record
+  uses `source: operator_disabled` (never `antigravity_hook`) and is appended
+  only when `OMA_STATE_ROOT` already exists — the write is skipped rather than
+  creating a state root.
+
 - New in-session skill **`ask`** (`/oh-my-agy:ask`), matching the `ask` entry
   point that OMC, OMX, and OMG already ship: it brokers a second opinion from a
   locally installed advisor CLI (Codex / Claude / Gemini / `agy`) under
