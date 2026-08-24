@@ -21,6 +21,10 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Added
 
+- `oma session list [--json] [--workspace-key <key>] [--limit <1..200>]` enumerates
+  managed sessions from the existing continuation inventory (read-only).
+  `oma resume --list` is an alias. `oma hud --session <id>` can omit
+  `--workspace-key` and resolve it from cwd. (#44)
 - `oma team start` honors `--max-parallel` and optional manifest `max_parallel`
   (CLI flag > manifest > default 1), matching `tick` validation. Overlapping
   `write_scope` still serializes. (#43)

@@ -90,6 +90,7 @@ import {
   ordinaryEnvironment,
 } from './managed-invocation';
 import { ExtendedCliCommand, NativeCliCommand } from './parser';
+import { runSessionListCommand } from './session-commands';
 
 export interface RuntimeManagedTransactionOptions {
   readonly cwd?: string;
@@ -824,6 +825,8 @@ export async function runExtendedCommand(
         return runWikiCommand(argv, context);
       case 'hud':
         return await runHudCommand(argv, context);
+      case 'session':
+        return runSessionListCommand(argv, context);
       case 'native-status':
         return await runNativeStatusCommand(argv, context);
       case 'lsp-status':
@@ -2397,10 +2400,10 @@ async function runHudCommand(
   const teamId = optionValue(argv, '--team');
   const workspaceKey = optionValue(argv, '--workspace-key');
   if (sessionId !== undefined) {
-    if (workspaceKey === undefined) {
-      throw new ExtendedCliUsageError('--session requires --workspace-key');
-    }
-    query.session = { session_id: sessionId, workspace_key: workspaceKey };
+    query.session = {
+      session_id: sessionId,
+      workspace_key: resolveHudWorkspaceKey(workspaceKey, context.cwd),
+    };
   }
   if (teamId !== undefined) {
     if (workspaceKey === undefined) throw new ExtendedCliUsageError('--team requires --workspace-key');
@@ -2543,6 +2546,20 @@ async function runSidecarStatusCommand(
       : 'unknown',
   }, null, 2)}\n`);
   return 0;
+}
+
+
+/**
+ * `oma hud --session` 未給 `--workspace-key` 時，以 cwd 經 resolveWorkspaceIdentity
+ * 自動解析。解析失敗仍回既有錯誤字串，避免改動呼叫端契約。
+ */
+function resolveHudWorkspaceKey(workspaceKey: string | undefined, cwd: string): string {
+  if (workspaceKey !== undefined) return workspaceKey;
+  const identity = resolveWorkspaceIdentity(cwd);
+  if (!identity.ok) {
+    throw new ExtendedCliUsageError('--session requires --workspace-key');
+  }
+  return identity.value.workspaceKey;
 }
 
 function collectHudAdapters(
@@ -2705,6 +2722,9 @@ async function runResumeCommand(
   argv: readonly string[],
   context: Readonly<ExtendedCommandContext>,
 ): Promise<number> {
+  if (argv.includes('--list')) {
+    return runSessionListCommand(argv, context);
+  }
   assertOnlyOptions(argv, ['--session', '--conversation', '--expected-revision']);
   const sessionId = requiredOption(argv, '--session');
   const conversationId = requiredOption(argv, '--conversation');

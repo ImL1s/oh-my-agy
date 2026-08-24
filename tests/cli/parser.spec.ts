@@ -60,6 +60,7 @@ describe('CLI parser', () => {
     ['workflow', ['list']],
     ['mcp-server', []],
     ['wiki', ['search', 'release']],
+    ['session', ['list', '--json']],
     ['native-status', []],
     ['resume', ['--session', 's1']],
     ['production', ['verify']],

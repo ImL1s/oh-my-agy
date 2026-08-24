@@ -24,6 +24,7 @@ export type ExtendedCliCommand =
   | 'mcp-server'
   | 'wiki'
   | 'hud'
+  | 'session'
   | 'native-status'
   | 'lsp-status'
   | 'sidecar-status'
@@ -43,6 +44,7 @@ const EXTENDED_COMMANDS = new Set<ExtendedCliCommand>([
   'mcp-server',
   'wiki',
   'hud',
+  'session',
   'native-status',
   'lsp-status',
   'sidecar-status',
