@@ -41,6 +41,15 @@ describe('OMA W0 exhaustive changed-path ownership oracle', () => {
     });
   });
 
+  test('#65 doctor conflicts files map to install owner', () => {
+    expect(ownershipForPath('src/setup/doctor-conflicts.ts')).toEqual({
+      wave: 'OMA-W1', owner: 'oma-install-owner',
+    });
+    expect(ownershipForPath('tests/setup/doctor-conflicts.spec.ts')).toEqual({
+      wave: 'OMA-W1', owner: 'oma-install-owner',
+    });
+  });
+
   test('#49 MCP registration files map to install and composition owners', () => {
     expect(ownershipForPath('tests/setup/mcp-registration.spec.ts')).toEqual({
       wave: 'OMA-W1', owner: 'oma-install-owner',

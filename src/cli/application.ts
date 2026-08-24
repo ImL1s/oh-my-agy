@@ -86,7 +86,8 @@ Usage:
   oma team api <op> --input JSON [--json]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
   oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]
-  oma doctor [--json] [--no-strict-plugin] [--native] [--fix]
+  oma doctor [--json] [--no-strict-plugin] [--native] [--fix] [--strict]
+  oma doctor conflicts [--json] [--plugin-dir <path>] [--strict]
   oma hooks status [--json]
   oma hooks tail [--limit <1..500>]
   oma hooks test [--event pre-invocation|stop]
