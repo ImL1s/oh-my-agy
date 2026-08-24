@@ -133,6 +133,10 @@ describe('OMA session skill surface', () => {
     expect(runtime).toMatch(/oma wiki index\\\|list\\\|search/);
     expect(runtime).toMatch(/minimal\\\|focused\\\|full/);
     expect(runtime).toMatch(/start\\\|status\\\|tick/);
+    const planBody = loadSkillMarkdown(packageRoot, 'plan');
+    expect(planBody).toMatch(/no `oma plan` CLI/i);
+    expect(planBody).toMatch(/upgrade to `ralplan`/i);
+    expect(planBody).toMatch(/\.agy\/plans\//);
   });
 
   test('catalog generator write targets are only the two authorized catalog files', () => {

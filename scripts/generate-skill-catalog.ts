@@ -33,6 +33,7 @@ interface CatalogCopy {
 export const PREFERRED_SKILL_ORDER: readonly string[] = [
   'autopilot',
   'deep-interview',
+  'plan',
   'ralplan',
   'ultragoal',
   'code-review',
@@ -62,6 +63,11 @@ const CATALOG_COPY: Readonly<Record<string, CatalogCopy>> = Object.freeze({
     agents: 'Clarify / specs',
     intent: 'Clarify requirements',
     cli: '(phase of autopilot)',
+  },
+  plan: {
+    agents: 'Light planning under ralplan',
+    intent: 'Bounded step list with verifiable completion',
+    cli: '(none)',
   },
   ralplan: {
     agents: 'Plan + critic APPROVE gate',

@@ -27,6 +27,7 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 |-------------|-----------------|------------|---------------------|
 | Full autonomous delivery (OMX five-phase) | `/oh-my-agy:autopilot` | `skills/autopilot/SKILL.md` | `oma autopilot …` (ledger only) |
 | Clarify requirements | `/oh-my-agy:deep-interview` | `skills/deep-interview/SKILL.md` | (phase of autopilot) |
+| Bounded step list with verifiable completion | `/oh-my-agy:plan` | `skills/plan/SKILL.md` | (none) |
 | Consensus-style plan gate | `/oh-my-agy:ralplan` | `skills/ralplan/SKILL.md` | `oma autopilot consensus` (optional) |
 | Durable implement + verify | `/oh-my-agy:ultragoal` | `skills/ultragoal/SKILL.md` | handoff/advance (optional); `oma team` explicit |
 | Merge-readiness review | `/oh-my-agy:code-review` | `skills/code-review/SKILL.md` | `oma autopilot review` (optional) |
@@ -44,7 +45,6 @@ When a skill is invoked via slash or skill protocol, treat **`$ARGUMENTS` as the
 | Deterministic repository workflow runner | `/oh-my-agy:workflow` | `skills/workflow/SKILL.md` | `oma workflow run <name> --input <json>` |
 | Internal discovery canary (do not use as a workflow) | `/oh-my-agy:discovery-proof` | `skills/discovery-proof/SKILL.md` | none — machine-verification token only |
 | This index | `/oh-my-agy:oma-runtime` | (this file) | `oma skill list` / `oma skill show <name>` |
-| In-session OMA light planning — invoke /oh-my-agy:plan; bounded step list wit... | `/oh-my-agy:plan` | `skills/plan/SKILL.md` | (none) |
 <!-- OMA-SKILL-CATALOG:END -->
 
 ### Autopilot phase cycle (canonical OMX)

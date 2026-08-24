@@ -14,6 +14,7 @@ In-session skill playbooks shipped with the plugin. Each subdirectory has a `SKI
 |------|-------------|
 | `autopilot/SKILL.md` | Full OMX five-phase delivery loop |
 | `deep-interview/SKILL.md` | Clarify / specs |
+| `plan/SKILL.md` | Light planning under ralplan |
 | `ralplan/SKILL.md` | Plan + critic APPROVE gate |
 | `ultragoal/SKILL.md` | Implement + verify ledger |
 | `code-review/SKILL.md` | Merge readiness review |
@@ -31,7 +32,6 @@ In-session skill playbooks shipped with the plugin. Each subdirectory has a `SKI
 | `workflow/SKILL.md` | Repository DAG runner (permissions, replay, ship gate) |
 | `discovery-proof/SKILL.md` | Production canary for namespaced skill discovery |
 | `oma-runtime/SKILL.md` | Skill index / runtime notes |
-| `plan/SKILL.md` | In-session OMA light planning — invoke /oh-my-agy:plan; bounded step list wit... |
 <!-- OMA-SKILL-CATALOG:END -->
 
 ## Subdirectories
