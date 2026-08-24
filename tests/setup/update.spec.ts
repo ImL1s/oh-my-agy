@@ -1,10 +1,16 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { createDefaultServices } from '../../src/cli/services';
 import { PluginCommandAdapter, PluginCommandResult } from '../../src/setup/plugin';
 import {
   DoctorProbeV1,
+  ImmutableInstallCheckV1,
   ImmutableInstallUpdater,
+  UPDATE_CHECK_NO_UPDATE_NEEDED,
+  UPDATE_CHECK_NO_UPDATE_NEEDED_MESSAGE,
+  UPDATE_CHECK_NOT_UPGRADEABLE,
+  UPDATE_CHECK_UPGRADEABLE,
   classifyDoctorProbe,
   preflightImmutableInstallCandidate,
 } from '../../src/setup/update';
@@ -348,4 +354,168 @@ describe('immutable update and doctor gate', () => {
     expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
       .toBe('0.9.0');
   });
+
+  test('check reports NO_UPDATE_NEEDED when candidate matches installed and does not replace', () => {
+    writable(installedRoot);
+    fs.rmSync(installedRoot, { recursive: true, force: true });
+    surface(installedRoot, '1.0.0', 'candidate');
+    const adapter = new InstallingAdapter(installedRoot);
+    const priorOma = fs.realpathSync(path.join(binDir, 'oma'));
+    const updater = new ImmutableInstallUpdater({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      binDir,
+      adapter,
+      mode: 'development',
+      doctorProbe: async () => probe(0),
+    });
+    const report = updater.check();
+    expect(report.classification).toBe(UPDATE_CHECK_NO_UPDATE_NEEDED);
+    expect(report.message).toBe(UPDATE_CHECK_NO_UPDATE_NEEDED_MESSAGE);
+    expect(report.replacement).toBe(false);
+    expect(report.candidate?.digest).toBe(report.installed?.digest);
+    expect(adapter.calls).toEqual([]);
+    expect(fs.existsSync(stateRoot)).toBe(false);
+    expect(fs.realpathSync(path.join(binDir, 'oma'))).toBe(priorOma);
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('1.0.0');
+  });
+
+  test('check reports UPGRADEABLE without replacing differing installed bytes', () => {
+    const adapter = new InstallingAdapter(installedRoot);
+    const priorOma = fs.realpathSync(path.join(binDir, 'oma'));
+    const updater = new ImmutableInstallUpdater({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      binDir,
+      adapter,
+      mode: 'development',
+    });
+    const report = updater.check();
+    expect(report.classification).toBe(UPDATE_CHECK_UPGRADEABLE);
+    expect(report.replacement).toBe(false);
+    expect(report.candidate?.version).toBe('1.0.0');
+    expect(report.installed?.version).toBe('0.9.0');
+    expect(report.candidate?.digest).not.toBe(report.installed?.digest);
+    expect(report.preflight).toEqual(expect.objectContaining({ ok: true }));
+    expect(adapter.calls).toEqual([]);
+    expect(fs.existsSync(stateRoot)).toBe(false);
+    expect(fs.realpathSync(path.join(binDir, 'oma'))).toBe(priorOma);
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('0.9.0');
+  });
+
+  test('check reports NOT_UPGRADEABLE for non-executable candidate and does not mutate', () => {
+    fs.chmodSync(path.join(source, 'dist', 'bin', 'oma.js'), 0o644);
+    const adapter = new InstallingAdapter(installedRoot);
+    const updater = new ImmutableInstallUpdater({
+      packageRoot: source,
+      stateRoot,
+      antigravityConfigRoot: configRoot,
+      binDir,
+      adapter,
+      mode: 'development',
+    });
+    const report = updater.check();
+    expect(report.classification).toBe(UPDATE_CHECK_NOT_UPGRADEABLE);
+    expect(report.replacement).toBe(false);
+    expect(report.preflight).toEqual(expect.objectContaining({
+      ok: false,
+      code: 'E_VALIDATOR_REJECTED',
+      message: 'CLI entrypoint is not executable',
+    }));
+    expect(adapter.calls).toEqual([]);
+    expect(fs.existsSync(stateRoot)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('0.9.0');
+  });
+
+  test('oma update --check reports NO_UPDATE_NEEDED over shipped CLI when identity matches', async () => {
+    writable(installedRoot);
+    fs.rmSync(installedRoot, { recursive: true, force: true });
+    surface(installedRoot, '1.0.0', 'candidate');
+    const adapter = new InstallingAdapter(installedRoot);
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot: source,
+      stateRoot,
+      pluginAdapter: adapter,
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    const code = await services.extendedCommand('update', [
+      '--check',
+      '--package-root', source,
+      '--home', scratch,
+      '--bin-dir', binDir,
+      '--config-root', configRoot,
+    ]);
+    expect(code).toBe(0);
+    const report = JSON.parse(stdout) as ImmutableInstallCheckV1;
+    expect(report.classification).toBe(UPDATE_CHECK_NO_UPDATE_NEEDED);
+    expect(report.message).toBe(UPDATE_CHECK_NO_UPDATE_NEEDED_MESSAGE);
+    expect(adapter.calls).toEqual([]);
+    expect(fs.existsSync(stateRoot)).toBe(false);
+  });
+
+  test('oma update --check dispatches shipped CLI without replacement', async () => {
+    const adapter = new InstallingAdapter(installedRoot);
+    const priorOma = fs.realpathSync(path.join(binDir, 'oma'));
+    let stdout = '';
+    let stderr = '';
+    const services = createDefaultServices({
+      packageRoot: source,
+      stateRoot,
+      pluginAdapter: adapter,
+      stdout: (value) => { stdout += value; },
+      stderr: (value) => { stderr += value; },
+    });
+    const code = await services.extendedCommand('update', [
+      '--check',
+      '--package-root', source,
+      '--home', scratch,
+      '--bin-dir', binDir,
+      '--config-root', configRoot,
+    ]);
+    expect(code).toBe(0);
+    expect(stderr).toBe('');
+    const report = JSON.parse(stdout) as ImmutableInstallCheckV1;
+    expect(report.classification).toBe(UPDATE_CHECK_UPGRADEABLE);
+    expect(report.message).toContain('no replacement');
+    expect(report.replacement).toBe(false);
+    expect(adapter.calls).toEqual([]);
+    expect(fs.existsSync(stateRoot)).toBe(false);
+    expect(fs.realpathSync(path.join(binDir, 'oma'))).toBe(priorOma);
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('0.9.0');
+  });
+
+  test('oma update --check exits non-zero when preflight is not upgradeable', async () => {
+    fs.chmodSync(path.join(source, 'dist', 'bin', 'oma.js'), 0o644);
+    const adapter = new InstallingAdapter(installedRoot);
+    let stdout = '';
+    const services = createDefaultServices({
+      packageRoot: source,
+      stateRoot,
+      pluginAdapter: adapter,
+      stdout: (value) => { stdout += value; },
+      stderr: () => undefined,
+    });
+    const code = await services.extendedCommand('update', [
+      '--check',
+      '--package-root', source,
+      '--home', scratch,
+      '--bin-dir', binDir,
+      '--config-root', configRoot,
+    ]);
+    expect(code).toBe(1);
+    const report = JSON.parse(stdout) as ImmutableInstallCheckV1;
+    expect(report.classification).toBe(UPDATE_CHECK_NOT_UPGRADEABLE);
+    expect(adapter.calls).toEqual([]);
+    expect(JSON.parse(fs.readFileSync(path.join(installedRoot, 'package.json'), 'utf8')).version)
+      .toBe('0.9.0');
+  });
 });
+

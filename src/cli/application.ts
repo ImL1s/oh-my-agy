@@ -46,7 +46,7 @@ Usage:
   oma resume --list
   oma resume --session <id> --conversation <id> --expected-revision <n>
   oma recovery --source <transcript.jsonl> [--recovery-root <dir>] [--include-prompt]
-  oma update [--release] [--bin-dir <dir>]
+  oma update [--release] [--bin-dir <dir>] [--check]
   oma uninstall --receipt <receipt.json> [--project-state <.agy>] [--purge]
   oma parity verify|verify-handoff -- <read-only run-manifest args...>
   oma parity verify-composition --run-id <id> --aggregate <aggregate-handoff.json>
@@ -75,7 +75,7 @@ Usage:
   oma team tick --team <id> [--worker-mode headless|interactive] [--max-parallel <n>]
   oma team api <op> --input JSON [--json]
   oma team resolve-fork --team <id> --fork <id> --winner-generation <n> --expected-revision <n> --evidence <file>
-  oma setup [--global|--workspace] [--host all|agy|claude|grok]
+  oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]
   oma doctor [--json] [--no-strict-plugin] [--native]
 
   team api P0 ops: send-message, mailbox-list, mailbox-mark-delivered, create-task,

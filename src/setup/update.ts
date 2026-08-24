@@ -5,14 +5,18 @@ import * as os from 'os';
 import * as path from 'path';
 import { canonicalJson, sha256 } from '../runtime/atomic';
 import { runtimeError, RuntimeError } from '../runtime/errors';
+import { assertRedacted, redactValue } from '../runtime/redaction';
 import { resolveStateRoot } from '../runtime/state-root';
 import { Result, err, ok } from '../runtime/types';
 import { doctorReportToLines, runDoctor } from './doctor';
 import {
   computePackageIdentity,
+  PackageIdentitySummaryV1,
+  readInstalledIdentityIfPresent,
+  summarizePackageIdentity,
   validateRunnablePackageEntrypoints,
 } from './installed-identity';
-import { PluginCommandAdapter, PluginCommandResult } from './plugin';
+import { PluginCommandAdapter, PluginCommandResult, readPackagePluginName } from './plugin';
 import {
   InstallReceiptV1,
   commandReceipt,
@@ -73,6 +77,37 @@ export interface ImmutableInstallPreflightV1 {
   packageDigest: string;
   assetSha256: string | null;
   runnableEntrypoints: true;
+}
+
+export const UPDATE_CHECK_SCHEMA = 'oma.update-check/v1' as const;
+export const UPDATE_CHECK_NO_UPDATE_NEEDED = 'NO_UPDATE_NEEDED' as const;
+export const UPDATE_CHECK_UPGRADEABLE = 'UPGRADEABLE' as const;
+export const UPDATE_CHECK_NOT_UPGRADEABLE = 'NOT_UPGRADEABLE' as const;
+export const UPDATE_CHECK_NO_UPDATE_NEEDED_MESSAGE = '無需更新';
+
+export type UpdateCheckClassificationV1 =
+  | typeof UPDATE_CHECK_NO_UPDATE_NEEDED
+  | typeof UPDATE_CHECK_UPGRADEABLE
+  | typeof UPDATE_CHECK_NOT_UPGRADEABLE;
+
+export interface ImmutableInstallCheckV1 {
+  schema: typeof UPDATE_CHECK_SCHEMA;
+  schemaVersion: 1;
+  classification: UpdateCheckClassificationV1;
+  message: string;
+  replacement: false;
+  candidate: PackageIdentitySummaryV1 | null;
+  installed: {
+    version: string;
+    digest: string;
+    installPath: string;
+  } | null;
+  preflight: { ok: true; report: ImmutableInstallPreflightV1 } | {
+    ok: false;
+    code: string;
+    message: string;
+  };
+  pointerPreflight: { ok: true } | { ok: false; code: string; message: string };
 }
 
 /**
@@ -153,6 +188,121 @@ export class ImmutableInstallUpdater {
     this.options = { ...options };
   }
 
+  /**
+   * 設計概念映射：OMC `update --check` 只核對 identity/digest 與 preflight，不置換。
+   * 禁止 staging、pointer switch、receipt、host registry mutation。
+   */
+  check(): ImmutableInstallCheckV1 {
+    const candidateResult = computePackageIdentity(this.options.packageRoot);
+    const candidate = candidateResult.ok ? summarizePackageIdentity(candidateResult.value) : null;
+    const preflight = preflightImmutableInstallCandidate({
+      packageRoot: this.options.packageRoot,
+      mode: this.options.mode,
+      expectedPackageDigest: this.options.expectedPackageDigest,
+      assetSha256: this.options.assetSha256,
+    });
+    const preflightReport = preflight.ok
+      ? { ok: true as const, report: preflight.value }
+      : {
+        ok: false as const,
+        code: preflight.error.code,
+        message: preflight.error.message,
+      };
+    const pointers = inspectPointers(this.options.binDir, false);
+    const pointerPreflight = pointers.ok
+      ? { ok: true as const }
+      : {
+        ok: false as const,
+        code: pointers.error.code,
+        message: pointers.error.message,
+      };
+
+    const named = readPackagePluginName(this.options.packageRoot);
+    const pluginName = candidate?.pluginName ?? (named.ok ? named.value : 'oh-my-agy');
+    const installedRead = readInstalledIdentityIfPresent({
+      pluginName,
+      antigravityConfigRoot: this.options.antigravityConfigRoot,
+      homeDir: this.options.homeDir,
+    });
+    const installed = installedRead.identity === null
+      ? null
+      : {
+        version: installedRead.identity.version,
+        digest: installedRead.identity.digest,
+        installPath: installedRead.identity.rootPath,
+      };
+
+    if (!preflight.ok) {
+      return this.checkReport(
+        UPDATE_CHECK_NOT_UPGRADEABLE,
+        preflight.error.message,
+        candidate,
+        installed,
+        preflightReport,
+        pointerPreflight,
+      );
+    }
+    if (!candidateResult.ok) {
+      return this.checkReport(
+        UPDATE_CHECK_NOT_UPGRADEABLE,
+        candidateResult.error.message,
+        null,
+        installed,
+        preflightReport,
+        pointerPreflight,
+      );
+    }
+    if (!pointers.ok) {
+      return this.checkReport(
+        UPDATE_CHECK_NOT_UPGRADEABLE,
+        pointers.error.message,
+        candidate,
+        installed,
+        preflightReport,
+        pointerPreflight,
+      );
+    }
+    if (installed !== null && installed.digest === candidateResult.value.digest) {
+      return this.checkReport(
+        UPDATE_CHECK_NO_UPDATE_NEEDED,
+        UPDATE_CHECK_NO_UPDATE_NEEDED_MESSAGE,
+        candidate,
+        installed,
+        preflightReport,
+        pointerPreflight,
+      );
+    }
+    return this.checkReport(
+      UPDATE_CHECK_UPGRADEABLE,
+      'upgrade available; no replacement',
+      candidate,
+      installed,
+      preflightReport,
+      pointerPreflight,
+    );
+  }
+
+  private checkReport(
+    classification: UpdateCheckClassificationV1,
+    message: string,
+    candidate: PackageIdentitySummaryV1 | null,
+    installed: ImmutableInstallCheckV1['installed'],
+    preflight: ImmutableInstallCheckV1['preflight'],
+    pointerPreflight: ImmutableInstallCheckV1['pointerPreflight'],
+  ): ImmutableInstallCheckV1 {
+    return {
+      schema: UPDATE_CHECK_SCHEMA,
+      schemaVersion: 1,
+      classification,
+      message,
+      replacement: false,
+      candidate,
+      installed,
+      preflight,
+      pointerPreflight,
+    };
+  }
+
   async run(): Promise<Result<ImmutableInstallUpdateSuccess, RuntimeError>> {
     const source = computePackageIdentity(this.options.packageRoot);
     if (!source.ok) return source;
@@ -169,7 +319,7 @@ export class ImmutableInstallUpdater {
       && isDirtyGitSource(source.value.rootPath)) {
       return err(runtimeError('E_VALIDATOR_REJECTED', 'release install refuses a dirty/local checkout'));
     }
-    const pointerPreflight = inspectPointers(this.options.binDir);
+    const pointerPreflight = inspectPointers(this.options.binDir, true);
     if (!pointerPreflight.ok) return pointerPreflight;
 
     const transactionId = this.options.idFactory?.() ?? crypto.randomUUID();
@@ -313,11 +463,18 @@ export class ImmutableInstallUpdater {
   }
 }
 
-function inspectPointers(binDir: string): Result<PointerSnapshot[], RuntimeError> {
+function inspectPointers(
+  binDir: string,
+  createDirectory = true,
+): Result<PointerSnapshot[], RuntimeError> {
   const directory = path.resolve(binDir);
   const snapshots: PointerSnapshot[] = [];
   try {
-    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    if (createDirectory) {
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    } else if (!fs.existsSync(directory)) {
+      return ok([]);
+    }
     for (const name of ['oma', 'omy'] as const) {
       const pointerPath = path.join(directory, name);
       if (!fs.existsSync(pointerPath) && !isBrokenSymlink(pointerPath)) {
@@ -433,6 +590,16 @@ function isDirtyGitSource(packageRoot: string): boolean {
     timeout: 10_000,
   });
   return status.status !== 0 || status.stdout.trim() !== '';
+}
+
+export function renderUpdateCheck(report: Readonly<ImmutableInstallCheckV1>): string {
+  const redacted = redactValue(report);
+  assertRedacted(redacted);
+  return `${JSON.stringify(redacted, null, 2)}\n`;
+}
+
+export function updateCheckExitCode(report: Readonly<ImmutableInstallCheckV1>): number {
+  return report.classification === UPDATE_CHECK_NOT_UPGRADEABLE ? 1 : 0;
 }
 
 export function defaultPluginCommandAdapter(
