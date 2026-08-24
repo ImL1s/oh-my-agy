@@ -59,9 +59,9 @@ export const OMA_OWNERSHIP_RULES_V1: readonly OwnershipRule[] = [
   },
   {
     wave: 'OMA-W1', owner: 'oma-install-owner', patterns: [
-      /^src\/setup\/(?:plugin|doctor|transaction|host-install|installed-identity|update|uninstall|receipt)\.ts$/,
+      /^src\/setup\/(?:plugin|doctor|transaction|host-install|installed-identity|update|uninstall|receipt|dry-run)\.ts$/,
       /^scripts\/(?:install|smoke)\.sh$/, /^scripts\/(?:smoke-full-product|release-attest)\.ts$/,
-      /^tests\/setup\/(?:doctor|host-install|plugin-preflight|setup-transaction|installed-identity|update|uninstall|release-install)\.spec\.ts$/,
+      /^tests\/setup\/(?:doctor|host-install|plugin-preflight|setup-transaction|installed-identity|update|uninstall|release-install|dry-run)\.spec\.ts$/,
       exact(['tests/package/plugin-surface.spec.ts']),
     ],
   },

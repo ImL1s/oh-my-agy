@@ -179,6 +179,50 @@ function readEntrypoints(root: string, packageJson: Record<string, unknown>): Pa
   };
 }
 
+export interface PackageIdentitySummaryV1 {
+  packageName: string;
+  pluginName: string;
+  version: string;
+  digest: string;
+  rootPath: string;
+}
+
+export function summarizePackageIdentity(
+  identity: Readonly<PackageIdentityV1>,
+): PackageIdentitySummaryV1 {
+  return {
+    packageName: identity.packageName,
+    pluginName: identity.pluginName,
+    version: identity.version,
+    digest: identity.digest,
+    rootPath: identity.rootPath,
+  };
+}
+
+/**
+ * 只讀已安裝 plugin 目錄；不 spawn host、不 mkdir。
+ * 設計概念映射：OMC `update --check` / OMX setup --dry-run 的 identity 預覽。
+ */
+export function readInstalledIdentityIfPresent(input: {
+  pluginName: string;
+  antigravityConfigRoot?: string;
+  homeDir?: string;
+}): { identity: PackageIdentitySummaryV1 | null; warning: string | null } {
+  const configRoot = path.resolve(
+    input.antigravityConfigRoot ?? defaultAntigravityConfigRoot(input.homeDir),
+  );
+  const installPath = path.join(configRoot, 'plugins', input.pluginName);
+  if (!fs.existsSync(installPath)) return { identity: null, warning: null };
+  const identity = computePackageIdentity(installPath);
+  if (!identity.ok) {
+    return {
+      identity: null,
+      warning: `installed plugin at ${installPath} is unreadable (${identity.error.code}: ${identity.error.message})`,
+    };
+  }
+  return { identity: summarizePackageIdentity(identity.value), warning: null };
+}
+
 export function computePackageIdentity(
   packageRoot: string,
 ): Result<PackageIdentityV1, RuntimeError> {

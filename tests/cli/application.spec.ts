@@ -103,6 +103,8 @@ describe('CLI application wiring', () => {
     expect(output().stdout).toContain(
       'oma team start --manifest <file> [--worker-mode interactive|headless] [--max-parallel <n>]',
     );
+    expect(output().stdout).toContain('oma setup [--global|--workspace] [--host all|agy|claude|grok] [--dry-run]');
+    expect(output().stdout).toContain('oma update [--release] [--bin-dir <dir>] [--check]');
   });
 
   test('routes public composition commands without passing them to agy', async () => {

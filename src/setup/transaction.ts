@@ -65,6 +65,62 @@ export interface PluginSetupTransactionOptions {
   faultInjector?: (point: SetupFaultPoint) => void;
 }
 
+/** agy plugin adapter 的 argv（不含 `agy` 可執行檔）。dry-run 與 transaction.run 共用。 */
+export function agyPluginListArgs(): readonly string[] {
+  return ['plugin', 'list'];
+}
+
+export function agyPluginValidateArgs(stagePath: string): readonly string[] {
+  return ['plugin', 'validate', stagePath];
+}
+
+export function agyPluginInstallArgs(stagePath: string): readonly string[] {
+  return ['plugin', 'install', stagePath];
+}
+
+export function agyPluginEnableArgs(pluginName: string): readonly string[] {
+  return ['plugin', 'enable', pluginName];
+}
+
+export function agyPluginDisableArgs(pluginName: string): readonly string[] {
+  return ['plugin', 'disable', pluginName];
+}
+
+export function agyPluginUninstallArgs(pluginName: string): readonly string[] {
+  return ['plugin', 'uninstall', pluginName];
+}
+
+/**
+ * 將被 spawn 的完整 argv（含 agy 可執行檔）。
+ * 設計概念映射：OMX setup --dry-run 列出將執行的步驟；此處對齊 transaction.run 的 adapter 呼叫序。
+ */
+export function plannedAgyPluginSpawns(
+  agyCommand: string,
+  pluginName: string,
+  stagePath: string,
+  removePrevious: boolean,
+): readonly (readonly string[])[] {
+  const pluginArgs: readonly (readonly string[])[] = removePrevious
+    ? [
+      agyPluginListArgs(),
+      agyPluginValidateArgs(stagePath),
+      agyPluginDisableArgs(pluginName),
+      agyPluginUninstallArgs(pluginName),
+      agyPluginListArgs(),
+      agyPluginInstallArgs(stagePath),
+      agyPluginEnableArgs(pluginName),
+      agyPluginListArgs(),
+    ]
+    : [
+      agyPluginListArgs(),
+      agyPluginValidateArgs(stagePath),
+      agyPluginInstallArgs(stagePath),
+      agyPluginEnableArgs(pluginName),
+      agyPluginListArgs(),
+    ];
+  return pluginArgs.map((args) => [agyCommand, ...args]);
+}
+
 interface PreviousInstallSnapshot {
   identity: InstalledPluginIdentityV1;
   snapshotPath: string;
@@ -112,7 +168,7 @@ export class PluginSetupTransaction {
 
     const existing = this.findSuccessfulDigest(packageDigest);
     if (existing !== undefined) {
-      const listed = await this.adapter.run(['plugin', 'list']);
+      const listed = await this.adapter.run(agyPluginListArgs());
       const readback = listed.code === 0
         ? await verifyPluginActive({
           packageRoot: staged.value.stagePath,
@@ -143,7 +199,7 @@ export class PluginSetupTransaction {
     let previous: PreviousInstallSnapshot | undefined;
     let switched = false;
     try {
-      const listedBefore = await this.runStep(['plugin', 'list'], commands);
+      const listedBefore = await this.runStep(agyPluginListArgs(), commands);
       steps.push(`plugin list:${listedBefore.code}`);
       if (listedBefore.code !== 0) {
         return this.failWithoutSwitch(
@@ -184,7 +240,7 @@ export class PluginSetupTransaction {
       }
 
       const validated = await this.runStep(
-        ['plugin', 'validate', staged.value.stagePath], commands,
+        agyPluginValidateArgs(staged.value.stagePath), commands,
       );
       if (validated.code !== 0) {
         return this.failWithoutSwitch(
@@ -212,7 +268,7 @@ export class PluginSetupTransaction {
         steps.push('previous install removed');
       }
       const installed = await this.runStep(
-        ['plugin', 'install', staged.value.stagePath], commands,
+        agyPluginInstallArgs(staged.value.stagePath), commands,
       );
       switched = true;
       if (installed.code !== 0) {
@@ -229,7 +285,7 @@ export class PluginSetupTransaction {
       }
 
       this.faultInjector('after_plugin_switch');
-      const enabled = await this.runStep(['plugin', 'enable', pluginName], commands);
+      const enabled = await this.runStep(agyPluginEnableArgs(pluginName), commands);
       if (enabled.code !== 0 && !/already enabled/i.test(`${enabled.stderr}\n${enabled.stdout}`)) {
         return await this.failAfterSwitch(
           transactionId, pluginName, staged.value, steps, commands,
@@ -321,7 +377,7 @@ export class PluginSetupTransaction {
     pluginName: string,
     commands?: InstallCommandReceiptV1[],
   ): Promise<Result<Awaited<ReturnType<typeof verifyPluginActive>> extends Result<infer T, RuntimeError> ? T : never, RuntimeError>> {
-    const listed = await this.adapter.run(['plugin', 'list']);
+    const listed = await this.adapter.run(agyPluginListArgs());
     if (commands !== undefined) {
       commands.push(commandReceipt(listed.argv, listed.code, listed.stdout, listed.stderr));
     }
@@ -449,13 +505,13 @@ export class PluginSetupTransaction {
     const cleared = await this.removeInstalledPlugin(pluginName, commands, 'rollback');
     if (!cleared.ok) return cleared;
     if (previous === undefined) return ok(undefined);
-    const validated = await this.runStep(['plugin', 'validate', previous.snapshotPath], commands);
+    const validated = await this.runStep(agyPluginValidateArgs(previous.snapshotPath), commands);
     if (validated.code !== 0) return err(commandError('rollback snapshot validate failed', validated));
-    const installed = await this.runStep(['plugin', 'install', previous.snapshotPath], commands);
+    const installed = await this.runStep(agyPluginInstallArgs(previous.snapshotPath), commands);
     if (installed.code !== 0 && !isUncertainResult(installed)) {
       return err(commandError('rollback snapshot install failed', installed));
     }
-    const enabled = await this.runStep(['plugin', 'enable', pluginName], commands);
+    const enabled = await this.runStep(agyPluginEnableArgs(pluginName), commands);
     if (enabled.code !== 0 && !/already enabled/i.test(`${enabled.stdout}\n${enabled.stderr}`)) {
       return err(commandError('rollback snapshot enable failed', enabled));
     }
@@ -469,17 +525,17 @@ export class PluginSetupTransaction {
     context = 'upgrade',
     installPath = path.join(this.configRoot, 'plugins', pluginName),
   ): Promise<Result<void, RuntimeError>> {
-    const disabled = await this.runStep(['plugin', 'disable', pluginName], commands);
+    const disabled = await this.runStep(agyPluginDisableArgs(pluginName), commands);
     if (disabled.code !== 0 && !/already disabled|not (?:installed|enabled)|not found/i.test(
       `${disabled.stdout}\n${disabled.stderr}`,
     )) return err(commandError(`${context} disable failed`, disabled));
 
-    const removed = await this.runStep(['plugin', 'uninstall', pluginName], commands);
+    const removed = await this.runStep(agyPluginUninstallArgs(pluginName), commands);
     if (removed.code !== 0 && !/not installed|not found/i.test(
       `${removed.stdout}\n${removed.stderr}`,
     )) return err(commandError(`${context} uninstall failed`, removed));
 
-    const listed = await this.runStep(['plugin', 'list'], commands);
+    const listed = await this.runStep(agyPluginListArgs(), commands);
     if (listed.code !== 0) return err(commandError(`${context} plugin list failed`, listed));
     if (parsePluginListLine(listed.stdout, pluginName) !== undefined) {
       return err(runtimeError(

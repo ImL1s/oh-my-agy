@@ -8,6 +8,8 @@ import {
   installSlashHosts,
   linkProjectSkills,
   parseSetupHosts,
+  plannedClaudeSlashSpawns,
+  plannedGrokSlashSpawns,
   slashReportHasHardFailure,
 } from '../../src/setup/host-install';
 
@@ -50,10 +52,23 @@ describe('slash host install helpers', () => {
     expect(parseSetupHosts(['--agy-only'])).toEqual(['agy']);
     expect(parseSetupHosts(['--claude'])).toEqual(['claude']);
     expect(parseSetupHosts(['--grok'])).toEqual(['grok']);
+    expect(parseSetupHosts(['--dry-run'])).toEqual(['all']);
+    expect(parseSetupHosts(['--dry-run', '--host', 'claude', '--workspace'])).toEqual(['claude']);
   });
 
   test('parseSetupHosts rejects invalid --host', () => {
     expect(parseSetupHosts(['--host', 'foo'])).toEqual([]);
+  });
+
+  test('planned slash spawns are full copy-paste argv arrays shared with install', () => {
+    const root = '/tmp/oma-package';
+    expect(plannedClaudeSlashSpawns(root)).toEqual([
+      ['claude', 'plugin', 'marketplace', 'add', root],
+      ['claude', 'plugin', 'install', 'oh-my-agy@oh-my-agy'],
+    ]);
+    expect(plannedGrokSlashSpawns(root)).toEqual([
+      ['grok', 'plugin', 'install', root, '--trust'],
+    ]);
   });
 
   test('linkProjectSkills uses absolute symlink targets under /tmp', () => {

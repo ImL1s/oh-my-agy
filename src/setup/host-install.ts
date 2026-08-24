@@ -75,6 +75,40 @@ export function parseSetupHosts(argv: readonly string[]): SetupHost[] {
   return ['all'];
 }
 
+/** Claude Code plugin spec，對齊 OMC marketplace install 識別字。 */
+export const CLAUDE_PLUGIN_INSTALL_SPEC = 'oh-my-agy@oh-my-agy';
+
+/** 實際會交給 `claude` 的 argv（不含可執行檔）。dry-run 與 install 共用，避免計畫漂移。 */
+export function claudeMarketplaceAddArgs(packageRoot: string): readonly string[] {
+  return ['plugin', 'marketplace', 'add', packageRoot];
+}
+
+export function claudePluginInstallArgs(): readonly string[] {
+  return ['plugin', 'install', CLAUDE_PLUGIN_INSTALL_SPEC];
+}
+
+/** 實際會交給 `grok` 的 argv（不含可執行檔）。對齊 OMG `plugin install --trust`。 */
+export function grokPluginInstallArgs(packageRoot: string): readonly string[] {
+  return ['plugin', 'install', packageRoot, '--trust'];
+}
+
+/**
+ * 將被 spawn 的完整 argv（含 host 可執行檔名稱）。
+ * 設計概念映射：OMX `setup --dry-run` 先列計畫；此處輸出可直接複製執行的 argv 陣列。
+ */
+export function plannedClaudeSlashSpawns(packageRoot: string): readonly (readonly string[])[] {
+  return [
+    ['claude', ...claudeMarketplaceAddArgs(packageRoot)],
+    ['claude', ...claudePluginInstallArgs()],
+  ];
+}
+
+export function plannedGrokSlashSpawns(packageRoot: string): readonly (readonly string[])[] {
+  return [
+    ['grok', ...grokPluginInstallArgs(packageRoot)],
+  ];
+}
+
 /** slash steps 是否有硬失敗（timeout 等）— setup exit 1。needs_manual 不算 hard fail。 */
 export function slashReportHasHardFailure(report: HostInstallReportV1): boolean {
   return report.steps.some((s) => s.status === 'failed');
@@ -111,8 +145,9 @@ export function evaluateHostInstallAuthority(
 export function installSlashHosts(
   packageRoot: string,
   hosts: ReadonlyArray<SetupHost>,
-  adapter: HostCliAdapter = defaultHostCliAdapter(),
+  adapter?: HostCliAdapter,
 ): Result<HostInstallReportV1, RuntimeError> {
+  const hostAdapter = adapter ?? defaultHostCliAdapter();
   const root = path.resolve(packageRoot);
   const manifest = path.join(root, '.claude-plugin', 'plugin.json');
   if (!fs.existsSync(manifest)) {
@@ -127,10 +162,10 @@ export function installSlashHosts(
   const steps: HostInstallStepV1[] = [];
 
   if (want.has('claude')) {
-    steps.push(installClaudeSlash(root, adapter));
+    steps.push(installClaudeSlash(root, hostAdapter));
   }
   if (want.has('grok')) {
-    steps.push(installGrokSlash(root, adapter));
+    steps.push(installGrokSlash(root, hostAdapter));
   }
 
   return ok({ schemaVersion: 1, packageRoot: root, steps });
@@ -151,10 +186,12 @@ function expandHosts(hosts: ReadonlyArray<SetupHost>): Set<'claude' | 'grok'> {
 
 function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostInstallStepV1 {
   const claude = adapter.which('claude');
+  const marketplaceArgs = claudeMarketplaceAddArgs(packageRoot);
+  const installArgs = claudePluginInstallArgs();
   const commands = [
-    `claude plugin marketplace add ${shellQuote(packageRoot)}`,
-    `claude plugin install oh-my-agy@oh-my-agy`,
-    '# if install fails, enable after restart: claude plugin enable oh-my-agy@oh-my-agy',
+    ['claude', ...marketplaceArgs].map(shellQuote).join(' '),
+    ['claude', ...installArgs].map(shellQuote).join(' '),
+    `# if install fails, enable after restart: claude plugin enable ${CLAUDE_PLUGIN_INSTALL_SPEC}`,
     '# slash: /oh-my-agy:autopilot <goal>',
   ];
 
@@ -173,11 +210,11 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
     };
   }
 
-  const marketplace = adapter.run(claude, ['plugin', 'marketplace', 'add', packageRoot]);
-  const install = adapter.run(claude, ['plugin', 'install', 'oh-my-agy@oh-my-agy']);
+  const marketplace = adapter.run(claude, marketplaceArgs);
+  const install = adapter.run(claude, installArgs);
   const commandReceipts = [
-    hostCommandReceipt(claude, ['plugin', 'marketplace', 'add', packageRoot], marketplace),
-    hostCommandReceipt(claude, ['plugin', 'install', 'oh-my-agy@oh-my-agy'], install),
+    hostCommandReceipt(claude, marketplaceArgs, marketplace),
+    hostCommandReceipt(claude, installArgs, install),
   ];
 
   if (install.timedOut || marketplace.timedOut) {
@@ -240,8 +277,9 @@ function installClaudeSlash(packageRoot: string, adapter: HostCliAdapter): HostI
 
 function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostInstallStepV1 {
   const grok = adapter.which('grok');
+  const installArgs = grokPluginInstallArgs(packageRoot);
   const commands = [
-    `grok plugin install ${shellQuote(packageRoot)} --trust`,
+    ['grok', ...installArgs].map(shellQuote).join(' '),
     '# slash: /oh-my-agy:autopilot <goal>',
   ];
   const packageLink = linkProjectSkills(packageRoot, path.join(packageRoot, '.grok', 'skills'));
@@ -259,9 +297,9 @@ function installGrokSlash(packageRoot: string, adapter: HostCliAdapter): HostIns
     };
   }
 
-  const result = adapter.run(grok, ['plugin', 'install', packageRoot, '--trust']);
+  const result = adapter.run(grok, installArgs);
   const commandReceipts = [
-    hostCommandReceipt(grok, ['plugin', 'install', packageRoot, '--trust'], result),
+    hostCommandReceipt(grok, installArgs, result),
   ];
   if (result.timedOut) {
     return {

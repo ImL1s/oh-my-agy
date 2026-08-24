@@ -2796,10 +2796,16 @@ async function runUpdateCommand(
   assertOnlyOptions(argv, [
     '--release', '--bin-dir', '--package-root', '--asset-sha256', '--package-digest',
     '--source-uri', '--source-tag', '--peeled-commit', '--config-root', '--home',
+    '--check',
   ]);
   const homeDir = path.resolve(optionValue(argv, '--home') ?? os.homedir());
-  const stateRoot = commandStateRoot(context, homeDir);
-  const { ImmutableInstallUpdater } = await import('../setup/update');
+  const checkOnly = argv.includes('--check');
+  const stateRoot = commandStateRoot(context, homeDir, !checkOnly);
+  const {
+    ImmutableInstallUpdater,
+    renderUpdateCheck,
+    updateCheckExitCode,
+  } = await import('../setup/update');
   const updater = new ImmutableInstallUpdater({
     packageRoot: path.resolve(optionValue(argv, '--package-root') ?? context.packageRoot),
     stateRoot,
@@ -2815,6 +2821,12 @@ async function runUpdateCommand(
     peeledCommit: optionValue(argv, '--peeled-commit'),
     agyCommand: context.agyCommand,
   });
+  // 設計概念映射：OMC `update --check` — 印 identity/digest 與 preflight 後返回，不置換。
+  if (checkOnly) {
+    const report = updater.check();
+    context.stdout(renderUpdateCheck(report));
+    return updateCheckExitCode(report);
+  }
   const result = await updater.run();
   if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`);
   context.stdout(`${JSON.stringify({ ok: true, ...result.value }, null, 2)}\n`);
@@ -3077,6 +3089,7 @@ const BOOLEAN_OPTIONS = new Set([
   '--include-prompt',
   '--release',
   '--purge',
+  '--check',
 ]);
 
 function optionValue(argv: readonly string[], name: string): string | undefined {
@@ -3264,9 +3277,11 @@ function commandProbeOptions(
 function commandStateRoot(
   context: Readonly<ExtendedCommandContext>,
   homeDirectory = os.homedir(),
+  create = true,
 ): string {
   if (context.stateRoot !== undefined) {
     const target = path.resolve(context.stateRoot);
+    if (!create) return target;
     fs.mkdirSync(target, { recursive: true, mode: 0o700 });
     const stat = fs.lstatSync(target);
     if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error('state root is unsafe');
@@ -3275,7 +3290,7 @@ function commandStateRoot(
   const resolved = resolveStateRoot({
     env: context.environment,
     homeDirectory,
-    create: true,
+    create,
   });
   if (!resolved.ok) throw new Error(`${resolved.error.code}: ${resolved.error.message}`);
   return resolved.value.path;

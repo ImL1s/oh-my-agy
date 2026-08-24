@@ -9,6 +9,7 @@ import { RuntimeError, runtimeError } from '../runtime/errors';
 import { verifyPluginActive, PluginCommandAdapter } from '../setup/plugin';
 import { PluginSetupTransaction } from '../setup/transaction';
 import { doctorReportToLines, runDoctor } from '../setup/doctor';
+import { HostCliAdapter } from '../setup/host-install';
 import { teamCommand as runTeamCommand } from '../team/commands';
 import { RuntimeContext } from '../team/types';
 import { ManagedInvocationService, ordinaryEnvironment } from './managed-invocation';
@@ -36,6 +37,10 @@ export interface DefaultServicesOptions {
   agyCommand?: string;
   version?: string;
   pluginAdapter?: PluginCommandAdapter;
+  /** 測試注入：禁止 dry-run / unit 測碰真 claude/grok。 */
+  hostCliAdapter?: HostCliAdapter;
+  homeDir?: string;
+  antigravityConfigRoot?: string;
   stdout?: (value: string) => void;
   stderr?: (value: string) => void;
   environment?: NodeJS.ProcessEnv;
@@ -244,6 +249,22 @@ export function createDefaultServices(
         || hosts.includes('claude')
         || hosts.includes('grok');
 
+      // 設計概念映射：OMX `setup --dry-run` — 先印計畫、零變更；OMA 走 canonical JSON。
+      if (argv.includes('--dry-run')) {
+        const { buildSetupDryRunPlan, renderSetupDryRunPlan } = await import('../setup/dry-run');
+        const plan = buildSetupDryRunPlan({
+          argv,
+          packageRoot,
+          agyCommand,
+          stateRoot: options.stateRoot,
+          homeDir: options.homeDir,
+          antigravityConfigRoot: options.antigravityConfigRoot,
+          environment,
+        });
+        stdout(renderSetupDryRunPlan(plan));
+        return 0;
+      }
+
       // 設計概念映射：slash-first — agy 與 Claude/Grok slash 解耦；
       // 預設 all 時 agy 失敗只 warn 並繼續裝 slash（僅 --host agy 才 hard-fail）。
       let agyResult: unknown = null;
@@ -264,6 +285,8 @@ export function createDefaultServices(
             packageRoot,
             stateRoot: state.value.path,
             adapter,
+            antigravityConfigRoot: options.antigravityConfigRoot,
+            homeDir: options.homeDir,
           });
           const result = await transaction.run();
           if (!result.ok) {
@@ -288,7 +311,7 @@ export function createDefaultServices(
         const slashHosts = hosts.includes('all')
           ? (['claude', 'grok'] as const)
           : hosts.filter((h): h is 'claude' | 'grok' => h === 'claude' || h === 'grok');
-        const installed = installSlashHosts(packageRoot, [...slashHosts]);
+        const installed = installSlashHosts(packageRoot, [...slashHosts], options.hostCliAdapter);
         if (!installed.ok) {
           stderr(`${installed.error.code}: ${installed.error.message}\n`);
           return 1;
