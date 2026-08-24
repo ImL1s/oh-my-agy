@@ -188,9 +188,12 @@ export function resolveProviderChild(
   const children: ProviderProcessIdentityV1[] = descendants.map(toIdentity);
   const pane = toIdentity(paneRow);
   const expected = collectExpectedBasenames(options);
+  // 只比對 pane 的子程序。生產 pane 本身是 worker-bootstrap（node），
+  // 若把 pane comm 當成 worker，沒有 `oma team worker run` 子程序也會誤判 matched。
+  // 設計概念映射：Codex PR94 P2；#59 pane-alive 不足以為證。
   const matched = expected.length === 0
     ? undefined
-    : [pane, ...children].find((entry) => providerCommMatchesAnyBasename(entry.comm, expected));
+    : children.find((entry) => providerCommMatchesAnyBasename(entry.comm, expected));
   if (matched !== undefined) {
     return { status: 'matched', panePid, pane, children, matched };
   }

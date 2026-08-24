@@ -294,6 +294,37 @@ describe('resolveProviderChild', () => {
     expect(providerChildProcessMarker(resolved)).toBeUndefined();
   });
 
+  test('pane bootstrap comm is not a provider child even when it matches node', () => {
+    // 生產 pane_pid 是 worker-bootstrap（node）；沒有 team worker run 子程序不得 matched。
+    const paneOnly = [
+      `  ${PANE_PID}     1 ${PANE_LSTART} node`,
+      '',
+    ].join('\n');
+    const fake = recordingSpawns({ psStdout: paneOnly });
+    const resolved = resolveProviderChild(SESSION, {
+      expectedBasenames: teamWorkerLivenessBasenames('/usr/bin/node', '/opt/bin/agy'),
+      tmuxSpawn: fake.tmuxSpawn,
+      psSpawn: fake.psSpawn,
+    });
+    expect(resolved.status).toBe('orphan');
+    expect(resolved.pane?.comm).toBe('node');
+    expect(resolved.matched).toBeUndefined();
+    expect(providerLivenessFromResolution(resolved)).toEqual({
+      providerIdentityMatched: false,
+      processLiveness: 'unknown',
+    });
+    expect(reconcileWorkerObservation(aggregateFor(tmuxBinding()), {
+      taskId: 'task',
+      generation: 1,
+      providerReceiptHash: sha256('tmux_agy'),
+      process: tmuxBinding().process,
+      pane: tmuxBinding().pane,
+      processLiveness: 'unknown',
+      paneLiveness: 'alive',
+      providerIdentityMatched: false,
+    }).action).toBe('block_identity_unproven');
+  });
+
   test('production worker is node team-worker-run, not routed agy', () => {
     // #45 後 pane 主體是 process.execPath + oma team worker run；只找 agy 會把活 worker 判 orphan。
     expect(teamWorkerLivenessBasenames('/usr/bin/node', '/opt/bin/agy')).toEqual(['node', 'agy']);

@@ -40,6 +40,16 @@ Format inspired by [Keep a Changelog](https://keepachangelog.com/). Versions fol
 
 ### Fixed
 
+- tmux provider identity matches only pane **children**, never the pane
+  process itself (`resolveProviderChild`). Production pane_pid is
+  worker-bootstrap (`node`); a live bootstrap with no `oma team worker run`
+  child is `orphan` / `block_identity_unproven`. Resume copies the newly
+  observed process marker into `reconcileWorkerObservation` so a replacement
+  PID/lstart is `fence_stale_observation`. `oma team resume` requires
+  `workspaceKey === aggregate.leaderWorkspaceKey`. Cleanup treats
+  integration as git reachability from leader HEAD (not
+  `status === 'completed'`), and missing worktrees assess the branch tip
+  before `git branch -d` (never force `-D`). (#59, #60, #61)
 - Team tmux workers no longer adopt on a live pane shell. `resolveProviderChild`
   (`src/team/tmux.ts`) reads `#{pane_pid}` then `ps` `pid/ppid/lstart/comm`
   via argv (no shell) and `reconcileWorkerObservation` requires a live child

@@ -20,6 +20,7 @@ import { Result, err, ok } from '../runtime/types';
 import { createDeliveryEvidence, DeliveryValidator } from './delivery';
 import { IntegrationManager } from './integration';
 import { probeRecordedWorkerProcess, probeTmuxSession } from './liveness';
+import { ProcessLiveness } from '../runtime/lock';
 import { readTeamManifest } from './manifest';
 import { FastForwardPublisherV1 } from './publisher';
 import { requireDeadProof } from './reclaim';
@@ -27,6 +28,7 @@ import { TeamStateStore } from './state';
 import { assessWorker, SupervisorAssessment } from './supervisor';
 import { teamWorkerLivenessBasenames } from './provider-readiness';
 import {
+  ArgvSpawnFn,
   observeTmuxWorkerIdentity,
   providerChildProcessMarker,
   providerLivenessFromResolution,
@@ -145,6 +147,12 @@ export interface TeamOrchestratorOptions {
    * production 以 process/pane probe 組 observation，不得盲目採納。
    */
   resumeObserver?: TeamResumeObserverV1;
+  /** 測試注入：resume 生產觀測的 tmux/ps adapter（fake 行程表，不打真實 ps）。 */
+  resumeIdentitySpawn?: {
+    readonly tmuxSpawn?: ArgvSpawnFn;
+    readonly psSpawn?: ArgvSpawnFn;
+    readonly probePane?: (sessionName: string) => ProcessLiveness;
+  };
   /** 測試注入：supervisor lease owner token；預設使用 team ownerNonce。 */
   supervisorOwnerToken?: string;
   /** 測試注入：supervisor process 身分；預設為本行程。 */
@@ -274,6 +282,7 @@ export class TeamOrchestrator {
   private readonly workerBootstrapArgv: readonly string[];
   private readonly providerProfileFactory: TeamOrchestratorOptions['providerProfileFactory'];
   private readonly resumeObserver: TeamResumeObserverV1 | undefined;
+  private readonly resumeIdentitySpawn: TeamOrchestratorOptions['resumeIdentitySpawn'];
   private readonly supervisorOwnerToken: string | undefined;
   private readonly supervisorProcess: ProcessMarkerV1 | undefined;
   private readonly leaderContextMaxBytes: number;
@@ -296,6 +305,7 @@ export class TeamOrchestrator {
     this.workerExecutablePath = options.workerExecutablePath ?? process.execPath;
     this.providerProfileFactory = options.providerProfileFactory;
     this.resumeObserver = options.resumeObserver;
+    this.resumeIdentitySpawn = options.resumeIdentitySpawn;
     this.supervisorOwnerToken = options.supervisorOwnerToken;
     this.supervisorProcess = options.supervisorProcess;
     this.leaderContextMaxBytes = options.leaderContextMaxBytes ?? LEADER_CONTEXT_MAX_BYTES;
@@ -806,6 +816,13 @@ export class TeamOrchestrator {
         actualRevision: snapshot.value.revision,
       }));
     }
+    if (snapshot.value.value.leaderWorkspaceKey !== this.workspaceKey) {
+      return err(runtimeError(
+        'E_TEAM_LEADER_REQUIRED',
+        'Team resume requires the recorded leader workspace',
+        { leaderWorkspaceKey: snapshot.value.value.leaderWorkspaceKey },
+      ));
+    }
 
     const nowMs = this.nowMs();
     const ownerToken = this.supervisorOwnerToken ?? snapshot.value.value.ownerNonce;
@@ -919,12 +936,13 @@ export class TeamOrchestrator {
           : { heartbeat: aggregate.heartbeats[binding.taskId] }),
       });
     }
-    return defaultObserveBoundWorker(
+    return observeBoundWorkerForResume(
       aggregate,
       binding,
       this.tmux,
       this.sessionNamePrefix,
       this.workerExecutablePath,
+      this.resumeIdentitySpawn,
     );
   }
 
@@ -1341,27 +1359,34 @@ export class TeamOrchestrator {
 }
 
 /**
- * production resume observation：tmux 必須證明 worker 子程序（#59），
- * 不得只因 pane shell 存活就 adopt。設計概念映射：OMC/OMX resume fence。
+ * production resume observation：tmux 必須證明 worker **子程序**（#59），
+ * 不得把 pane bootstrap comm 當 worker。觀測到的 process marker 必須寫回
+ * observation，否則 identityMatches 對 binding 自身永遠成立（Codex PR95 P1）。
  */
-function defaultObserveBoundWorker(
+export function observeBoundWorkerForResume(
   aggregate: TeamAggregateV1,
   binding: WorkerAuthorityBindingV1,
   tmux: TmuxController,
   sessionNamePrefix: string | undefined,
   workerExecutablePath: string,
+  spawn?: Readonly<{
+    tmuxSpawn?: ArgvSpawnFn;
+    psSpawn?: ArgvSpawnFn;
+    probePane?: (sessionName: string) => ProcessLiveness;
+  }>,
 ): WorkerRuntimeObservationV1 {
   const heartbeat = aggregate.heartbeats[binding.taskId];
-  const observedProcess = binding.process ?? heartbeat?.process;
+  let observedProcess: ProcessMarkerV1 | undefined = binding.process ?? heartbeat?.process;
   let processLiveness = observedProcess === undefined
     ? 'unknown' as const
     : probeRecordedWorkerProcess(observedProcess);
 
+  const paneProbe = spawn?.probePane ?? probeTmuxSession;
   let paneLiveness = 'unknown' as ReturnType<typeof probeTmuxSession>;
   let observedPane = binding.pane;
   let providerIdentityMatched: boolean | undefined;
   if (binding.pane !== undefined) {
-    paneLiveness = probeTmuxSession(binding.pane.sessionName);
+    paneLiveness = paneProbe(binding.pane.sessionName);
     if (paneLiveness === 'alive') {
       const inspected = tmux.inspectOwnedPane(binding.pane.sessionName);
       if (!inspected.ok) {
@@ -1386,13 +1411,16 @@ function defaultObserveBoundWorker(
         const observed = observeTmuxWorkerIdentity(
           binding.pane.sessionName,
           expectedBasenames,
+          spawn,
         );
         providerIdentityMatched = observed.providerIdentityMatched;
         processLiveness = observed.processLiveness;
+        if (observed.process !== undefined) observedProcess = observed.process;
+        else observedProcess = undefined;
       }
     }
   } else if (heartbeat !== undefined) {
-    paneLiveness = probeTmuxSession(
+    paneLiveness = paneProbe(
       inferSessionName(sessionNamePrefix, aggregate.teamId, binding.taskId, heartbeat),
     );
   }

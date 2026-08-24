@@ -116,7 +116,11 @@ export async function cleanupTeam(
       }));
     }
 
-    const outcome: 'integrated' | 'cancelled' = task.status === 'completed' ? 'integrated' : 'cancelled';
+    // 整合證明是 git（leader 可達 HEAD/branch tip），不是 task.status==='completed'。
+    // completeReadOnlyTask 也會標 completed，但 worktree 可能仍有未合併 commit。
+    const outcome: 'integrated' | 'cancelled' = input.worktrees.isDescriptorIntegrated(descriptor)
+      ? 'integrated'
+      : 'cancelled';
     const worktreeResource: TeamCleanupResourceV1 = {
       kind: 'worktree',
       taskId: descriptor.workerId,
@@ -130,6 +134,18 @@ export async function cleanupTeam(
     };
 
     if (!fs.existsSync(descriptor.path)) {
+      const assessedBranch = input.worktrees.assessOwnedBranchRemoval(descriptor, { ownerNonce });
+      if (!assessedBranch.ok) {
+        if (assessedBranch.error.code === 'E_LOCK_NOT_OWNER') return assessedBranch;
+        preserved.push({
+          kind: 'branch',
+          taskId: descriptor.workerId,
+          branchName: descriptor.branchName,
+          code: assessedBranch.error.code,
+          reason: assessedBranch.error.message,
+        });
+        continue;
+      }
       planned.push(worktreeResource, branchResource);
       candidates.push({
         descriptor, worktreeResource, branchResource, outcome, missing: true,
